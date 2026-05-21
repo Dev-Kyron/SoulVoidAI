@@ -310,7 +310,7 @@ A plugin is a **declarative JSON workflow pack** — drop a `.json` file into th
   "id": "spiritless-pack",
   "name": "Spiritless",
   "version": "1.0.0",
-  "author": "Kyron",
+  "author": "your-name",
   "description": "Shortcuts for my UE5 game.",
   "quickActions": [
     {
@@ -406,7 +406,7 @@ Use the official apps for their sandboxed exploration. Use VoidSoul when you wan
 - **Privacy:** see [**Privacy Policy**](PRIVACY.md). Short version: nothing leaves your computer unless you trigger an action that explicitly sends it.
 - **Bug reports & feedback:** [open an issue](https://github.com/Dev-Kyron/SoulVoidAI/issues/new).
 
-VoidSoul Assistant is © Kyron. Distribution of the compiled application is governed by the Terms of Service linked above. Re-selling, re-distributing, or hosting the application as a service requires written permission.
+VoidSoul Assistant is © Void Soul Studio. Distribution of the compiled application is governed by the Terms of Service linked above. Re-selling, re-distributing, or hosting the application as a service requires written permission.
 
 ---
 

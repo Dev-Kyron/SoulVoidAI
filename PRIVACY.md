@@ -17,7 +17,7 @@ If you have any questions, contact us at the address at the bottom of this page.
 
 ## 2. Who we are
 
-VoidSoul Assistant is developed by Kyron ("we", "us", "our"). The application is distributed as a desktop installer for Windows, macOS, and Linux. Source code is available at <https://github.com/Dev-Kyron/SoulVoidAI>.
+VoidSoul Assistant is developed by Void Soul Studio ("we", "us", "our"). The application is distributed as a desktop installer for Windows, macOS, and Linux. Source code is available at <https://github.com/Dev-Kyron/SoulVoidAI>.
 
 ## 3. What we collect — nothing, by default
 

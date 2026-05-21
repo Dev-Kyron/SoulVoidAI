@@ -36,7 +36,7 @@ describe('basename', () => {
     expect(basename('/file.txt')).toBe('file.txt')
   })
   it('returns the final segment of a Windows path', () => {
-    expect(basename('C:\\Users\\Kyron\\notes.md')).toBe('notes.md')
+    expect(basename('C:\\Users\\example\\notes.md')).toBe('notes.md')
     expect(basename('D:\\file.txt')).toBe('file.txt')
   })
   it('handles mixed separators', () => {

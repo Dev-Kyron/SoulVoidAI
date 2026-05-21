@@ -15,7 +15,7 @@ If anything here is unclear, contact us before relying on the Software for anyth
 
 ## 2. Who we are
 
-The Software is developed by Kyron ("we", "us", "our"). Source code is available at <https://github.com/Dev-Kyron/SoulVoidAI>.
+The Software is developed by Void Soul Studio ("we", "us", "our"). Source code is available at <https://github.com/Dev-Kyron/SoulVoidAI>.
 
 ## 3. License grant
 

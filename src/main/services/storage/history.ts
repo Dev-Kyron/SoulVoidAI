@@ -79,7 +79,23 @@ function loadMessages(threadId: string): ChatMessage[] {
   const rows = db()
     .prepare(`SELECT json FROM messages WHERE thread_id = ? ORDER BY position ASC`)
     .all(threadId) as { json: string }[]
-  return rows.map((r) => JSON.parse(r.json) as ChatMessage)
+  // Skip-and-log corrupt rows individually instead of throwing the whole load.
+  // One bad message used to crash thread open, leaving the user with an empty
+  // history they couldn't recover from.
+  const out: ChatMessage[] = []
+  for (let i = 0; i < rows.length; i++) {
+    try {
+      out.push(JSON.parse(rows[i].json) as ChatMessage)
+    } catch (err) {
+      log(
+        'warn',
+        'system',
+        `Skipped corrupt message row ${i} in thread ${threadId}`,
+        err instanceof Error ? err.message : String(err)
+      )
+    }
+  }
+  return out
 }
 
 /* --------------------------------- writes --------------------------------- */

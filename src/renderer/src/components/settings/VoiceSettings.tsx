@@ -6,6 +6,7 @@ import { useEffect, useReducer, useState } from 'react'
 import { Play, FolderOpen, Ear } from 'lucide-react'
 import { useConfigStore } from '../../store/useConfigStore'
 import { useUiStore } from '../../store/useUiStore'
+import { useWidgetStore } from '../../store/useWidgetStore'
 import { Toggle } from '../common/ui'
 import { CollapsibleSection } from './CollapsibleSection'
 import { availableVoices, guessVoice, onVoicesChanged, speak } from '../../lib/voice'
@@ -133,6 +134,41 @@ export function VoiceSettings(): JSX.Element | null {
   )
 }
 
+/**
+ * Per-session arm switch for the wake-word engine. Sits under the toggle —
+ * the toggle controls the persisted preference, this controls whether the
+ * mic is actually hot RIGHT NOW. Resets to disarmed on every app launch
+ * so the user always opts in fresh; this is the signal that prevents the
+ * "panel opens and the orb pulses as if recording me" reaction.
+ */
+function ArmRow(): JSX.Element {
+  const armed = useWidgetStore((s) => s.wakeArmed)
+  const setArmed = useWidgetStore((s) => s.setWakeArmed)
+  return (
+    <div className="mt-2 flex items-center justify-between rounded-md border border-white/5 bg-black/20 px-2 py-1.5">
+      <div className="flex items-center gap-1.5">
+        <span
+          className={`h-1.5 w-1.5 rounded-full ${armed ? 'bg-emerald-400 animate-pulse' : 'bg-slate-600'}`}
+        />
+        <p className="text-[11px] text-slate-300">
+          {armed ? 'Listening for wake word' : 'Mic is off · click Arm to listen'}
+        </p>
+      </div>
+      <button
+        type="button"
+        onClick={() => setArmed(!armed)}
+        className={`rounded px-2 py-0.5 text-[10px] font-medium transition-colors ${
+          armed
+            ? 'bg-rose-500/15 text-rose-300 hover:bg-rose-500/25'
+            : 'bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25'
+        }`}
+      >
+        {armed ? 'Disarm' : 'Arm now'}
+      </button>
+    </div>
+  )
+}
+
 function WakeWordRow({ voice }: { voice: VoiceConfig }): JSX.Element {
   const setVoice = useConfigStore((s) => s.setVoice)
   const pushToast = useUiStore((s) => s.pushToast)
@@ -218,6 +254,7 @@ function WakeWordRow({ voice }: { voice: VoiceConfig }): JSX.Element {
         access key, the engine upgrades to Porcupine for lower CPU and faster detection;
         custom .ppn keyword files dropped in the wake-words folder override the defaults.
       </p>
+      {voice.wakeWord.enabled && <ArmRow />}
       <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[10px]">
         <span className={hasKey ? 'text-emerald-400' : 'text-cyan-300'}>
           {hasKey ? '✓ Porcupine (key set)' : '✓ Whisper (keyless default)'}

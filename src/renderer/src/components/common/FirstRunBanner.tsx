@@ -44,14 +44,28 @@ export function FirstRunBanner(): JSX.Element | null {
   // selector means unrelated config edits don't re-render the banner.
   const usable = useConfigStore(selectIsUsable)
   const configReady = useConfigStore((s) => s.config !== null)
-  const [dismissed, setDismissed] = useState(
-    () => typeof window !== 'undefined' && window.localStorage.getItem(DISMISS_KEY) === '1'
-  )
+  const [dismissed, setDismissed] = useState(() => {
+    // localStorage can throw on quota-exceeded or in private-mode browsers
+    // (rare in Electron, but the panel runs in a Chromium context that
+    // honours those errors). Default to "not dismissed" on read failure
+    // rather than blanking the whole onboarding banner.
+    if (typeof window === 'undefined') return false
+    try {
+      return window.localStorage.getItem(DISMISS_KEY) === '1'
+    } catch {
+      return false
+    }
+  })
 
   if (!configReady || dismissed || usable) return null
 
   const dismiss = (): void => {
-    window.localStorage.setItem(DISMISS_KEY, '1')
+    try {
+      window.localStorage.setItem(DISMISS_KEY, '1')
+    } catch {
+      // If we can't persist the dismissal, the banner will return on next
+      // launch — acceptable, vs. throwing uncaught and breaking the UI.
+    }
     setDismissed(true)
   }
 

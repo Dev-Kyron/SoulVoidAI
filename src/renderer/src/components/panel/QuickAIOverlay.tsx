@@ -158,24 +158,30 @@ export function QuickAIOverlay(): JSX.Element {
     const requestId = uid()
     requestIdRef.current = requestId
 
-    const outcome = await vs.ai.chat({
-      requestId,
-      provider: provider.id,
-      model: provider.model,
-      // Single, intentionally tight system prompt — Quick AI is one-shot,
-      // not a full agent loop, and certainly not the user's long-running
-      // chat assistant. Keep replies short and useful.
-      system:
-        'You are VoidSoul Quick AI. Answer the question directly and concisely. ' +
-        'Use Markdown for formatting. No greeting, no sign-off.',
-      messages: [{ role: 'user', content: finalPrompt }],
-      temperature: 0.4
-    })
-
-    setStreaming(false)
-    requestIdRef.current = null
-    if (outcome.error && outcome.error !== 'aborted') {
-      setError(outcome.error)
+    try {
+      const outcome = await vs.ai.chat({
+        requestId,
+        provider: provider.id,
+        model: provider.model,
+        // Single, intentionally tight system prompt — Quick AI is one-shot,
+        // not a full agent loop, and certainly not the user's long-running
+        // chat assistant. Keep replies short and useful.
+        system:
+          'You are VoidSoul Quick AI. Answer the question directly and concisely. ' +
+          'Use Markdown for formatting. No greeting, no sign-off.',
+        messages: [{ role: 'user', content: finalPrompt }],
+        temperature: 0.4
+      })
+      if (outcome.error && outcome.error !== 'aborted') {
+        setError(outcome.error)
+      }
+    } catch (err) {
+      // Network drop, IPC crash, malformed response — without this guard the
+      // streaming flag stuck on `true` forever and the overlay looked frozen.
+      setError(err instanceof Error ? err.message : 'Request failed.')
+    } finally {
+      setStreaming(false)
+      requestIdRef.current = null
     }
   }
 

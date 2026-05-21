@@ -333,8 +333,17 @@ export async function flushAllPendingSavesAsync(): Promise<void> {
   for (const slot of slots) clearTimeout(slot.timer)
   savesByThread.clear()
   // Fire all writes in parallel — they're independent threads, no ordering
-  // matters. Promise.all so the caller gets one Promise to await.
-  await Promise.all(slots.map((s) => writeSlot(s)))
+  // matters. allSettled rather than all so one corrupt thread's write
+  // failure (db locked, disk full, JSON serialization throw) doesn't reject
+  // the whole batch and lose the other threads' debounced saves on quit.
+  const results = await Promise.allSettled(slots.map((s) => writeSlot(s)))
+  for (const r of results) {
+    if (r.status === 'rejected') {
+      // Best-effort log so quit-time data loss leaves a trace. Can't toast —
+      // the window is already on the way down.
+      console.error('[useChatStore] flushAllPendingSavesAsync — slot failed:', r.reason)
+    }
+  }
 }
 
 function invalidatePendingSaves(): void {

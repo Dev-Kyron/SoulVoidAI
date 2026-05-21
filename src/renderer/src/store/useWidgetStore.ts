@@ -16,17 +16,27 @@ interface WidgetStore {
   busy: boolean
   orbState: WidgetState
   /**
-   * Whether the wake-word engine is armed. This is a BASELINE — it surfaces
-   * on the orb only when `orbState === 'idle'`, so a chat-in-progress or
-   * active recording isn't visually overridden by the background listener.
-   * See `visibleOrbState`.
+   * Whether the wake-word engine has actually booted and is scanning audio
+   * right now. Surfaces on the orb only when `orbState === 'idle'`, so a
+   * chat-in-progress or active recording isn't visually overridden by the
+   * background listener. See `visibleOrbState`.
    */
   wakeListening: boolean
+  /**
+   * Per-session arm switch — separate from the persisted
+   * `config.voice.wakeWord.enabled`. Defaults to `false` on every app
+   * launch even if wake-word is enabled in settings; users must click an
+   * "Arm" control to actually start listening. This stops the orb from
+   * pulsing the moment the panel opens, which beta testers read as "the
+   * app is recording me without permission".
+   */
+  wakeArmed: boolean
   activeTab: PanelTab
 
   setTab: (tab: PanelTab) => void
   setOrbState: (state: WidgetState) => void
   setWakeListening: (listening: boolean) => void
+  setWakeArmed: (armed: boolean) => void
   expand: () => Promise<void>
   collapse: () => void
   toggle: () => Promise<void>
@@ -40,6 +50,7 @@ export const useWidgetStore = create<WidgetStore>((set, get) => ({
   busy: false,
   orbState: 'idle',
   wakeListening: false,
+  wakeArmed: false,
   activeTab: 'nexus',
 
   setTab: (tab) => set({ activeTab: tab }),
@@ -57,6 +68,11 @@ export const useWidgetStore = create<WidgetStore>((set, get) => ({
     // Skip the no-op write so subscribers don't re-render on every boot ping.
     if (get().wakeListening === listening) return
     set({ wakeListening: listening })
+  },
+
+  setWakeArmed: (armed) => {
+    if (get().wakeArmed === armed) return
+    set({ wakeArmed: armed })
   },
 
   expand: async () => {

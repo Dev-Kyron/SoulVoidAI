@@ -7,6 +7,7 @@
 import { randomUUID } from 'node:crypto'
 import { McpConnection } from './connection'
 import { getServers, setServers } from './store'
+import { log } from '../logger'
 import type {
   McpServerConfig,
   McpServerInput,
@@ -40,7 +41,21 @@ async function bringUp(config: McpServerConfig): Promise<McpConnection> {
   // (which would orphan the loser's process). Each new call awaits whatever
   // is currently registered and then runs in series after it.
   const prev = bringUpInFlight.get(config.id) ?? Promise.resolve(null)
-  const work: Promise<McpConnection> = prev.catch(() => null).then(async () => {
+  const work: Promise<McpConnection> = prev
+    .catch((err) => {
+      // Don't blanket-swallow — log the previous bringUp's failure so the
+      // user can see WHY the earlier toggle errored. Returning null still
+      // lets the new bringUp proceed (which is the desired behaviour for
+      // rapid toggles), but the error doesn't vanish.
+      log(
+        'warn',
+        'mcp',
+        `Previous bringUp for "${config.id}" failed before this one started`,
+        err instanceof Error ? err.message : String(err)
+      )
+      return null
+    })
+    .then(async () => {
     const existing = connections.get(config.id)
     if (existing) await existing.disconnect()
     const conn = new McpConnection(config)

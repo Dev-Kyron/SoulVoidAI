@@ -152,15 +152,26 @@ async function onWakeDetected(persona: VoicePersona, label: string): Promise<voi
 }
 
 /**
- * Mounts (and tears down) the wake-word engine based on the user's settings.
- * Re-runs when the toggle flips. While disabled, neither engine's modules
+ * Mounts (and tears down) the wake-word engine based on TWO gates:
+ *
+ *   1. `voice.wakeWord.enabled`  (persisted setting — user wants the feature)
+ *   2. `wakeArmed`               (per-session flag — user has explicitly armed)
+ *
+ * Both must be true for the engine to start. The session flag defaults to
+ * `false` on every app launch even if the persisted setting is on; users
+ * arm via the orb context menu or the Voice settings page. This avoids the
+ * "panel opens and looks like it's recording me" reaction that beta testers
+ * had — the mic only goes hot after explicit per-session consent.
+ *
+ * Re-runs when either gate flips. While disabled, neither engine's modules
  * are imported — the lazy chunks stay out of the initial bundle.
  */
 export function useWakeWord(): void {
   const enabled = useConfigStore((s) => s.config?.voice.wakeWord.enabled ?? false)
+  const armed = useWidgetStore((s) => s.wakeArmed)
 
   useEffect(() => {
-    if (!enabled) {
+    if (!enabled || !armed) {
       void shutdown()
       return
     }
@@ -168,5 +179,5 @@ export function useWakeWord(): void {
     return () => {
       void shutdown()
     }
-  }, [enabled])
+  }, [enabled, armed])
 }

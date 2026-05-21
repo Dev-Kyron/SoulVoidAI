@@ -13,6 +13,10 @@ files:
   - '!{.eslintrc,.prettierrc,.prettierrc.json,.editorconfig}'
   - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
   - '!{.env,.env.*,README.md,LICENSE}'
+  # Dev-only tool — Discord MCP is for the studio bootstrapping the
+  # community server, not for end users of the installed app. Keep it
+  # out of the installer so it doesn't bloat the download.
+  - '!tools/discord-mcp/**'
 
 # `asarUnpack` already places `resources/**` under `app.asar.unpacked/` so the
 # main process can read them via the normal path. A previous build config

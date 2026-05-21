@@ -1,0 +1,58 @@
+appId: dev.kyron.voidsoul
+productName: VoidSoul Assistant
+copyright: Copyright (c) 2026 Kyron
+
+directories:
+  buildResources: build
+  output: release
+
+files:
+  - '!**/.vscode/*'
+  - '!src/*'
+  - '!electron.vite.config.{js,ts,mjs,cjs}'
+  - '!{.eslintrc,.prettierrc,.prettierrc.json,.editorconfig}'
+  - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
+  - '!{.env,.env.*,README.md,LICENSE}'
+
+# `asarUnpack` already places `resources/**` under `app.asar.unpacked/` so the
+# main process can read them via the normal path. A previous build config
+# also listed `extraResources: resources/**`, which doubled the inclusion
+# and inflated installer size — removed.
+asarUnpack:
+  - resources/**
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: build/icon.png
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  perMachine: false
+
+mac:
+  target: dmg
+  category: public.app-category.productivity
+  icon: build/icon.png
+
+linux:
+  target: AppImage
+  category: Utility
+  icon: build/icon.png
+
+# Auto-update channel. electron-updater reads the same `publish` block at
+# runtime to know which `latest.yml` / `latest-mac.yml` / `latest-linux.yml`
+# to fetch. Pushing a tagged release (e.g. `v0.1.1`) to the repo causes
+# electron-builder to upload artifacts AND the per-platform metadata
+# manifests; the running app then sees the new version on its next check.
+#
+# `releaseType: draft` keeps published releases as drafts until you manually
+# flip them to public — gives one last review step before users see them.
+publish:
+  provider: github
+  owner: Dev-Kyron
+  repo: SoulVoidAI
+  releaseType: draft

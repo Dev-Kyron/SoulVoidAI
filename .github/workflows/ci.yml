@@ -1,0 +1,112 @@
+name: CI
+
+# Run on every push to main and on PRs. Catches regressions before they hit
+# the dev machine — typecheck, the vitest suite, and the full electron-vite
+# build all have to pass on both Windows (primary dev target) and Linux
+# (cheap runner that catches anything Windows-specific in path handling,
+# native module rebuilds, or shell scripts). macOS can join when distribution
+# starts targeting it.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  # Manual trigger for re-running after a flaky network issue without
+  # needing an empty commit.
+  workflow_dispatch:
+
+# A second push to the same branch cancels older in-flight runs — saves
+# minutes when iterating quickly.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    # `fail-fast: false` keeps the other matrix leg running when one breaks —
+    # often the OS-specific failures are more interesting than the first
+    # red light.
+    strategy:
+      fail-fast: false
+      matrix:
+        # macOS-latest catches Apple-specific path / native-rebuild surprises
+        # (better-sqlite3 + Whisper-tiny ONNX on arm64). The added minutes
+        # only burn on PRs that touch main-process code; renderer-only PRs
+        # cache through quickly.
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          # Matches @types/node major; bumping here is a separate PR so
+          # native-module compatibility can be vetted on its own.
+          node-version: '22'
+          cache: 'npm'
+
+      # electron-builder install-app-deps (run via postinstall) downloads
+      # Electron + rebuilds native modules — both are slow and re-run on
+      # every cold install. Caching by lockfile hash dodges that on
+      # unchanged-dependency runs.
+      - name: Cache Electron downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/electron
+            ~/.cache/electron-builder
+            ~/AppData/Local/electron/Cache
+            ~/AppData/Local/electron-builder/Cache
+          key: electron-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            electron-${{ runner.os }}-
+
+      - name: Install
+        # `npm ci` rather than `npm install` so the lockfile is the source
+        # of truth — no surprise bumps mid-CI. postinstall (electron-builder
+        # install-app-deps) rebuilds better-sqlite3 for the Electron ABI.
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        # The SQLite-backed tests (embedding store, history, db) are gated
+        # behind RUN_SQLITE_TESTS=1 because better-sqlite3 here is built for
+        # Electron's Node ABI, not the host Node vitest runs under. Enabling
+        # them needs an `electron-rebuild --runtime=node` step (or running
+        # vitest under Electron). Tracked as a follow-up — for now CI runs
+        # the same suite the dev machine does, which catches every other
+        # regression class.
+        run: npm test
+
+      - name: Build
+        # `npm run build` itself re-runs typecheck before electron-vite build.
+        # Slightly redundant given the explicit Typecheck step above, but
+        # acceptable for the safety — and makes the build step's failure
+        # mode self-contained.
+        run: npm run build
+
+      # Packaged installers — only on pushes to main, not on every PR (each
+      # leg of electron-builder takes 5-10 min and produces ~150MB+). Lets
+      # the user grab a "latest main" binary from the workflow run page
+      # without setting up the toolchain locally.
+      - name: Package installer
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: npx electron-builder --publish=never
+
+      - name: Upload installer artifacts
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: voidsoul-${{ runner.os }}
+          path: |
+            release/*.exe
+            release/*.AppImage
+            release/*.dmg
+            release/*.zip
+          if-no-files-found: ignore
+          retention-days: 14

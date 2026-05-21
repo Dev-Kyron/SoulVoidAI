@@ -1,0 +1,359 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Theme tokens. Everything that varies between dark and light goes through
+ * semantic CSS variables here so components don't have to hard-code colours.
+ * The accent (--accent / --accent-soft / --accent-ring) stays identical across
+ * themes — it's the user's chosen highlight colour, not part of the surface
+ * palette.
+ *
+ * `--surface-*` = panel backgrounds, `--text-*` = foreground tones,
+ * `--border-*` = subtle dividers, `--glass-*` = the glass gradient endpoints.
+ */
+:root,
+:root[data-theme='dark'] {
+  --accent: #7c3aed;
+  --accent-glow: rgba(124, 58, 237, 0.55);
+  --accent-soft: rgba(124, 58, 237, 0.16);
+  --accent-ring: rgba(124, 58, 237, 0.45);
+  --glass-opacity: 0.85;
+
+  /* Surface tones — deepest at the panel chrome, lighter on cards. */
+  --surface-bg: #0c0e1f;
+  --surface-card: rgba(17, 19, 43, 0.6);
+  --surface-card-strong: rgba(8, 10, 22, 0.85);
+  --surface-input: rgba(0, 0, 0, 0.3);
+  --surface-input-strong: rgba(0, 0, 0, 0.4);
+  --glass-stop-a: rgba(26, 29, 61, var(--glass-opacity, 0.85));
+  --glass-stop-b: rgba(8, 10, 22, var(--glass-opacity, 0.85));
+
+  /* Foreground — strong → muted → faint, all readable on dark surfaces. */
+  --text-strong: #e6e8f5;
+  --text-body: #cbd0e2;
+  --text-muted: #94a3b8;
+  --text-faint: #64748b;
+  --text-on-accent: #ffffff;
+
+  /* Borders — barely-visible separators on dark surfaces. */
+  --border-soft: rgba(255, 255, 255, 0.06);
+  --border-medium: rgba(255, 255, 255, 0.1);
+  --border-strong: rgba(124, 58, 237, 0.28);
+
+  --link: #22d3ee;
+  --code-bg: rgba(124, 58, 237, 0.18);
+
+  /* Orb tokens — see components/widget/Orb.tsx. `--orb-core` is the inner
+     stop of the core sphere's radial gradient (the "centre of the planet"
+     colour); `--orb-sheen` is the bright reflection ribbon on the rotating
+     ring. Dark theme keeps the original deep-space look. */
+  --orb-core: #161a36;
+  --orb-sheen: #ffffff;
+}
+
+/*
+ * Light theme. Same semantic variables, light values. Components that read
+ * `var(--text-strong)` etc. flip automatically; raw `bg-black/X` / `text-slate-X`
+ * classes need per-call audit, but the most-visible glass surfaces use these
+ * tokens directly.
+ */
+:root[data-theme='light'] {
+  --glass-opacity: 0.92;
+  --surface-bg: #f5f6fb;
+  --surface-card: rgba(255, 255, 255, 0.78);
+  --surface-card-strong: rgba(255, 255, 255, 0.94);
+  --surface-input: rgba(255, 255, 255, 0.7);
+  --surface-input-strong: rgba(255, 255, 255, 0.95);
+  --glass-stop-a: rgba(245, 246, 252, var(--glass-opacity, 0.92));
+  --glass-stop-b: rgba(228, 230, 244, var(--glass-opacity, 0.92));
+
+  --text-strong: #0f172a;
+  --text-body: #1f2937;
+  --text-muted: #475569;
+  --text-faint: #64748b;
+  --text-on-accent: #ffffff;
+
+  --border-soft: rgba(15, 23, 42, 0.08);
+  --border-medium: rgba(15, 23, 42, 0.14);
+  --border-strong: rgba(124, 58, 237, 0.32);
+
+  --link: #0ea5b7;
+  --code-bg: rgba(124, 58, 237, 0.1);
+
+  /* Orb in light mode — the core blooms outward instead of receding into
+     deep space. Inner stop sits a hair below the surface so the accent
+     colour reads as luminous rather than dark-against-bright. */
+  --orb-core: #eef1ff;
+  --orb-sheen: #ffffff;
+}
+
+/* The window is frameless and transparent — the app paints its own surfaces. */
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  background: transparent;
+}
+
+body {
+  font-family: theme('fontFamily.sans');
+  color: var(--text-strong);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  cursor: default;
+}
+
+#root {
+  display: flex;
+}
+
+@layer components {
+  /* Frosted-glass surface used by the command panel and cards. */
+  .glass {
+    background: linear-gradient(155deg, var(--glass-stop-a) 0%, var(--glass-stop-b) 100%);
+    backdrop-filter: blur(18px);
+    border: 1px solid var(--border-strong);
+  }
+
+  .glass-soft {
+    background: var(--surface-card);
+    border: 1px solid var(--border-medium);
+  }
+
+  /* Regions that drag the frameless window. */
+  .drag {
+    -webkit-app-region: drag;
+  }
+  .no-drag {
+    -webkit-app-region: no-drag;
+  }
+
+  .neon-text {
+    text-shadow: 0 0 12px var(--accent-glow);
+  }
+
+  .tab-active {
+    background: var(--accent-soft);
+    box-shadow: inset 0 0 0 1px var(--accent-ring);
+  }
+}
+
+@layer utilities {
+  .scrollbar-void {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(124, 58, 237, 0.5) transparent;
+  }
+  .scrollbar-void::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  .scrollbar-void::-webkit-scrollbar-thumb {
+    background: rgba(124, 58, 237, 0.4);
+    border-radius: 999px;
+  }
+  .scrollbar-void::-webkit-scrollbar-thumb:hover {
+    background: rgba(124, 58, 237, 0.65);
+  }
+  .scrollbar-void::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .selectable {
+    user-select: text;
+    cursor: text;
+  }
+}
+
+/* Markdown rendering inside chat bubbles. */
+.markdown {
+  font-size: 13px;
+  line-height: 1.6;
+}
+.markdown p {
+  margin: 0 0 8px;
+}
+.markdown p:last-child {
+  margin-bottom: 0;
+}
+.markdown ul,
+.markdown ol {
+  margin: 4px 0 8px;
+  padding-left: 18px;
+}
+.markdown li {
+  margin: 2px 0;
+}
+.markdown a {
+  color: var(--link);
+  text-decoration: underline;
+}
+.markdown h1,
+.markdown h2,
+.markdown h3 {
+  font-weight: 600;
+  margin: 10px 0 6px;
+}
+.markdown code {
+  font-family: theme('fontFamily.mono');
+  font-size: 12px;
+  background: var(--code-bg);
+  padding: 1px 5px;
+  border-radius: 5px;
+}
+.markdown pre {
+  margin: 6px 0;
+}
+.markdown pre code {
+  background: transparent;
+  padding: 0;
+}
+.markdown blockquote {
+  border-left: 2px solid var(--accent-ring);
+  padding-left: 10px;
+  margin: 6px 0;
+  opacity: 0.85;
+}
+
+/* Math (KaTeX) — neutral colour so it inherits the bubble's text colour. */
+.markdown .katex {
+  color: inherit;
+}
+
+/*
+ * Light-theme overrides for raw Tailwind colour classes. This is a pragmatic
+ * bridge — components were written with `bg-black/X` / `text-slate-X` /
+ * `border-white/Y` for dark-only display, and rewriting all of them to
+ * semantic CSS variables is a multi-session refactor. Until then, this
+ * stylesheet remaps the most common offenders for light mode. New code
+ * should prefer the `--surface-*` / `--text-*` / `--border-*` tokens
+ * directly.
+ *
+ * Specificity bumped via `:root[data-theme='light']` so we don't need
+ * !important — Tailwind's single-class rules lose to the prefixed ones.
+ */
+:root[data-theme='light'] .bg-black\/10 { background-color: rgba(15, 23, 42, 0.04); }
+:root[data-theme='light'] .bg-black\/20 { background-color: rgba(15, 23, 42, 0.05); }
+:root[data-theme='light'] .bg-black\/25 { background-color: rgba(15, 23, 42, 0.06); }
+:root[data-theme='light'] .bg-black\/30 { background-color: rgba(15, 23, 42, 0.07); }
+:root[data-theme='light'] .bg-black\/40 { background-color: rgba(15, 23, 42, 0.08); }
+:root[data-theme='light'] .bg-black\/50 { background-color: rgba(15, 23, 42, 0.1); }
+:root[data-theme='light'] .bg-black\/65 { background-color: rgba(15, 23, 42, 0.4); }
+:root[data-theme='light'] .bg-black\/80 { background-color: rgba(15, 23, 42, 0.55); }
+:root[data-theme='light'] .bg-white\/5 { background-color: rgba(15, 23, 42, 0.04); }
+:root[data-theme='light'] .bg-white\/10 { background-color: rgba(15, 23, 42, 0.06); }
+:root[data-theme='light'] .bg-white\/15 { background-color: rgba(15, 23, 42, 0.08); }
+:root[data-theme='light'] .bg-void-700 { background-color: #f5f6fb; }
+
+:root[data-theme='light'] .border-white\/5 { border-color: rgba(15, 23, 42, 0.06); }
+:root[data-theme='light'] .border-white\/10 { border-color: rgba(15, 23, 42, 0.1); }
+:root[data-theme='light'] .border-white\/15 { border-color: rgba(15, 23, 42, 0.12); }
+:root[data-theme='light'] .border-white\/25 { border-color: rgba(15, 23, 42, 0.18); }
+
+:root[data-theme='light'] .text-white { color: #0f172a; }
+:root[data-theme='light'] .text-slate-100 { color: #0f172a; }
+:root[data-theme='light'] .text-slate-200 { color: #1f2937; }
+:root[data-theme='light'] .text-slate-300 { color: #334155; }
+:root[data-theme='light'] .text-slate-400 { color: #475569; }
+:root[data-theme='light'] .text-slate-500 { color: #64748b; }
+:root[data-theme='light'] .text-slate-600 { color: #94a3b8; }
+:root[data-theme='light'] .placeholder\:text-slate-500::placeholder,
+:root[data-theme='light'] .placeholder\:text-slate-600::placeholder { color: #94a3b8; }
+
+/* The faint hover backgrounds also need flipping; the same darkening on
+   a light surface reads as a depressed/pressed state — what we want. */
+:root[data-theme='light'] .hover\:bg-white\/5:hover { background-color: rgba(15, 23, 42, 0.05); }
+:root[data-theme='light'] .hover\:bg-white\/10:hover { background-color: rgba(15, 23, 42, 0.08); }
+:root[data-theme='light'] .hover\:bg-black\/30:hover { background-color: rgba(15, 23, 42, 0.08); }
+:root[data-theme='light'] .hover\:text-white:hover { color: #0f172a; }
+
+/* highlight.js — a lean theme-aware palette. Dark uses muted neon tones that
+   match the accent; light uses a softer set so contrast stays comfortable. */
+:root[data-theme='dark'] .hljs,
+:root[data-theme='dark'] code.hljs {
+  color: #cbd5e1;
+}
+:root[data-theme='dark'] .hljs-comment,
+:root[data-theme='dark'] .hljs-quote {
+  color: #64748b;
+  font-style: italic;
+}
+:root[data-theme='dark'] .hljs-keyword,
+:root[data-theme='dark'] .hljs-selector-tag,
+:root[data-theme='dark'] .hljs-section {
+  color: #c084fc;
+}
+:root[data-theme='dark'] .hljs-string,
+:root[data-theme='dark'] .hljs-attr,
+:root[data-theme='dark'] .hljs-symbol {
+  color: #86efac;
+}
+:root[data-theme='dark'] .hljs-number,
+:root[data-theme='dark'] .hljs-literal,
+:root[data-theme='dark'] .hljs-built_in {
+  color: #fbbf24;
+}
+:root[data-theme='dark'] .hljs-title,
+:root[data-theme='dark'] .hljs-name,
+:root[data-theme='dark'] .hljs-tag {
+  color: #60a5fa;
+}
+:root[data-theme='dark'] .hljs-variable,
+:root[data-theme='dark'] .hljs-template-variable {
+  color: #f87171;
+}
+:root[data-theme='dark'] .hljs-meta,
+:root[data-theme='dark'] .hljs-deletion {
+  color: #94a3b8;
+}
+
+:root[data-theme='light'] .hljs,
+:root[data-theme='light'] code.hljs {
+  color: #1f2937;
+}
+:root[data-theme='light'] .hljs-comment,
+:root[data-theme='light'] .hljs-quote {
+  color: #6b7280;
+  font-style: italic;
+}
+:root[data-theme='light'] .hljs-keyword,
+:root[data-theme='light'] .hljs-selector-tag,
+:root[data-theme='light'] .hljs-section {
+  color: #7c3aed;
+}
+:root[data-theme='light'] .hljs-string,
+:root[data-theme='light'] .hljs-attr,
+:root[data-theme='light'] .hljs-symbol {
+  color: #15803d;
+}
+:root[data-theme='light'] .hljs-number,
+:root[data-theme='light'] .hljs-literal,
+:root[data-theme='light'] .hljs-built_in {
+  color: #b45309;
+}
+:root[data-theme='light'] .hljs-title,
+:root[data-theme='light'] .hljs-name,
+:root[data-theme='light'] .hljs-tag {
+  color: #1d4ed8;
+}
+:root[data-theme='light'] .hljs-variable,
+:root[data-theme='light'] .hljs-template-variable {
+  color: #b91c1c;
+}
+:root[data-theme='light'] .hljs-meta,
+:root[data-theme='light'] .hljs-deletion {
+  color: #475569;
+}
+
+/* Mermaid diagrams — center and constrain so a wide graph doesn't overflow
+   the bubble before the renderer's own viewBox math kicks in. */
+.markdown .mermaid {
+  display: flex;
+  justify-content: center;
+  margin: 6px 0;
+}
+.markdown .mermaid svg {
+  max-width: 100%;
+  height: auto;
+}

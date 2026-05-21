@@ -1,0 +1,79 @@
+name: Release
+
+# Triggered by pushing a version tag like `v0.1.1`. Each platform leg builds
+# its installer + the `latest*.yml` metadata file electron-updater reads,
+# then electron-builder uploads everything to a GitHub Release.
+#
+# The Release is created as a DRAFT (per electron-builder.yml `releaseType:
+# draft`) — you flip it to published in the GitHub UI when you're ready for
+# end-users to pick up the update. Drafts are invisible to electron-updater
+# so the update is "armed" but not yet rolling out.
+#
+# Tagging recipe:
+#   1. Bump `version` in package.json (e.g. 0.1.0 → 0.1.1)
+#   2. Commit → `git tag v0.1.1` → `git push --tags`
+#   3. This workflow runs, drafts a release with the three installers.
+#   4. Review the draft on GitHub → "Publish release" when ready.
+on:
+  push:
+    tags:
+      - 'v*'
+  # Manual fallback — bypass the tag flow without faking a tag.
+  workflow_dispatch:
+
+jobs:
+  release:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Cache Electron downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/electron
+            ~/.cache/electron-builder
+            ~/AppData/Local/electron/Cache
+            ~/AppData/Local/electron-builder/Cache
+          key: electron-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            electron-${{ runner.os }}-
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+      - name: Publish to GitHub Releases
+        # `--publish=always` tells electron-builder to upload artifacts to
+        # the GitHub Release matching the current tag (creates one if it
+        # doesn't exist yet — `releaseType: draft` in electron-builder.yml
+        # keeps it hidden until manually flipped to published).
+        #
+        # GH_TOKEN is the standard auth env var electron-builder reads;
+        # GitHub Actions injects the default token automatically and it
+        # has the `contents: write` permission below.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx electron-builder --publish=always
+
+    permissions:
+      # Required for electron-builder to create/edit the draft release and
+      # upload assets via the GitHub API.
+      contents: write

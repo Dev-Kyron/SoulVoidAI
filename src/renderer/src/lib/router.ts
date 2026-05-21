@@ -317,3 +317,17 @@ export function toAvailable(runtime: Record<ProviderId, ProviderRuntime>, provid
     return { id, model: r.model, usable, isLocal }
   })
 }
+
+/**
+ * Budget signal computation — `nearCap` fires when the user has a
+ * monthly cap set AND has spent >= 80% of it. Below that threshold
+ * the router stays cost-neutral; above it, cheap/local providers
+ * get a scoring boost so a runaway agent loop doesn't blow the cap.
+ *
+ * Pure function for testability — the caller fetches the numbers
+ * via the usage IPC and hands them in.
+ */
+export function deriveBudgetState(totalSpentUsd: number, monthlyCapUsd: number | null): { nearCap: boolean } | undefined {
+  if (monthlyCapUsd === null || monthlyCapUsd <= 0) return undefined
+  return { nearCap: totalSpentUsd / monthlyCapUsd >= 0.8 }
+}

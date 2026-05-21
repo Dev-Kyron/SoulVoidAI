@@ -19,7 +19,7 @@ import { extractFacts } from '../lib/factExtractor'
 import { summarizeOlderTurns, estimateTokens } from '../lib/conversationSummarizer'
 import { canReuseSummary } from '../lib/summaryReuse'
 import { CHAT_STRINGS, formatErrorContent } from '../lib/chatStrings'
-import { pickProvider, type AvailableProvider } from '../lib/router'
+import { pickProvider, deriveBudgetState, type AvailableProvider } from '../lib/router'
 import { getMode } from '@shared/modes'
 import { modelHasVision } from '@shared/modelCapabilities'
 import { useConfigStore } from './useConfigStore'
@@ -540,12 +540,27 @@ export const useChatStore = create<ChatState>((set, get) => ({
         usable: p.needsKey ? p.hasKey : Boolean(p.localReady),
         isLocal: !p.needsKey
       }))
+      // Cost-aware bias. Fetch the current month's spend + cap so the
+      // router can push toward cheap/local when the user is within 20%
+      // of their cap. Failures are best-effort — usage IPC hiccups
+      // shouldn't block a chat send.
+      let budget: { nearCap: boolean } | undefined
+      try {
+        const [summary, budgetCfg] = await Promise.all([
+          vs.usage.summary(),
+          vs.usage.getBudget()
+        ])
+        budget = deriveBudgetState(summary.totalCost, budgetCfg.monthlyUsd)
+      } catch {
+        // Stay cost-neutral on IPC failure.
+      }
       const pick = pickProvider({
         prompt: content,
         hasImages: hasImage,
         agentMode: config.chat.agent,
         available,
-        activeProviderId: config.activeProvider
+        activeProviderId: config.activeProvider,
+        budget
       })
       if (pick && pick.overrideOfActive) {
         const swapped = config.providers.find((p) => p.id === pick.providerId)

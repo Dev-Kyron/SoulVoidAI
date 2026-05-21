@@ -31,6 +31,7 @@ import { speakWith, stopSpeaking } from '../lib/voice'
 import {
   WELCOME_MESSAGE_ID,
   isQuietNow,
+  type AgentCheckpoint,
   type ChatAttachment,
   type ChatMessage,
   type ChatStreamChunk,
@@ -466,6 +467,18 @@ interface ChatState {
    */
   modelOverride: string | null
   setModelOverride: (model: string | null) => void
+
+  /**
+   * Crash-recovery entry point. Called when the user clicks "Resume" on
+   * a stale checkpoint (one whose row is still at status='running' from
+   * a previous session). Switches to the checkpoint's thread, cleans up
+   * the orphan streaming bubble, drops a synthetic "[Resume]" user turn,
+   * and fires send() — the agent loop sees the full conversation
+   * history with its earlier tool calls and picks up from where it
+   * stopped. Deletes the old checkpoint so the new send() creates a
+   * fresh row.
+   */
+  resumeFromCheckpoint: (checkpoint: AgentCheckpoint) => Promise<void>
 }
 
 /**
@@ -1134,6 +1147,52 @@ export const useChatStore = create<ChatState>((set, get) => ({
       modelOverride: null
     })
     void vs.history.setActiveThread(id)
+  },
+
+  resumeFromCheckpoint: async (checkpoint) => {
+    // Switch to the checkpoint's thread. Same path as switchThread but
+    // skips the "is streaming" guard — a stale checkpoint by definition
+    // belongs to a previous session, so the current streaming state
+    // is unrelated.
+    const state = get()
+    if (state.activeThreadId !== checkpoint.threadId) {
+      const messages = await vs.history.getMessages(checkpoint.threadId)
+      const target = state.threads.find((t) => t.id === checkpoint.threadId)
+      flushPendingSave(state.activeThreadId)
+      set({
+        activeThreadId: checkpoint.threadId,
+        messages:
+          messages.length > 0
+            ? messages
+            : [welcomeMessage()],
+        summary: target?.summary ?? null,
+        attachments: [],
+        modelOverride: null
+      })
+      void vs.history.setActiveThread(checkpoint.threadId)
+    }
+    // Cleanup pass: the assistant bubble we left behind when the
+    // process died likely has `streaming: true` and possibly empty
+    // content. Clear those flags so the user sees a stable bubble
+    // before the new agent loop starts adding to the thread.
+    set((s) => ({
+      messages: s.messages.map((m) =>
+        m.id === checkpoint.assistantMessageId
+          ? { ...m, streaming: false, error: false }
+          : m
+      )
+    }))
+    // Drop the old checkpoint row — the new send() below will INSERT
+    // a fresh one with its own requestId. Keeping the old row would
+    // confuse the next boot's recovery scan.
+    void vs.agentCheckpoint.delete(checkpoint.requestId).catch(() => {
+      /* best-effort */
+    })
+    // Kick off a fresh agent round. The conversation history already
+    // contains the partial assistant output + every tool call & result
+    // from before the crash, so the model has everything it needs to
+    // pick up from where the previous loop stopped.
+    await get().send('Continue from where you left off.')
   },
 
   renameThread: async (id, title) => {

@@ -4,7 +4,7 @@
  */
 import { create } from 'zustand'
 import { uid } from '../lib/utils'
-import type { ActiveWindowInfo } from '@shared/types'
+import type { ActiveWindowInfo, AgentCheckpoint } from '@shared/types'
 import type { PermissionId } from '@shared/permissions'
 
 export type ToastKind = 'info' | 'success' | 'error'
@@ -36,6 +36,12 @@ interface UiState {
   canvasContent: { code: string; language: string } | null
   /** The custom action awaiting delete confirmation, or null. */
   actionToDelete: { id: string; label: string } | null
+  /**
+   * Agent runs that were still at `running` when the app last quit/crashed —
+   * fetched once at boot. The recovery banner offers to resume or discard
+   * each one. Empty array = banner is hidden.
+   */
+  staleCheckpoints: AgentCheckpoint[]
 
   pushToast: (kind: ToastKind, message: string, undoId?: string) => void
   dismissToast: (id: string) => void
@@ -48,6 +54,8 @@ interface UiState {
   setGlobalSearchOpen: (open: boolean) => void
   setCanvas: (content: { code: string; language: string } | null) => void
   setActionToDelete: (target: { id: string; label: string } | null) => void
+  setStaleCheckpoints: (checkpoints: AgentCheckpoint[]) => void
+  removeStaleCheckpoint: (requestId: string) => void
 }
 
 export const useUiStore = create<UiState>((set, get) => ({
@@ -60,6 +68,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   globalSearchOpen: false,
   canvasContent: null,
   actionToDelete: null,
+  staleCheckpoints: [],
 
   pushToast: (kind, message, undoId) => {
     const id = uid()
@@ -94,5 +103,12 @@ export const useUiStore = create<UiState>((set, get) => ({
 
   setCanvas: (content) => set({ canvasContent: content }),
 
-  setActionToDelete: (target) => set({ actionToDelete: target })
+  setActionToDelete: (target) => set({ actionToDelete: target }),
+
+  setStaleCheckpoints: (checkpoints) => set({ staleCheckpoints: checkpoints }),
+
+  removeStaleCheckpoint: (requestId) =>
+    set((state) => ({
+      staleCheckpoints: state.staleCheckpoints.filter((c) => c.requestId !== requestId)
+    }))
 }))

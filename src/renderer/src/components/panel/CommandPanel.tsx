@@ -24,6 +24,7 @@ import { IconButton } from '../common/ui'
 import { NexusView } from './NexusView'
 import { ChatView } from '../chat/ChatView'
 import { FirstRunBanner } from '../common/FirstRunBanner'
+import { ResumeAgentBanner } from '../common/ResumeAgentBanner'
 import { Overlays } from './Overlays'
 import { CommandPalette } from './CommandPalette'
 import { SpiritMotes } from './SpiritMotes'
@@ -214,6 +215,11 @@ export function CommandPanel(): JSX.Element {
               first-run users an obvious path to a working setup instead of
               hitting a silent "no provider configured" error in the chat. */}
           <FirstRunBanner />
+          {/* Shown only when the previous session left agent runs at
+              status='running' in the checkpoint table — picks up where
+              they stopped instead of starting over. Emerald (recoverable)
+              vs the purple "missing setup" cue. */}
+          <ResumeAgentBanner />
           <div className="relative flex-1 overflow-hidden border-t border-white/5">
             {activeTab === 'nexus' && <NexusView />}
             {activeTab === 'chat' && <ChatView />}

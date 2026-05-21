@@ -111,25 +111,53 @@ function taskSnippet(cp: AgentCheckpoint): string {
 }
 
 /**
+ * Most agent runs we surface as individual rows in the tray menu before
+ * collapsing the rest into a single "+N more" overflow. Three keeps the
+ * menu compact even on the unusual day someone has many concurrent
+ * agent loops in flight across threads.
+ */
+const TRAY_AGENT_DISPLAY_CAP = 3
+
+/**
  * Builds the "Agent activity" section of the menu — one disabled label
- * per running checkpoint. Returns an empty array when nothing is in
- * flight so the menu doesn't get cluttered with a hollow header.
+ * per running checkpoint, capped at TRAY_AGENT_DISPLAY_CAP. Returns an
+ * empty array when nothing is in flight so the menu doesn't get
+ * cluttered with a hollow header.
  */
 function agentActivityItems(): MenuItemConstructorOptions[] {
   if (agentRuns.length === 0) return []
   const items: MenuItemConstructorOptions[] = []
-  for (const cp of agentRuns) {
+  const visible = agentRuns.slice(0, TRAY_AGENT_DISPLAY_CAP)
+  for (const cp of visible) {
     items.push({
       label: `⚙ step ${cp.step} — ${taskSnippet(cp)}`,
       enabled: false
     })
   }
+  const overflow = agentRuns.length - visible.length
+  if (overflow > 0) {
+    items.push({
+      label: `…and ${overflow} more run${overflow === 1 ? '' : 's'}`,
+      enabled: false
+    })
+  }
   items.push({
     label: agentRuns.length === 1 ? 'Open the panel to follow' : 'Open the panel to follow runs',
-    click: () => showWindow()
+    click: () => openPanelForAgent()
   })
   items.push({ type: 'separator' as const })
   return items
+}
+
+/**
+ * Surfaces the panel and switches to the chat tab. Used by the
+ * "Open the panel to follow" menu item AND by the tray single-click
+ * when there's an active agent run — both UX paths are "user wants to
+ * see what's happening", and what's happening is in the chat view.
+ */
+function openPanelForAgent(): void {
+  showWindow()
+  broadcast('tray:open-tab', 'chat')
 }
 
 function buildMenu(): Menu {
@@ -222,9 +250,19 @@ export function createTray(): Tray {
   tray.setToolTip('VoidSoul Assistant')
   tray.setContextMenu(buildMenu())
 
-  // Single click toggles the widget; refresh the menu so labels stay accurate.
+  // Single click toggles the widget. If an agent run is in flight and
+  // the panel was hidden, the user almost certainly clicked the tray
+  // to peek at progress — so jump straight into the chat tab where
+  // they can see the live activity, rather than dropping them on
+  // whatever tab they happened to last leave open.
   tray.on('click', () => {
-    toggleWindow()
+    const win = getWindow()
+    const wasHidden = !(win?.isVisible() ?? false)
+    if (wasHidden && agentRuns.length > 0) {
+      openPanelForAgent()
+    } else {
+      toggleWindow()
+    }
     tray?.setContextMenu(buildMenu())
   })
 

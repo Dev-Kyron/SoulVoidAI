@@ -23,6 +23,7 @@ import { isGranted } from './services/permissions/permissions'
 import { broadcast, requestFlushPending } from './events'
 import { loadDotEnv } from './env'
 import { log } from './services/logger'
+import { pauseAllRunningCheckpoints } from './services/storage/agent-checkpoints'
 
 const SUMMON_SHORTCUT = 'CommandOrControl+Shift+Space'
 /**
@@ -162,6 +163,28 @@ if (!app.requestSingleInstanceLock()) {
     void (async () => {
       try {
         await requestFlushPending(FLUSH_BUDGET_MS)
+        // Promote any 'running' agent checkpoints to 'paused' BEFORE we
+        // tear down IPC and shut the renderer. The user clicked Quit on
+        // purpose — the runs aren't crashes, they're paused-by-intent.
+        // On next launch the recovery banner frames them accordingly
+        // and a resume from 'paused' reads cleanly.
+        try {
+          const paused = pauseAllRunningCheckpoints()
+          if (paused > 0) {
+            log(
+              'info',
+              'system',
+              `Paused ${paused} in-flight agent run(s) for graceful shutdown.`
+            )
+          }
+        } catch (err) {
+          log(
+            'warn',
+            'system',
+            'Failed to pause in-flight agent runs before shutdown',
+            err instanceof Error ? err.message : String(err)
+          )
+        }
         disposeIpc()
         await Promise.race([
           Promise.all([disposeMcp(), disposeWorker()]),

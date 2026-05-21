@@ -6,6 +6,15 @@
  * step counter, then finalises it to a terminal status when the loop
  * exits (paused / completed / failed / aborted).
  *
+ * The stored `turns` and `invocations` are diagnostic snapshots, not
+ * provider-replayable input. The renderer strips image data URLs to
+ * the literal placeholder `[image]` before persisting (see
+ * `sanitiseTurnsForCheckpoint` in useChatStore) — this keeps SQLite
+ * blobs lean over long visual-agent runs but means a future tool
+ * reading checkpoint state directly can't feed it back to a provider
+ * verbatim. Resume runs always rebuild fresh turns from the thread's
+ * message history rather than from these stored bytes.
+ *
  * Why this exists:
  *   - Sustained 1-hour runs need to survive a crash, sleep, or restart
  *     without the user losing every minute of progress.
@@ -256,4 +265,30 @@ export function getCheckpoint(requestId: string): AgentCheckpoint | null {
  */
 export function deleteCheckpoint(requestId: string): void {
   db().prepare(`DELETE FROM agent_checkpoints WHERE request_id = ?`).run(requestId)
+}
+
+/**
+ * Graceful-shutdown helper. Promotes every row still at status='running'
+ * to status='paused' in a single UPDATE — the user clicked Quit while
+ * agent loops were live, but that's a deliberate stop, not a crash.
+ * Marking the rows 'paused' lets the recovery UI on the next launch
+ * frame them as "you stopped this on purpose, resume?" instead of
+ * "looks like something crashed". Phantom-running prune logic stays
+ * unaffected since this only runs on a real before-quit.
+ *
+ * Returns the count of rows it touched so the shutdown sequence can
+ * log how many runs were caught mid-flight.
+ */
+export function pauseAllRunningCheckpoints(): number {
+  const now = new Date().toISOString()
+  const result = db()
+    .prepare(
+      `UPDATE agent_checkpoints
+       SET status = 'paused',
+           failure = 'Paused on app quit — resume to continue.',
+           updated_at = ?
+       WHERE status = 'running'`
+    )
+    .run(now)
+  return Number(result.changes ?? 0)
 }

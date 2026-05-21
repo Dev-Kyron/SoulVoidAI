@@ -64,6 +64,30 @@ const KEEP_RECENT_MIN = 8
 /** Default placeholder titles that get auto-replaced after the first user turn. */
 const PLACEHOLDER_TITLES = new Set(['New chat', 'Untitled', ''])
 
+/**
+ * Strips image data-URLs out of a ChatTurn[] for checkpoint persistence.
+ * The checkpoint's `turns` field is informational only — resume rebuilds
+ * the live turns from the thread's message history, not from this stored
+ * snapshot. Storing the actual base64 here would bloat the SQLite write
+ * by ~100KB per screenshot per step (10 steps × 10 screenshots = ~10MB
+ * of redundant I/O on a long visual-agent run).
+ *
+ * Preserves the image COUNT so a future "stored agent state inspector"
+ * can show how many screenshots a run captured, just not the bytes.
+ */
+function sanitiseTurnsForCheckpoint(turns: ChatTurn[]): ChatTurn[] {
+  return turns.map((turn) => {
+    if (!turn.images || turn.images.length === 0) return turn
+    return { ...turn, images: turn.images.map(() => '[image]') }
+  })
+}
+
+/** Same shape for invocations — the `image` field on a tool result is
+ *  a full base64 data URL of a screenshot or generated image. */
+function sanitiseInvocationsForCheckpoint(invs: ToolInvocation[]): ToolInvocation[] {
+  return invs.map((inv) => (inv.image ? { ...inv, image: '[image]' } : inv))
+}
+
 function welcomeMessage(): ChatMessage {
   return {
     id: WELCOME_MESSAGE_ID,
@@ -714,7 +738,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             providerId: provider.id,
             modelId: effectiveModel,
             systemPrompt: system,
-            turns: baseTurns
+            turns: sanitiseTurnsForCheckpoint(baseTurns)
           })
           .catch((err) => {
             void vs.logs.write(
@@ -817,8 +841,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
           void vs.agentCheckpoint
             .update(requestId, {
               step: step + 1,
-              turns: [...turns],
-              invocations: [...invocations]
+              turns: sanitiseTurnsForCheckpoint(turns),
+              invocations: sanitiseInvocationsForCheckpoint(invocations)
             })
             .catch((err) => {
               void vs.logs.write(

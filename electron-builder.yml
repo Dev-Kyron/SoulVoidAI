@@ -21,12 +21,16 @@ files:
 asarUnpack:
   - resources/**
 
+# Stable artifact filenames so the marketing site can use the
+# /releases/latest/download/<filename> redirect without ever needing
+# an update. New version → same filenames → same direct URLs.
 win:
   target:
     - target: nsis
       arch:
         - x64
   icon: build/icon.png
+  artifactName: VoidSoul-Assistant-Setup.${ext}
 
 nsis:
   oneClick: false
@@ -37,11 +41,13 @@ mac:
   target: dmg
   category: public.app-category.productivity
   icon: build/icon.png
+  artifactName: VoidSoul-Assistant.${ext}
 
 linux:
   target: AppImage
   category: Utility
   icon: build/icon.png
+  artifactName: VoidSoul-Assistant.${ext}
 
 # Auto-update channel. electron-updater reads the same `publish` block at
 # runtime to know which `latest.yml` / `latest-mac.yml` / `latest-linux.yml`

@@ -177,6 +177,7 @@ function AddServerForm({ onAdd }: { onAdd: () => void }): JSX.Element {
   const [name, setName] = useState('')
   const [command, setCommand] = useState('')
   const [argsRaw, setArgsRaw] = useState('')
+  const [envRaw, setEnvRaw] = useState('')
   const [busy, setBusy] = useState(false)
 
   const submit = async (): Promise<void> => {
@@ -184,11 +185,21 @@ function AddServerForm({ onAdd }: { onAdd: () => void }): JSX.Element {
     setBusy(true)
     // Args input is a whitespace-separated string; quoted segments stay together.
     const args = parseArgs(argsRaw)
-    const created = await add({ name: name.trim(), command: command.trim(), args })
+    // Env input is a `KEY=value` per line list — let MCP servers that need
+    // secrets (API tokens, bot tokens) load them without putting the value
+    // in plain Args. Lines without `=` and blank lines are ignored.
+    const env = parseEnv(envRaw)
+    const created = await add({
+      name: name.trim(),
+      command: command.trim(),
+      args,
+      ...(Object.keys(env).length ? { env } : {})
+    })
     setBusy(false)
     setName('')
     setCommand('')
     setArgsRaw('')
+    setEnvRaw('')
     setOpen(false)
     onAdd()
     pushToast(
@@ -232,6 +243,13 @@ function AddServerForm({ onAdd }: { onAdd: () => void }): JSX.Element {
         placeholder='Args (e.g. -y @modelcontextprotocol/server-filesystem /path)'
         className={FIELD}
       />
+      <textarea
+        value={envRaw}
+        onChange={(e) => setEnvRaw(e.target.value)}
+        placeholder={'Env (optional, one KEY=value per line)\nDISCORD_BOT_TOKEN=...\nDISCORD_GUILD_ID=...'}
+        rows={3}
+        className={`${FIELD} resize-y font-mono`}
+      />
       <div className="flex gap-1.5">
         <button
           type="button"
@@ -263,6 +281,26 @@ function parseArgs(raw: string): string[] {
   let match: RegExpExecArray | null
   while ((match = re.exec(trimmed)) !== null) {
     out.push(match[1] ?? match[2])
+  }
+  return out
+}
+
+/**
+ * Parses a `KEY=value` per-line env block into the object shape the MCP
+ * connection layer wants. Lines without an `=` are ignored (so comments
+ * starting with `#` are silently dropped), blank lines are ignored, and
+ * the value side accepts `=` literals beyond the first split point.
+ */
+function parseEnv(raw: string): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const line of raw.split(/\r?\n/)) {
+    const trimmed = line.trim()
+    if (!trimmed || trimmed.startsWith('#')) continue
+    const eq = trimmed.indexOf('=')
+    if (eq <= 0) continue
+    const key = trimmed.slice(0, eq).trim()
+    const value = trimmed.slice(eq + 1).trim()
+    if (key) out[key] = value
   }
   return out
 }

@@ -40,13 +40,38 @@ const {
 } = require('@modelcontextprotocol/sdk/types.js')
 
 const API = 'https://discord.com/api/v10'
-const TOKEN = process.env.DISCORD_BOT_TOKEN
-const GUILD = process.env.DISCORD_GUILD_ID
+
+/**
+ * Config sources, in order of precedence:
+ *   1. CLI args  (--token X --guild Y)  — used when the host's MCP form
+ *      doesn't have an env field (VoidSoul's current shape).
+ *   2. Env vars  (DISCORD_BOT_TOKEN, DISCORD_GUILD_ID) — preferred when
+ *      the host supports it (anything that follows the MCP env: {} spec).
+ */
+function parseArgs() {
+  const out = {}
+  const argv = process.argv.slice(2)
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i]
+    if (a === '--token' && argv[i + 1]) {
+      out.token = argv[++i]
+    } else if (a === '--guild' && argv[i + 1]) {
+      out.guild = argv[++i]
+    }
+  }
+  return out
+}
+
+const cliArgs = parseArgs()
+const TOKEN = cliArgs.token || process.env.DISCORD_BOT_TOKEN
+const GUILD = cliArgs.guild || process.env.DISCORD_GUILD_ID
 
 if (!TOKEN || !GUILD) {
   console.error(
-    '[discord-mcp] DISCORD_BOT_TOKEN and DISCORD_GUILD_ID must both be set. ' +
-      'Configure them in VoidSoul → Settings → MCP Servers → (this server) → Env.'
+    '[discord-mcp] Bot token + guild id required.\n' +
+      '  Args form:  --token <BOT_TOKEN> --guild <GUILD_ID>\n' +
+      '  Env form:   DISCORD_BOT_TOKEN, DISCORD_GUILD_ID\n' +
+      'See tools/discord-mcp/README.md.'
   )
   process.exit(1)
 }

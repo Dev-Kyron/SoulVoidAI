@@ -83,7 +83,15 @@ export function createMainWindow(): BrowserWindow {
       sandbox: true,
       contextIsolation: true,
       nodeIntegration: false,
-      spellcheck: false
+      spellcheck: false,
+      // Default Chromium throttles timers / requestAnimationFrame in
+      // hidden BrowserWindows down to ~1Hz. That's catastrophic for the
+      // agent loop — when the user closes the panel and walks away,
+      // we WANT the loop to keep firing tool calls at full speed.
+      // Disabling background throttling keeps a hidden renderer running
+      // at normal pace, so a 30-step research task that takes 2 minutes
+      // visible takes 2 minutes hidden too.
+      backgroundThrottling: false
     }
   })
 

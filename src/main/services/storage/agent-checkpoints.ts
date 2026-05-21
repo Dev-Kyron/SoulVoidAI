@@ -186,6 +186,23 @@ export function finalizeCheckpoint(
 }
 
 /**
+ * Lightweight SELECT — every row currently at status='running', sorted
+ * newest-first. No side-effects. Used by the tray's progress poll which
+ * fires every few seconds and shouldn't trigger a full prune sweep that
+ * often.
+ */
+export function getRunningCheckpoints(): AgentCheckpoint[] {
+  const rows = db()
+    .prepare(
+      `SELECT * FROM agent_checkpoints
+       WHERE status = 'running'
+       ORDER BY updated_at DESC`
+    )
+    .all() as Row[]
+  return rows.map(rowToCheckpoint)
+}
+
+/**
  * Fetch every row still marked `running` on app boot — these are the
  * crash-recovery candidates. Sorted newest-first so the UI shows the
  * most recent first if the user has multiple unfinished loops.
@@ -197,6 +214,10 @@ export function finalizeCheckpoint(
  *      almost certainly crash artefacts the user no longer cares
  *      about. Without this, a user who crashes-and-ignores 50 times
  *      ends up with a 50-pill recovery banner on every launch.
+ *
+ * The boot-time variant of getRunningCheckpoints — same query, but
+ * paired with the prune so the panel-mount path is the natural place
+ * for the table to self-maintain.
  */
 export function listStaleRunning(): AgentCheckpoint[] {
   try {
@@ -217,14 +238,7 @@ export function listStaleRunning(): AgentCheckpoint[] {
       err instanceof Error ? err.message : String(err)
     )
   }
-  const rows = db()
-    .prepare(
-      `SELECT * FROM agent_checkpoints
-       WHERE status = 'running'
-       ORDER BY updated_at DESC`
-    )
-    .all() as Row[]
-  return rows.map(rowToCheckpoint)
+  return getRunningCheckpoints()
 }
 
 /** Single-checkpoint lookup. Used by the resume flow once the user picks one. */

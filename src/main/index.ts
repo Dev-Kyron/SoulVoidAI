@@ -7,7 +7,7 @@
  */
 import { app, BrowserWindow, globalShortcut, session } from 'electron'
 import { createMainWindow, getWindow, showWindow } from './window'
-import { createTray } from './tray'
+import { createTray, startAgentProgressPolling, stopAgentProgressPolling } from './tray'
 import { registerIpc, applyAppearance, disposeIpc } from './ipc'
 import { getConfig } from './services/storage/config'
 import { loadPlugins } from './services/plugins/plugins'
@@ -48,6 +48,11 @@ if (!app.requestSingleInstanceLock()) {
     registerIpc()
     createMainWindow()
     createTray()
+    // Headless agent-progress feed — reads agent_checkpoints every 4s
+    // and reflects live runs on the tray tooltip + menu. Keeps the user
+    // informed even when the panel is hidden, which is the whole point
+    // of letting the loop run with backgroundThrottling disabled.
+    startAgentProgressPolling()
     applyAppearance(getConfig().appearance)
 
     // Microphone capture is gated on VoidSoul's own "microphone" permission.
@@ -131,6 +136,7 @@ if (!app.requestSingleInstanceLock()) {
     if (shuttingDown) return
     shuttingDown = true
     stopScreenAwareness()
+    stopAgentProgressPolling()
     disposeScheduler()
     event.preventDefault()
     const FLUSH_BUDGET_MS = 1500

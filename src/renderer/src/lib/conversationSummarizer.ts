@@ -260,10 +260,13 @@ export async function compactTurnsIfNeeded(
   // tentative boundary until we land BEFORE an assistant-with-toolCalls
   // turn (so the older bucket holds complete cycles).
   let splitAt = turns.length - KEEP_RECENT_TURNS
-  while (splitAt < turns.length - 1) {
+  // Explicit lower-bound guard so a pathological turns array (e.g. every
+  // assistant turn has tool calls) can't drive splitAt past 0 and start
+  // reading turns[-1]. If we ever reach splitAt === 0 the older bucket
+  // would be empty anyway, which the post-loop length check handles.
+  while (splitAt > 0 && splitAt < turns.length - 1) {
     const onBoundary = turns[splitAt - 1]
     if (
-      onBoundary &&
       onBoundary.role === 'assistant' &&
       onBoundary.toolCalls &&
       onBoundary.toolCalls.length > 0

@@ -16,12 +16,22 @@ import {
 } from './window'
 import { getConfig, getClientConfig, setAppearance, updateConfig } from './services/storage/config'
 import { getMemory } from './services/storage/memory'
+import { getRunningCheckpoints } from './services/storage/agent-checkpoints'
 import { MODES } from '@shared/modes'
-import { isQuietNow } from '@shared/types'
+import { isQuietNow, type AgentCheckpoint } from '@shared/types'
 import { broadcast } from './events'
 import { beginQuit } from './lifecycle'
 
 let tray: Tray | null = null
+/** Snapshot of agent runs at the last poll — drives tooltip + menu copy. */
+let agentRuns: AgentCheckpoint[] = []
+let agentPollTimer: NodeJS.Timeout | null = null
+
+/** Tray-poll cadence. 4 seconds is fast enough that the user sees the
+ *  step counter tick visibly while they're watching, slow enough that
+ *  the SQLite SELECT + tray menu rebuild doesn't add measurable
+ *  background CPU. */
+const AGENT_POLL_INTERVAL_MS = 4000
 
 /** Pushes the latest ClientConfig to every open renderer + refreshes the tray. */
 function emitConfigChange(): void {
@@ -89,6 +99,39 @@ function quickPromptsSubmenu(): MenuItemConstructorOptions[] {
   ]
 }
 
+/**
+ * Trims a checkpoint's first-user-turn down to a short tray-menu label.
+ * The tray menu is narrow; keep snippets ≤ 50 chars including the
+ * "Agent: " prefix the caller adds.
+ */
+function taskSnippet(cp: AgentCheckpoint): string {
+  const first = cp.turns.find((t) => t.role === 'user' && t.content)
+  const text = first?.content?.replace(/\s+/g, ' ').trim() ?? 'task'
+  return text.length > 42 ? `${text.slice(0, 39)}…` : text
+}
+
+/**
+ * Builds the "Agent activity" section of the menu — one disabled label
+ * per running checkpoint. Returns an empty array when nothing is in
+ * flight so the menu doesn't get cluttered with a hollow header.
+ */
+function agentActivityItems(): MenuItemConstructorOptions[] {
+  if (agentRuns.length === 0) return []
+  const items: MenuItemConstructorOptions[] = []
+  for (const cp of agentRuns) {
+    items.push({
+      label: `⚙ step ${cp.step} — ${taskSnippet(cp)}`,
+      enabled: false
+    })
+  }
+  items.push({
+    label: agentRuns.length === 1 ? 'Open the panel to follow' : 'Open the panel to follow runs',
+    click: () => showWindow()
+  })
+  items.push({ type: 'separator' as const })
+  return items
+}
+
 function buildMenu(): Menu {
   const visible = getWindow()?.isVisible() ?? false
   const config = getConfig()
@@ -105,6 +148,10 @@ function buildMenu(): Menu {
     { label: 'VoidSoul Assistant', enabled: false },
     { label: `Mode: ${activeMode}`, enabled: false },
     { type: 'separator' },
+    // Live agent runs — surfaces between the header and the show/hide so a
+    // user with a long task running sees its progress at a glance without
+    // opening the panel.
+    ...agentActivityItems(),
     {
       label: visible ? 'Hide widget' : 'Show widget',
       click: () => toggleWindow()
@@ -193,4 +240,64 @@ export function createTray(): Tray {
 
 export function refreshTray(): void {
   tray?.setContextMenu(buildMenu())
+}
+
+/* ------------------------- agent progress polling -------------------------
+ *
+ * Periodically reads the agent_checkpoints table and reflects any
+ * `running` rows on the tray. Pure pull-based design — the renderer
+ * doesn't push events; the tray reads the persisted state directly.
+ * This keeps the tray correct even when the panel is hidden + the
+ * agent loop is running headless (the whole point of B4).
+ *
+ * Change-detection: only updates the tooltip / rebuilds the menu when
+ * the (requestId, step) tuples actually changed since the last tick,
+ * so an idle app burns ~zero CPU on the poll.
+ * --------------------------------------------------------------------------
+ */
+
+function agentStateSignature(runs: AgentCheckpoint[]): string {
+  return runs.map((r) => `${r.requestId}:${r.step}`).join('|')
+}
+
+function tooltipFor(runs: AgentCheckpoint[]): string {
+  if (runs.length === 0) return 'VoidSoul Assistant'
+  if (runs.length === 1) return `VoidSoul · agent step ${runs[0].step}`
+  return `VoidSoul · ${runs.length} agent runs (latest step ${runs[0].step})`
+}
+
+function pollAgentProgress(): void {
+  if (!tray) return
+  let next: AgentCheckpoint[]
+  try {
+    next = getRunningCheckpoints()
+  } catch {
+    // Best-effort. If the DB read fails for any reason, leave the tray
+    // showing the last known state rather than thrashing the menu.
+    return
+  }
+  if (agentStateSignature(next) === agentStateSignature(agentRuns)) return
+  agentRuns = next
+  tray.setToolTip(tooltipFor(next))
+  refreshTray()
+}
+
+/**
+ * Starts the periodic poll. Idempotent — calling twice doesn't stack
+ * timers. `.unref()` on the interval handle so a phantom running loop
+ * doesn't block app quit if the cleanup path forgets to stop it.
+ */
+export function startAgentProgressPolling(): void {
+  if (agentPollTimer) return
+  // Run once immediately so the first poll happens at boot, not 4s later.
+  pollAgentProgress()
+  agentPollTimer = setInterval(pollAgentProgress, AGENT_POLL_INTERVAL_MS)
+  agentPollTimer.unref?.()
+}
+
+export function stopAgentProgressPolling(): void {
+  if (agentPollTimer) {
+    clearInterval(agentPollTimer)
+    agentPollTimer = null
+  }
 }

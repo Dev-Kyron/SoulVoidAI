@@ -229,10 +229,22 @@ function buildTurnTranscript(turns: ChatTurn[]): string {
  * @param isLocal    whether the model runs locally (used for capability
  *                   resolution; doesn't affect context window choice)
  */
+/**
+ * Optional provider override used by the summariser. Lets the agent
+ * loop tell the compactor "use the same provider the router picked"
+ * instead of falling back to config.activeProvider — which may not
+ * even have a key, depending on the routing decision.
+ */
+export interface SummariserProviderOverride {
+  providerId: string
+  modelId: string
+}
+
 export async function compactTurnsIfNeeded(
   turns: ChatTurn[],
   modelId: string,
-  isLocal: boolean
+  isLocal: boolean,
+  providerOverride?: SummariserProviderOverride
 ): Promise<{ turns: ChatTurn[]; compacted: boolean }> {
   if (turns.length <= KEEP_RECENT_TURNS) return { turns, compacted: false }
 
@@ -241,10 +253,34 @@ export async function compactTurnsIfNeeded(
   const estimated = estimateTurnTokens(turns)
   if (estimated < budget) return { turns, compacted: false }
 
-  const older = turns.slice(0, turns.length - KEEP_RECENT_TURNS)
-  const recent = turns.slice(turns.length - KEEP_RECENT_TURNS)
+  // Find a clean split point — never separate an assistant turn that
+  // has tool calls from its matching tool-result turn, or both
+  // Anthropic and OpenAI reject the next provider call with an orphan
+  // tool_use / dangling tool_call_id error. Walk forward from the
+  // tentative boundary until we land BEFORE an assistant-with-toolCalls
+  // turn (so the older bucket holds complete cycles).
+  let splitAt = turns.length - KEEP_RECENT_TURNS
+  while (splitAt < turns.length - 1) {
+    const onBoundary = turns[splitAt - 1]
+    if (
+      onBoundary &&
+      onBoundary.role === 'assistant' &&
+      onBoundary.toolCalls &&
+      onBoundary.toolCalls.length > 0
+    ) {
+      // The previous turn was an assistant emitting tool calls — the
+      // CURRENT turn at splitAt is its tool-result match. Pull the
+      // split forward by one so both stay together in recent[].
+      splitAt -= 1
+      continue
+    }
+    break
+  }
+  const older = turns.slice(0, splitAt)
+  const recent = turns.slice(splitAt)
+  if (older.length === 0) return { turns, compacted: false }
 
-  const recap = await summarizeAgentTurns(older)
+  const recap = await summarizeAgentTurns(older, providerOverride)
   if (!recap) {
     // Summariser declined — pass through unchanged. The next provider call
     // may or may not overflow; if it does, the existing error surfaces.
@@ -274,12 +310,23 @@ export async function compactTurnsIfNeeded(
  * Summarises agent-loop turns into a compact recap. Mirrors
  * `summarizeOlderTurns` but reads from ChatTurn[] (the agent's working
  * shape) rather than ChatMessage[] (the renderer's display shape).
+ *
+ * Provider resolution preference (first usable wins):
+ *   1. `override.providerId` — what the router picked for THIS loop
+ *      (so we don't try to summarise via a provider whose key the
+ *      user doesn't actually have configured).
+ *   2. `config.activeProvider` — the user's global default. Fallback
+ *      for callers that don't pass an override.
  */
-async function summarizeAgentTurns(turns: ChatTurn[]): Promise<string | null> {
+async function summarizeAgentTurns(
+  turns: ChatTurn[],
+  override?: SummariserProviderOverride
+): Promise<string | null> {
   if (lock.isLocked) return null
   const config = useConfigStore.getState().config
   if (!config) return null
-  const provider = config.providers.find((p) => p.id === config.activeProvider)
+  const targetId = override?.providerId ?? config.activeProvider
+  const provider = config.providers.find((p) => p.id === targetId)
   if (!provider) return null
   if (provider.needsKey && !provider.hasKey) return null
 

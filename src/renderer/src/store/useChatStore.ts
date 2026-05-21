@@ -737,10 +737,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
         // invoke. No-op when we're well under the budget — cheap
         // token estimate gates the actual LLM call so the per-step
         // overhead is just a character count on the turns array.
+        //
+        // Provider override is the ROUTED-TO provider, not
+        // config.activeProvider. Stops the summariser from picking
+        // a provider whose key the user doesn't have configured
+        // when the router has moved this loop to a different one.
         const compaction = await compactTurnsIfNeeded(
           turns,
           effectiveModel,
-          !provider.needsKey
+          !provider.needsKey,
+          { providerId: provider.id, modelId: effectiveModel }
         )
         if (compaction.compacted) {
           turns.splice(0, turns.length, ...compaction.turns)
@@ -1168,22 +1174,39 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   resumeFromCheckpoint: async (checkpoint) => {
-    // Switch to the checkpoint's thread. Same path as switchThread but
-    // skips the "is streaming" guard — a stale checkpoint by definition
-    // belongs to a previous session, so the current streaming state
-    // is unrelated.
+    // Don't trample an active reply. The checkpoint itself is from a
+    // previous session, but the user could plausibly click Resume
+    // while a fresh chat is mid-stream in the current session —
+    // surface a toast and skip rather than orphaning the live request.
     const state = get()
+    if (state.streaming) {
+      useUiStore.getState().pushToast('info', CHAT_STRINGS.waitForStream)
+      return
+    }
+    // Switch to the checkpoint's thread if it still exists in the
+    // sidebar. If the user deleted the thread between sessions, we
+    // can't usefully resume — show a friendly error instead of
+    // silently materialising a blank chat.
+    const target = state.threads.find((t) => t.id === checkpoint.threadId)
+    if (!target) {
+      useUiStore
+        .getState()
+        .pushToast(
+          'error',
+          'Original thread was deleted — resume not possible. Discarding checkpoint.'
+        )
+      void vs.agentCheckpoint.delete(checkpoint.requestId).catch(() => {
+        /* best-effort */
+      })
+      return
+    }
     if (state.activeThreadId !== checkpoint.threadId) {
       const messages = await vs.history.getMessages(checkpoint.threadId)
-      const target = state.threads.find((t) => t.id === checkpoint.threadId)
       flushPendingSave(state.activeThreadId)
       set({
         activeThreadId: checkpoint.threadId,
-        messages:
-          messages.length > 0
-            ? messages
-            : [welcomeMessage()],
-        summary: target?.summary ?? null,
+        messages: messages.length > 0 ? messages : [welcomeMessage()],
+        summary: target.summary ?? null,
         attachments: [],
         modelOverride: null
       })
@@ -1210,7 +1233,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // contains the partial assistant output + every tool call & result
     // from before the crash, so the model has everything it needs to
     // pick up from where the previous loop stopped.
-    await get().send('Continue from where you left off.')
+    //
+    // When the previous loop hadn't yet completed any tool calls (the
+    // crash happened during the very first invoke), the "continue"
+    // prompt would land on a thread with no recent agent context and
+    // the model would re-answer the original prompt as if fresh.
+    // Include the step number as a hint so the model knows we're
+    // resuming partway through — minor but reduces the chance of a
+    // bland restart-from-scratch answer.
+    const hadProgress = checkpoint.step > 0 || checkpoint.invocations.length > 0
+    const resumePrompt = hadProgress
+      ? `Continue from where you left off (resumed after step ${checkpoint.step}).`
+      : 'Continue with the task you started.'
+    await get().send(resumePrompt)
   },
 
   renameThread: async (id, title) => {

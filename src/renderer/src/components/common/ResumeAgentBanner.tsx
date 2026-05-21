@@ -36,6 +36,24 @@ function formatAge(updatedAt: string): string {
   return `${Math.floor(diffSec / 86400)}d ago`
 }
 
+/**
+ * Extracts a short, single-line preview of the task the agent was
+ * working on. Reads the FIRST user-role turn — that's the original
+ * prompt that kicked off the agent loop. Tool-result turns and the
+ * synthetic "here is a screenshot" follow-ups are skipped so the
+ * preview reads as the actual user intent.
+ */
+function taskSnippet(checkpoint: { turns?: { role: string; content: string }[] }): string {
+  const firstUser = checkpoint.turns?.find(
+    (t) => t.role === 'user' && t.content && t.content.length > 4
+  )
+  if (!firstUser) return 'Untitled task'
+  const oneLine = firstUser.content
+    .replace(/\s+/g, ' ')
+    .trim()
+  return oneLine.length > 70 ? `${oneLine.slice(0, 67)}…` : oneLine
+}
+
 function CheckpointPill({ checkpoint }: { checkpoint: AgentCheckpoint }): JSX.Element {
   const removeStale = useUiStore((s) => s.removeStaleCheckpoint)
   const pushToast = useUiStore((s) => s.pushToast)
@@ -70,18 +88,21 @@ function CheckpointPill({ checkpoint }: { checkpoint: AgentCheckpoint }): JSX.El
   }
 
   return (
-    <div className="flex items-center gap-2 rounded-md border border-emerald-400/30 bg-emerald-500/5 px-2.5 py-1.5">
-      <RefreshCcw size={12} className="flex-none text-emerald-400" />
-      <p className="min-w-0 flex-1 truncate text-[11px] text-slate-200">
-        Stopped at step {checkpoint.step} ·{' '}
-        <span className="text-slate-500">{checkpoint.modelId}</span>
-        <span className="ml-1.5 text-slate-500">· {formatAge(checkpoint.updatedAt)}</span>
-      </p>
+    <div className="flex items-start gap-2 rounded-md border border-emerald-400/30 bg-emerald-500/5 px-2.5 py-1.5">
+      <RefreshCcw size={12} className="mt-0.5 flex-none text-emerald-400" />
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-[11px] font-medium text-slate-200">
+          {taskSnippet(checkpoint)}
+        </p>
+        <p className="truncate text-[10px] text-slate-500">
+          step {checkpoint.step} · {checkpoint.modelId} · {formatAge(checkpoint.updatedAt)}
+        </p>
+      </div>
       <button
         type="button"
         onClick={() => void onResume()}
         disabled={busy}
-        className="flex items-center gap-1 rounded bg-emerald-500/20 px-2 py-0.5 text-[10px] font-semibold text-emerald-300 transition-colors hover:bg-emerald-500/30 disabled:opacity-40"
+        className="flex flex-none items-center gap-1 rounded bg-emerald-500/20 px-2 py-0.5 text-[10px] font-semibold text-emerald-300 transition-colors hover:bg-emerald-500/30 disabled:opacity-40"
       >
         <Play size={9} fill="currentColor" />
         Resume
@@ -90,7 +111,7 @@ function CheckpointPill({ checkpoint }: { checkpoint: AgentCheckpoint }): JSX.El
         type="button"
         onClick={() => void onDiscard()}
         disabled={busy}
-        className="rounded p-0.5 text-slate-400 transition-colors hover:bg-white/5 hover:text-slate-200 disabled:opacity-40"
+        className="flex-none rounded p-0.5 text-slate-400 transition-colors hover:bg-white/5 hover:text-slate-200 disabled:opacity-40"
         aria-label="Discard"
       >
         <X size={11} />

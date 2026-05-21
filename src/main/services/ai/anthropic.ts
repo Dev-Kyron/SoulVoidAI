@@ -1,7 +1,7 @@
 /**
  * Anthropic Claude provider (Messages API, streaming).
  */
-import { readSSE, httpError, invokeAbortSignal } from './stream'
+import { readSSE, httpError, invokeAbortSignal, rethrowAsTimeout } from './stream'
 import { ProviderError } from './types'
 import type { AIProvider, CompletionOptions, CompletionResult, InvokeOptions } from './types'
 import type { ChatTurn } from '@shared/types'
@@ -145,7 +145,8 @@ export const anthropicProvider: AIProvider = {
       method: 'POST',
       // Combines the user's Stop signal with a 120s wall-clock cap so a
       // hung provider can't lock up the agent loop. AbortSignal.timeout
-      // emits an `AbortError` named TimeoutError if it fires solo.
+      // emits a TimeoutError; rethrowAsTimeout converts that to a clear
+      // user-readable message instead of the cryptic native string.
       signal: invokeAbortSignal(opts.signal),
       headers: {
         'Content-Type': 'application/json',
@@ -153,7 +154,7 @@ export const anthropicProvider: AIProvider = {
         'anthropic-version': '2023-06-01'
       },
       body: JSON.stringify(body)
-    })
+    }).catch((err) => rethrowAsTimeout(err, 'Anthropic'))
     if (!res.ok) throw await httpError(res, 'Anthropic')
 
     const json = (await res.json()) as {

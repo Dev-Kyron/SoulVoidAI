@@ -175,8 +175,18 @@ const STRONG_REASONING_PATTERNS: RegExp[] = [
 /* ---------------------------- context window --------------------------- */
 
 /**
- * Per-family context window in tokens. Order matters — earliest match
- * wins, so list more specific patterns first.
+ * Per-family context window in tokens.
+ *
+ * ⚠ ORDER MATTERS — earliest pattern that matches wins. List more
+ * specific patterns BEFORE the general family pattern, e.g.:
+ *   { pattern: /^gpt-4o-mini-2025/, tokens: ... }   ← specific first
+ *   { pattern: /^gpt-4o-mini/,      tokens: 128_000 }
+ *   { pattern: /^gpt-4o/,           tokens: 128_000 } ← general last
+ *
+ * When adding a new family with a larger / smaller variant, drop the
+ * narrow pattern at the top of its section, not the bottom. Otherwise
+ * the general family pattern absorbs the narrow case and your variant
+ * silently inherits the parent's number.
  */
 const CONTEXT_WINDOW: Array<{ pattern: RegExp; tokens: number }> = [
   // Anthropic 1M-context variants

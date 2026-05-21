@@ -95,15 +95,21 @@ function rowToCheckpoint(row: Row): AgentCheckpoint {
  * stamped status='running'; subsequent step updates only touch the
  * mutable fields (step, turns_json, invocations_json, updated_at).
  *
- * Uses INSERT OR REPLACE so a runaway retry (e.g. the agent loop is
- * re-entered with the same requestId after a transient failure)
- * doesn't error on the unique constraint — it just resets the row.
+ * Uses INSERT OR IGNORE rather than INSERT OR REPLACE so a second
+ * create with the same requestId can't accidentally resurrect a row
+ * that has already been finalised. If that race ever happens (e.g.
+ * a runaway resume re-using a stale requestId), the second create is
+ * silently dropped and the existing terminal status survives.
+ *
+ * UUID requestIds collide with cosmological-event probability, so the
+ * "two creates" scenario almost only matters for retry loops in dev,
+ * where the safer behaviour is "leave the old row alone".
  */
 export function createCheckpoint(input: AgentCheckpointCreate): void {
   const now = new Date().toISOString()
   db()
     .prepare(
-      `INSERT OR REPLACE INTO agent_checkpoints
+      `INSERT OR IGNORE INTO agent_checkpoints
          (request_id, thread_id, user_message_id, assistant_message_id,
           provider_id, model_id, system_prompt, turns_json,
           invocations_json, step, status, failure, created_at, updated_at)
@@ -184,23 +190,30 @@ export function finalizeCheckpoint(
  * crash-recovery candidates. Sorted newest-first so the UI shows the
  * most recent first if the user has multiple unfinished loops.
  *
- * Side-effect: lazily prunes terminal rows older than 30 days so the
- * table doesn't accumulate. Best-effort; failures don't block reads.
+ * Side-effects (best-effort; failures don't block the read):
+ *   1. Prune terminal rows older than 30 days so the table doesn't
+ *      grow forever from completed history.
+ *   2. Prune `running` rows older than 7 days as phantoms — these are
+ *      almost certainly crash artefacts the user no longer cares
+ *      about. Without this, a user who crashes-and-ignores 50 times
+ *      ends up with a 50-pill recovery banner on every launch.
  */
 export function listStaleRunning(): AgentCheckpoint[] {
   try {
-    const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
+    const terminalCutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
+    const phantomCutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
     db()
       .prepare(
         `DELETE FROM agent_checkpoints
-         WHERE status != 'running' AND updated_at < ?`
+         WHERE (status != 'running' AND updated_at < @terminalCutoff)
+            OR (status = 'running' AND updated_at < @phantomCutoff)`
       )
-      .run(cutoff)
+      .run({ terminalCutoff, phantomCutoff })
   } catch (err) {
     log(
       'warn',
       'system',
-      'agent-checkpoints: pruning of old terminal rows failed',
+      'agent-checkpoints: pruning sweep failed',
       err instanceof Error ? err.message : String(err)
     )
   }

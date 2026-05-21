@@ -29,6 +29,25 @@ export function invokeAbortSignal(userSignal: AbortSignal | undefined, ms = INVO
   return userSignal ? AbortSignal.any([userSignal, timeout]) : timeout
 }
 
+/**
+ * Re-throws a friendlier message if the fetch error was caused by
+ * `AbortSignal.timeout` rather than the user's Stop button. The native
+ * error reads "signal is aborted without reason" which means nothing
+ * to a user staring at a stuck agent run; this gives them an actionable
+ * line. Pass-through for any other error.
+ */
+export function rethrowAsTimeout(err: unknown, providerLabel: string, ms = INVOKE_TIMEOUT_MS): never {
+  // DOMException with name='TimeoutError' is the standard signal from
+  // AbortSignal.timeout. A user-driven Stop produces name='AbortError'
+  // instead, which we let bubble up unchanged.
+  if (err instanceof Error && err.name === 'TimeoutError') {
+    throw new Error(
+      `${providerLabel} request timed out after ${Math.round(ms / 1000)}s — the provider may be overloaded or the model is too slow. Try a faster model or check the provider status.`
+    )
+  }
+  throw err
+}
+
 /** Yields the response body one text line at a time (CRLF tolerant). */
 export async function* readLines(
   body: ReadableStream<Uint8Array>

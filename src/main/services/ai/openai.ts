@@ -2,7 +2,7 @@
  * OpenAI Chat Completions provider (also compatible with OpenAI-style
  * endpoints via a custom base URL).
  */
-import { readSSE, httpError, parseToolArgs, readJsonOrError, invokeAbortSignal } from './stream'
+import { readSSE, httpError, parseToolArgs, readJsonOrError, invokeAbortSignal, rethrowAsTimeout } from './stream'
 import { ProviderError } from './types'
 import type { AIProvider, CompletionOptions, CompletionResult, InvokeOptions } from './types'
 import type { ChatTurn } from '@shared/types'
@@ -107,11 +107,12 @@ export const openaiProvider: AIProvider = {
     const res = await fetch(`${opts.baseUrl}/v1/chat/completions`, {
       method: 'POST',
       // 120s cap combined with the user's Stop signal — prevents a hung
-      // provider from blocking the agent loop indefinitely.
+      // provider from blocking the agent loop indefinitely. rethrowAsTimeout
+      // turns the cryptic AbortError into a clear user-facing message.
       signal: invokeAbortSignal(opts.signal),
       headers: authHeaders(opts.apiKey),
       body: JSON.stringify(body)
-    })
+    }).catch((err) => rethrowAsTimeout(err, 'OpenAI'))
     if (!res.ok) throw await httpError(res, 'OpenAI')
 
     const json = await readJsonOrError<{

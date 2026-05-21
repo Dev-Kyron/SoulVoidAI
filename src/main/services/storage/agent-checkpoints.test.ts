@@ -137,7 +137,7 @@ describe.skipIf(!RUN)('agent-checkpoints', () => {
     expect(mod.getCheckpoint('req-1')).toBeNull()
   })
 
-  it('createCheckpoint is idempotent — same requestId resets the row', async () => {
+  it('createCheckpoint is a no-op when the requestId already exists', async () => {
     const mod = await loadFresh()
     mod.createCheckpoint(makeCreate())
     mod.updateCheckpoint('req-1', {
@@ -145,13 +145,14 @@ describe.skipIf(!RUN)('agent-checkpoints', () => {
       turns: [{ role: 'user', content: 'partway' }],
       invocations: []
     })
-    // Re-create with the same requestId — replaces the row, resetting step to 0.
-    // This protects against a runaway resume that re-enters create() with
-    // an existing requestId.
+    mod.finalizeCheckpoint('req-1', 'completed')
+    // Second create with the same requestId is silently dropped — the
+    // existing terminal row survives. Prevents a stale resume from
+    // resurrecting a finished row back to 'running'.
     mod.createCheckpoint(makeCreate())
     const cp = mod.getCheckpoint('req-1')
-    expect(cp!.step).toBe(0)
-    expect(cp!.status).toBe('running')
+    expect(cp!.step).toBe(7)
+    expect(cp!.status).toBe('completed')
   })
 
   it('safely degrades when persisted JSON is corrupt', async () => {

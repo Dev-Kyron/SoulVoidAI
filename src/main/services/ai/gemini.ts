@@ -1,7 +1,7 @@
 /**
  * Google Gemini provider (Generative Language API, SSE streaming).
  */
-import { readSSE, httpError, invokeAbortSignal } from './stream'
+import { readSSE, httpError, invokeAbortSignal, rethrowAsTimeout } from './stream'
 import { ProviderError } from './types'
 import type { AIProvider, CompletionOptions, CompletionResult, InvokeOptions } from './types'
 import type { ChatTurn } from '@shared/types'
@@ -118,11 +118,12 @@ export const geminiProvider: AIProvider = {
     const res = await fetch(`${opts.baseUrl}/v1beta/models/${opts.model}:generateContent`, {
       method: 'POST',
       // 120s wall-clock cap combined with the user's Stop signal —
-      // matches Anthropic + OpenAI invoke behaviour.
+      // matches Anthropic + OpenAI invoke behaviour. rethrowAsTimeout
+      // turns the cryptic AbortError into a clear message.
       signal: invokeAbortSignal(opts.signal),
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': opts.apiKey },
       body: JSON.stringify(body)
-    })
+    }).catch((err) => rethrowAsTimeout(err, 'Gemini'))
     if (!res.ok) throw await httpError(res, 'Gemini')
 
     const json = (await res.json()) as {

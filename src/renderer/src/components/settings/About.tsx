@@ -76,7 +76,7 @@ export function About(): JSX.Element {
             label="View source"
             onClick={() => openUrl(REPO_URL)}
             external
-            hint="MIT-licensed on GitHub."
+            hint="Source available on GitHub for transparency."
           />
           <ActionButton
             icon={<Heart size={12} />}

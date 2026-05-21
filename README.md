@@ -7,7 +7,7 @@
 A floating, always-on AI desktop assistant that talks, listens, sees your screen, drives your mouse, opens your apps, edits your files, and remembers every conversation.
 Bring whichever AI you already love — **12 providers, one interface** — and give it a body.
 
-[Download](https://github.com/Dev-Kyron/SoulVoidAI/releases) · [Privacy](PRIVACY.md) · [Terms](TERMS.md) · [Report an issue](https://github.com/Dev-Kyron/SoulVoidAI/issues/new)
+[**Download**](https://github.com/Dev-Kyron/SoulVoidAI/releases) · [Privacy](PRIVACY.md) · [Terms](TERMS.md) · [Report an issue](https://github.com/Dev-Kyron/SoulVoidAI/issues/new)
 
 </div>
 
@@ -124,27 +124,19 @@ OpenAI · Anthropic · Gemini · **Ollama** · **LM Studio** · **llama.cpp** ·
 
 ---
 
-## 🚀 Quick start
+## 🚀 Get started
 
 ### Download
 
-Grab the latest installer from the [Releases page](https://github.com/Dev-Kyron/SoulVoidAI/releases) — Windows `.exe`, macOS `.dmg`, or Linux `.AppImage`.
+Grab the latest installer from the [**Releases page**](https://github.com/Dev-Kyron/SoulVoidAI/releases):
 
-> First-launch heads-up: Windows SmartScreen may flag an unsigned indie binary. Click **More info → Run anyway** to install. macOS users: right-click the `.dmg` → **Open** the first time. Signed builds are on the roadmap once initial revenue covers the cert.
+- **Windows** — `VoidSoul Assistant Setup *.exe` (NSIS installer)
+- **macOS** — `VoidSoul Assistant-*.dmg`
+- **Linux** — `VoidSoul Assistant-*.AppImage`
 
-### Or run from source
+Updates arrive **automatically** — VoidSoul checks GitHub Releases on boot and notifies you when a new version is ready. Settings → About → *Check for updates* triggers a manual check.
 
-```bash
-git clone https://github.com/Dev-Kyron/SoulVoidAI.git
-cd SoulVoidAI
-npm install
-npm run icons     # generate orb / tray icons
-npm run dev       # boot the app with HMR
-```
-
-**Prerequisites:** Node 20.18+ (CI runs 22) and platform build tools for `better-sqlite3` (`Python 3.11` + "Desktop development with C++" on Windows).
-
-A glowing orb appears bottom-right of your screen. Click it to expand the command panel; it also lives in your system tray.
+> First-launch heads-up: Windows SmartScreen may flag the installer because it's not yet code-signed. Click **More info → Run anyway** to install. macOS users: right-click the `.dmg` → **Open** the first time. Code-signed builds land once the initial-release budget covers the certificate.
 
 ### First boot
 
@@ -153,16 +145,6 @@ A glowing orb appears bottom-right of your screen. Click it to expand the comman
 3. Either install **Ollama** ([ollama.com/download](https://ollama.com/download)) and VoidSoul auto-detects it for free local chat, or paste a provider key in **Settings → AI Providers**
 
 That's it. The orb is alive.
-
-### Build & package
-
-```bash
-npm run build          # typecheck + bundle to ./out
-npm run package        # build unpacked app into ./release
-npm run dist           # full installer (NSIS / DMG / AppImage)
-npm run typecheck      # strict TS across main + renderer + shared
-npm test               # vitest suite (147+ tests)
-```
 
 ---
 
@@ -244,7 +226,7 @@ Tested out of the box with:
 
 - 🗂️ **Filesystem** — search, read, write, list (14 tools)
 - 🐙 **GitHub** — issues, PRs, commits, gists, search (26 tools)
-- 🎮 **Unreal Engine 5** — custom bridge included in [`tools/ue5-mcp-bridge/`](tools/ue5-mcp-bridge/)
+- 🎮 **Unreal Engine 5** — custom bridge bundled with the install
 
 ---
 
@@ -388,83 +370,13 @@ Use the official apps for their sandboxed exploration. Use VoidSoul when you wan
 
 ---
 
-## 🏗️ Architecture
-
-**Stack**
-
-| Layer | Choice |
-|---|---|
-| Desktop shell | Electron 33 |
-| Build tooling | electron-vite · Vite 5 |
-| UI | React 18 · TypeScript strict · TailwindCSS · Framer Motion |
-| State | Zustand |
-| Storage | SQLite (better-sqlite3) + atomic JSON |
-| AI providers | 12 — unified behind one `AIProvider` interface |
-| Embeddings | Local `Xenova/all-MiniLM-L6-v2` (worker), or OpenAI / Ollama |
-| Markdown | react-markdown + remark-gfm + remark-math + rehype-katex + mermaid + highlight.js |
-| OCR | tesseract.js (WASM) |
-| MCP | `@modelcontextprotocol/sdk` |
-| Auto-update | electron-updater + GitHub Releases |
-| Tests | Vitest, 147+ tests, CI on Windows + macOS + Linux |
-
-**Three processes, one contract.** `src/shared/` holds the types. The preload exposes a single typed `window.voidsoul` bridge; the renderer never touches Node, the network, or the filesystem directly.
-
-**Modular services.** Each `src/main/services/*` folder is self-contained. Adding a provider, an action, or a memory layer means adding a file — not editing a monolith.
-
-```
-SoulVoidAI/
-├─ electron.vite.config.ts
-├─ electron-builder.yml          publish: github (Dev-Kyron/SoulVoidAI)
-├─ .github/workflows/
-│  ├─ ci.yml                     typecheck + tests + build on push/PR
-│  └─ release.yml                publish to GitHub Releases on v* tag
-├─ src/
-│  ├─ shared/                    types · bridge · permissions · modes · model capabilities · locales
-│  ├─ main/
-│  │  ├─ index.ts · window.ts · tray.ts · events.ts
-│  │  ├─ ipc/                    typed IPC surface
-│  │  └─ services/
-│  │     ├─ ai/                  provider gateway · 12 implementations · local-daemon detection
-│  │     ├─ automation/          permission-gated action engine · undo · 18 tools
-│  │     ├─ screen/              screenshot · OCR · active window · screen awareness
-│  │     ├─ storage/             config · keys · memory · history (SQLite) · sync (v6 bundle)
-│  │     ├─ embeddings/          RAG store · local-first via Transformers.js worker
-│  │     ├─ files-rag/           folder watcher · chunker · pdf/docx parsers
-│  │     ├─ mcp/                 MCP client + manager + per-server connection
-│  │     ├─ scheduler/           cron-style scheduled prompts
-│  │     ├─ usage/               metered call log · pricing · budget alerts
-│  │     ├─ updater/             electron-updater wrapper · GitHub Releases
-│  │     ├─ notebook/            cell runner
-│  │     ├─ permissions/         enforcement
-│  │     ├─ share/               save-to-file · GitHub gist upload
-│  │     └─ logger.ts            persisted activity log
-│  ├─ preload/                   contextBridge → window.voidsoul
-│  └─ renderer/
-│     └─ src/
-│        ├─ components/
-│        │  ├─ widget/           floating orb · panel shell
-│        │  ├─ panel/            nexus HUD · QuickAI · canvas · overlays · onboarding
-│        │  ├─ chat/             composer · view · message bubble · threads drawer · search · share
-│        │  └─ settings/         provider · mode · memory · MCP · plugins · sync · usage · about
-│        ├─ store/               Zustand stores
-│        ├─ lib/                 bridge · actions · voice · wake-word · i18n · theme
-│        └─ locales/             en · es · de · ja
-└─ tools/
-   └─ ue5-mcp-bridge/            custom MCP server for Unreal Engine 5
-```
-
----
-
 ## 🧪 Tested against
 
 - **Windows 11** (primary target — automation paths are Windows-tuned)
 - **macOS 14+** (Apple Silicon + Intel)
 - **Ubuntu 22.04** (AppImage)
-- **Node 20 / 22**, Electron 33
 - **Models used in agent mode:** Claude Sonnet 4.5, GPT-4o, Gemini 2.0 Flash, Qwen 2.5 7B (Ollama)
-- **MCP servers:** `@modelcontextprotocol/server-filesystem`, `@modelcontextprotocol/server-github`, the custom UE5 bridge
-
-CI runs typecheck + tests + build on Windows, macOS, and Linux on every push to `main` and every PR.
+- **MCP servers:** `@modelcontextprotocol/server-filesystem`, `@modelcontextprotocol/server-github`, the bundled UE5 bridge
 
 ---
 
@@ -488,25 +400,13 @@ CI runs typecheck + tests + build on Windows, macOS, and Linux on every push to 
 
 ---
 
-## 🛠️ Contributing
-
-This is a solo project at the moment — but every piece is modular, typed, and meant to be read.
-
-- Provider? Add a file in `src/main/services/ai/`.
-- Action? Add a case in `src/main/services/automation/actions.ts` + entry in `tools.ts`.
-- Memory layer? Each layer is its own service folder.
-- UI component? Self-contained under `src/renderer/src/components/`.
-- Locale? Add a catalog under `src/renderer/src/locales/`.
-
-PRs welcome. Issues welcome. Sharing what you've built with it — even more welcome.
-
----
-
 ## 📜 Legal
 
-- **Code:** MIT © Kyron — see [`LICENSE`](LICENSE).
-- **App binary:** governed by [`TERMS.md`](TERMS.md).
-- **Data:** governed by [`PRIVACY.md`](PRIVACY.md). Short version: nothing leaves your computer unless you trigger an action that explicitly sends it.
+- **Binary distribution & use:** governed by [**Terms of Service**](TERMS.md).
+- **Privacy:** see [**Privacy Policy**](PRIVACY.md). Short version: nothing leaves your computer unless you trigger an action that explicitly sends it.
+- **Bug reports & feedback:** [open an issue](https://github.com/Dev-Kyron/SoulVoidAI/issues/new).
+
+VoidSoul Assistant is © Kyron. Distribution of the compiled application is governed by the Terms of Service linked above. Re-selling, re-distributing, or hosting the application as a service requires written permission.
 
 ---
 

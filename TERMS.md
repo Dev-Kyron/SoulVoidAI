@@ -19,7 +19,7 @@ The Software is developed by Kyron ("we", "us", "our"). Source code is available
 
 ## 3. License grant
 
-We grant you a worldwide, non-exclusive, non-transferable, revocable licence to install and use the Software on devices you own or control, subject to these terms. The source code is published separately under the MIT License — the terms here apply to the **compiled, distributed application binaries** and any premium features that may be added in future.
+We grant you a worldwide, non-exclusive, non-transferable, revocable licence to install and use the Software on devices you own or control, subject to these terms. The source code in the public repository is published under a **source-visible proprietary licence** (see `LICENSE`) — it is not open-source. The terms here apply to the **compiled, distributed application binaries** and any premium features that may be added in future.
 
 You may not:
 
@@ -31,7 +31,7 @@ You may not:
 You may:
 
 - Use the Software for any personal or commercial purpose, including in a workplace.
-- Modify the source for your own use under the terms of the source-code licence (MIT).
+- Inspect and build the source for your own personal, non-commercial use, subject to `LICENSE`.
 - Run the Software on multiple devices that you personally control under a single licence (we don't track devices).
 
 ## 4. Third-party AI providers and services
@@ -127,4 +127,4 @@ Repository: <https://github.com/Dev-Kyron/SoulVoidAI>
 
 ---
 
-These terms apply to the binary distribution of VoidSoul Assistant. The source code is separately licensed under the MIT License — see the `LICENSE` file in the repository.
+These terms apply to the binary distribution of VoidSoul Assistant. The source code in the public repository is licensed under a separate proprietary licence — see the `LICENSE` file.

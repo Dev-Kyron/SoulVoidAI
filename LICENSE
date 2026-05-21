@@ -1,21 +1,85 @@
-MIT License
+VoidSoul Assistant — Proprietary License
 
-Copyright (c) 2026 Kyron
+Copyright (c) 2026 Kyron. All rights reserved.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+The source code in this repository is made available for transparency,
+security review, bug reporting and personal study. It is NOT open-source
+software and is NOT licensed under MIT, Apache, GPL, or any other
+permissive or copyleft licence.
 
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
+1.  PERMITTED USE
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
+    You may:
+      (a) view, read, and study the source code;
+      (b) clone the repository and build the application locally for your
+          own personal, non-commercial evaluation and use on devices you
+          own or control;
+      (c) report bugs or suggest improvements by opening an issue or pull
+          request, on the understanding that any contributions you submit
+          are assigned to the copyright holder under these terms;
+      (d) install and use compiled binaries obtained from official
+          distribution channels, subject to the Terms of Service
+          (TERMS.md).
+
+2.  PROHIBITED USE
+
+    Without prior written permission from the copyright holder, you may
+    NOT:
+      (a) redistribute the source code, in original or modified form, in
+          whole or in substantial part, to any third party;
+      (b) re-publish, sublicense, sell, lease, rent or offer the
+          application as a paid product or hosted service, including
+          under a different name or with cosmetic modifications;
+      (c) use the source code or compiled binaries to train, fine-tune
+          or evaluate any machine-learning model whose outputs would
+          compete with this application;
+      (d) remove, obscure, or alter any copyright notice, attribution,
+          trademark, licence notice, or branding element;
+      (e) use the application or its source code in any manner that
+          would breach the Terms of Service (TERMS.md) or applicable
+          law.
+
+3.  THIRD-PARTY COMPONENTS
+
+    The application depends on third-party libraries that are themselves
+    licensed under their own terms (MIT, Apache 2.0, BSD, etc.). Nothing
+    in this licence overrides or replaces the licences of those
+    components — your obligations to their respective authors remain
+    intact. A NOTICES file may be added at a future date listing those
+    components.
+
+4.  CONTRIBUTIONS
+
+    By submitting a pull request, issue, patch, suggestion or other
+    contribution, you grant the copyright holder a perpetual, worldwide,
+    royalty-free, transferable, irrevocable licence to use, modify,
+    sublicense, and incorporate that contribution into the application
+    under any licence terms the copyright holder chooses, with or
+    without attribution.
+
+5.  NO WARRANTY
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+    EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+    MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+    NON-INFRINGEMENT. IN NO EVENT SHALL THE COPYRIGHT HOLDER BE LIABLE
+    FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF
+    CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+    WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+6.  TERMINATION
+
+    Any breach of this licence terminates your rights under it
+    automatically and immediately. On termination you must cease all use
+    of the source code and delete every copy in your possession.
+
+7.  CONTACT
+
+    For licensing enquiries, commercial use requests, or anything not
+    covered above:
+
+      hello@voidsoul.app
+
+      Repository: https://github.com/Dev-Kyron/SoulVoidAI
+
+All rights not expressly granted above are reserved.

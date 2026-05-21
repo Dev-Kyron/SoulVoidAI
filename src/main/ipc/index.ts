@@ -35,6 +35,14 @@ import { runCompletion, invokeCompletion, listModels } from '../services/ai'
 import { transcribeAudio } from '../services/ai/transcribe'
 import { exportToFile, importFromFile, syncPush, syncPull } from '../services/storage/sync'
 import {
+  createCheckpoint as createAgentCheckpoint,
+  updateCheckpoint as updateAgentCheckpoint,
+  finalizeCheckpoint as finalizeAgentCheckpoint,
+  listStaleRunning as listStaleAgentCheckpoints,
+  getCheckpoint as getAgentCheckpoint,
+  deleteCheckpoint as deleteAgentCheckpoint
+} from '../services/storage/agent-checkpoints'
+import {
   getPermissions,
   setPermission,
   revokeAll
@@ -163,6 +171,9 @@ import {
 } from '../services/updater'
 import type {
   ActionRequest,
+  AgentCheckpointCreate,
+  AgentCheckpointStatus,
+  AgentCheckpointUpdate,
   AgentRequest,
   AgentResult,
   AppearanceConfig,
@@ -393,6 +404,33 @@ export function registerIpc(): void {
   ipcMain.handle('usage:clear', () => {
     clearUsage()
   })
+
+  /* -------------------------- Agent checkpoints ------------------------ */
+
+  ipcMain.handle('agent-checkpoint:create', (_e, input: AgentCheckpointCreate) =>
+    createAgentCheckpoint(input)
+  )
+  ipcMain.handle(
+    'agent-checkpoint:update',
+    (_e, requestId: string, patch: AgentCheckpointUpdate) =>
+      updateAgentCheckpoint(requestId, patch)
+  )
+  ipcMain.handle(
+    'agent-checkpoint:finalize',
+    (
+      _e,
+      requestId: string,
+      status: Exclude<AgentCheckpointStatus, 'running'>,
+      failure: string | null
+    ) => finalizeAgentCheckpoint(requestId, status, failure)
+  )
+  ipcMain.handle('agent-checkpoint:list-stale', () => listStaleAgentCheckpoints())
+  ipcMain.handle('agent-checkpoint:get', (_e, requestId: string) =>
+    getAgentCheckpoint(requestId)
+  )
+  ipcMain.handle('agent-checkpoint:delete', (_e, requestId: string) =>
+    deleteAgentCheckpoint(requestId)
+  )
 
   /* ------------------------------- AI ---------------------------------- */
 

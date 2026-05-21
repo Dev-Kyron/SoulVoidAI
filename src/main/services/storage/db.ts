@@ -175,6 +175,39 @@ const MIGRATIONS: Array<{ version: number; sql: string }> = [
       ALTER TABLE threads ADD COLUMN project_id TEXT REFERENCES projects(id) ON DELETE SET NULL;
       CREATE INDEX IF NOT EXISTS threads_project ON threads(project_id);
     `
+  },
+  {
+    // Agent-loop checkpoints. One row per in-flight or terminal agent
+    // invocation; persisted on every step so a crash / sleep / restart
+    // mid-task doesn't lose the user's progress.
+    //
+    // Lifecycle: created at status='running' when the loop starts,
+    // updated each step with new turns/invocations/step, finalised to
+    // 'paused' | 'completed' | 'failed' | 'aborted' when the loop exits.
+    // Rows stuck at 'running' on next launch are crash-recovery candidates.
+    version: 7,
+    sql: `
+      CREATE TABLE IF NOT EXISTS agent_checkpoints (
+        request_id            TEXT PRIMARY KEY,
+        thread_id             TEXT NOT NULL,
+        user_message_id       TEXT NOT NULL,
+        assistant_message_id  TEXT NOT NULL,
+        provider_id           TEXT NOT NULL,
+        model_id              TEXT NOT NULL,
+        system_prompt         TEXT NOT NULL,
+        turns_json            TEXT NOT NULL,
+        invocations_json      TEXT NOT NULL DEFAULT '[]',
+        step                  INTEGER NOT NULL DEFAULT 0,
+        status                TEXT NOT NULL,
+        failure               TEXT,
+        created_at            TEXT NOT NULL,
+        updated_at            TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS agent_checkpoints_status
+        ON agent_checkpoints(status);
+      CREATE INDEX IF NOT EXISTS agent_checkpoints_updated
+        ON agent_checkpoints(updated_at DESC);
+    `
   }
 ]
 

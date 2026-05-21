@@ -9,6 +9,10 @@ import type {
   ActionRequest,
   ActionResult,
   ActiveWindowInfo,
+  AgentCheckpoint,
+  AgentCheckpointCreate,
+  AgentCheckpointStatus,
+  AgentCheckpointUpdate,
   AgentRequest,
   AgentResult,
   AppearanceConfig,
@@ -218,6 +222,26 @@ export interface VoidSoulBridge {
     getBudget(): Promise<UsageBudget>
     setBudget(monthlyUsd: number | null): Promise<UsageBudget>
     clear(): Promise<void>
+  }
+  /**
+   * Persistent agent-loop checkpoints. The renderer writes one row when
+   * a multi-step agent run starts, updates it on every step with the
+   * latest turns + invocations, and finalises it to a terminal status
+   * on exit. On next launch, `listStale()` returns any row still at
+   * `running` — those are crash-recovery candidates the UI offers to
+   * resume.
+   */
+  agentCheckpoint: {
+    create(input: AgentCheckpointCreate): Promise<void>
+    update(requestId: string, patch: AgentCheckpointUpdate): Promise<void>
+    finalize(
+      requestId: string,
+      status: Exclude<AgentCheckpointStatus, 'running'>,
+      failure: string | null
+    ): Promise<void>
+    listStale(): Promise<AgentCheckpoint[]>
+    get(requestId: string): Promise<AgentCheckpoint | null>
+    delete(requestId: string): Promise<void>
   }
   rag: {
     status(): Promise<{

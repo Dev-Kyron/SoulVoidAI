@@ -674,6 +674,41 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // tools, and a clean completion all looked identical in the UI.
       let exitReason: 'completed' | 'step-cap' | 'aborted' | 'error' = 'completed'
       let step = 0
+
+      // Persistent checkpoint of the agent run — survives panel close,
+      // app restart, and process crash. Best-effort: a checkpoint write
+      // failure is logged but never blocks the loop (the loop's own
+      // in-memory state is the source of truth at runtime; checkpoints
+      // exist for crash recovery only).
+      //
+      // Skipped in private mode — private threads leave no trace on disk
+      // and that includes the checkpoint table. Also skipped when there
+      // is no active thread (rare edge case).
+      const checkpointThreadId = get().activeThreadId
+      const checkpointEnabled =
+        !config.chat.private && checkpointThreadId !== null
+      if (checkpointEnabled) {
+        void vs.agentCheckpoint
+          .create({
+            requestId,
+            threadId: checkpointThreadId,
+            userMessageId: userMessage.id,
+            assistantMessageId: assistantId,
+            providerId: provider.id,
+            modelId: effectiveModel,
+            systemPrompt: system,
+            turns: baseTurns
+          })
+          .catch((err) => {
+            void vs.logs.write(
+              'warn',
+              'system',
+              'Agent checkpoint create failed',
+              err instanceof Error ? err.message : String(err)
+            )
+          })
+      }
+
       for (; step < MAX_AGENT_STEPS; step++) {
         if (!isActive()) {
           exitReason = 'aborted'
@@ -736,6 +771,27 @@ export const useChatStore = create<ChatState>((set, get) => ({
             images: newImages
           })
         }
+
+        // Persist the step. Fire-and-forget — a write failure here
+        // doesn't kill the loop; the next step's write will catch up.
+        // The +1 captures "step just completed" so a crash after this
+        // write resumes at the right boundary.
+        if (checkpointEnabled) {
+          void vs.agentCheckpoint
+            .update(requestId, {
+              step: step + 1,
+              turns: [...turns],
+              invocations: [...invocations]
+            })
+            .catch((err) => {
+              void vs.logs.write(
+                'warn',
+                'system',
+                'Agent checkpoint update failed',
+                err instanceof Error ? err.message : String(err)
+              )
+            })
+        }
       }
       // Step cap hit while the model still wanted more tools — that's an
       // incomplete run, NOT a successful one. Surface it as a PAUSE
@@ -746,6 +802,32 @@ export const useChatStore = create<ChatState>((set, get) => ({
         exitReason = 'step-cap'
         isPause = true
         failure = `Reached the ${MAX_AGENT_STEPS}-step agent ceiling before finishing — type "continue" to keep going.`
+      }
+
+      // Finalise the checkpoint row — terminal status, no more writes.
+      // Maps the loop's exitReason onto the canonical AgentCheckpointStatus.
+      // `step-cap` → `paused` (recoverable via "continue"), everything
+      // else maps 1:1. Aborted loops still finalise so the crash-recovery
+      // UI doesn't pick them up as candidates.
+      if (checkpointEnabled) {
+        const status: 'paused' | 'completed' | 'failed' | 'aborted' =
+          exitReason === 'step-cap'
+            ? 'paused'
+            : exitReason === 'aborted'
+              ? 'aborted'
+              : exitReason === 'error'
+                ? 'failed'
+                : 'completed'
+        void vs.agentCheckpoint
+          .finalize(requestId, status, failure)
+          .catch((err) => {
+            void vs.logs.write(
+              'warn',
+              'system',
+              'Agent checkpoint finalize failed',
+              err instanceof Error ? err.message : String(err)
+            )
+          })
       }
 
       // Preserve whatever the agent had already produced (multi-step finalText
@@ -814,6 +896,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
           content: streamed || formatErrorContent(failure)
         })
       }
+      // Best-effort: mark the checkpoint failed so it isn't picked up
+      // by the crash-recovery UI on the next launch. The row may not
+      // exist (non-agent path / private mode / create failed silently)
+      // — the SQL UPDATE harmlessly matches zero rows in that case.
+      void vs.agentCheckpoint.finalize(requestId, 'failed', failure).catch(() => {
+        /* best-effort */
+      })
     }
 
     // Only clear streaming/pending bookkeeping if this request still owns them.

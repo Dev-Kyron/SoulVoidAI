@@ -125,6 +125,15 @@ const bridge: VoidSoulBridge = {
     setBudget: (monthlyUsd) => invoke('usage:set-budget', monthlyUsd),
     clear: () => invoke('usage:clear')
   },
+  agentCheckpoint: {
+    create: (input) => invoke('agent-checkpoint:create', input),
+    update: (requestId, patch) => invoke('agent-checkpoint:update', requestId, patch),
+    finalize: (requestId, status, failure) =>
+      invoke('agent-checkpoint:finalize', requestId, status, failure),
+    listStale: () => invoke('agent-checkpoint:list-stale'),
+    get: (requestId) => invoke('agent-checkpoint:get', requestId),
+    delete: (requestId) => invoke('agent-checkpoint:delete', requestId)
+  },
   rag: {
     status: () => invoke('rag:status'),
     search: (query, options) => invoke('rag:search', query, options),

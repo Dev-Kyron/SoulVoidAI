@@ -863,3 +863,61 @@ export type UpdaterStatus =
   | { kind: 'downloading'; percent: number; bytesPerSecond: number }
   | { kind: 'downloaded'; version: string }
   | { kind: 'error'; message: string }
+
+/* ------------------------- Agent checkpoints --------------------------- */
+
+/**
+ * Lifecycle of a single agent-loop invocation. Persisted to SQLite so
+ * a crash, restart, or sleep mid-step doesn't lose the user's work.
+ *
+ *   running    — loop is actively iterating
+ *   paused     — hit MAX_AGENT_STEPS; resumable by sending "continue"
+ *   completed  — model returned without more tool calls (success)
+ *   failed     — uncaught error or provider 4xx/5xx
+ *   aborted    — user clicked Stop, or thread switched mid-loop
+ *
+ * On next launch, any row still at `running` is interpreted as a crash:
+ * the recovery UI offers to resume it from the last persisted step.
+ */
+export type AgentCheckpointStatus =
+  | 'running'
+  | 'paused'
+  | 'completed'
+  | 'failed'
+  | 'aborted'
+
+export interface AgentCheckpoint {
+  requestId: string
+  threadId: string
+  userMessageId: string
+  assistantMessageId: string
+  providerId: ProviderId
+  modelId: string
+  systemPrompt: string
+  turns: ChatTurn[]
+  invocations: ToolInvocation[]
+  step: number
+  status: AgentCheckpointStatus
+  failure: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+/** Initial-state payload for `vs.agentCheckpoint.create`. */
+export interface AgentCheckpointCreate {
+  requestId: string
+  threadId: string
+  userMessageId: string
+  assistantMessageId: string
+  providerId: ProviderId
+  modelId: string
+  systemPrompt: string
+  turns: ChatTurn[]
+}
+
+/** Mid-loop update — bumps step + accumulated turns/invocations. */
+export interface AgentCheckpointUpdate {
+  step: number
+  turns: ChatTurn[]
+  invocations: ToolInvocation[]
+}

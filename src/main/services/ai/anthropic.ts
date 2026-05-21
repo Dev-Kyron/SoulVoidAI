@@ -22,6 +22,24 @@ function content(turn: ChatTurn): unknown {
   return [...turn.images.map(imageBlock), { type: 'text', text: turn.content }]
 }
 
+/**
+ * Models where Anthropic has deprecated the `temperature` parameter — the
+ * API now rejects requests that send it with a 400. Currently the
+ * extended-thinking-flavoured Opus models. Keep this list narrow — most
+ * models still accept temperature and silently clamp it; we only want to
+ * strip it for the ones that actively error.
+ */
+const TEMPERATURE_DEPRECATED = new Set<string>(['claude-opus-4-7'])
+
+function modelAcceptsTemperature(model: string): boolean {
+  if (TEMPERATURE_DEPRECATED.has(model)) return false
+  // Substring guard for the "thinking" family — Anthropic's pattern is to
+  // disable temperature on extended-thinking models; catching the suffix
+  // means we don't have to add every future variant to the set above.
+  if (/thinking/i.test(model)) return false
+  return true
+}
+
 /** Maps the provider-agnostic turn list to Anthropic messages. */
 function toMessages(turns: ChatTurn[]): unknown[] {
   const out: unknown[] = []
@@ -62,6 +80,16 @@ export const anthropicProvider: AIProvider = {
       content: content(m)
     }))
 
+    const streamBody: Record<string, unknown> = {
+      model: opts.model,
+      max_tokens: 4096,
+      system: opts.system || undefined,
+      messages,
+      stream: true
+    }
+    if (modelAcceptsTemperature(opts.model)) {
+      streamBody.temperature = opts.temperature ?? 0.7
+    }
     const res = await fetch(`${opts.baseUrl}/v1/messages`, {
       method: 'POST',
       signal: opts.signal,
@@ -70,14 +98,7 @@ export const anthropicProvider: AIProvider = {
         'x-api-key': opts.apiKey,
         'anthropic-version': '2023-06-01'
       },
-      body: JSON.stringify({
-        model: opts.model,
-        max_tokens: 4096,
-        system: opts.system || undefined,
-        messages,
-        temperature: opts.temperature ?? 0.7,
-        stream: true
-      })
+      body: JSON.stringify(streamBody)
     })
 
     if (!res.ok || !res.body) throw await httpError(res, 'Anthropic')
@@ -107,8 +128,10 @@ export const anthropicProvider: AIProvider = {
       model: opts.model,
       max_tokens: 4096,
       system: opts.system || undefined,
-      messages: toMessages(opts.messages),
-      temperature: opts.temperature ?? 0.7
+      messages: toMessages(opts.messages)
+    }
+    if (modelAcceptsTemperature(opts.model)) {
+      body.temperature = opts.temperature ?? 0.7
     }
     if (opts.tools.length > 0) {
       body.tools = opts.tools.map((t) => ({

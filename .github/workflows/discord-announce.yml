@@ -1,0 +1,79 @@
+name: Discord — Release announcement
+
+# Fires when a GitHub Release is published (i.e. you flip a draft to public).
+# Posts a formatted embed to the configured Discord channel via webhook so
+# every release lands in #announcements automatically — no copy/paste from
+# the user.
+#
+# Wiring (one-time setup):
+#   1. In Discord: Server Settings → Integrations → Webhooks → create or
+#      pick the webhook for #announcements → Copy URL.
+#   2. In GitHub: this repo → Settings → Secrets and variables → Actions
+#      → New repository secret → Name: DISCORD_WEBHOOK_URL → paste the URL.
+#   3. Publish a release. The post lands in seconds.
+#
+# Security: the secret never appears in workflow logs. If you ever leak
+# the webhook URL (paste it somewhere public by accident), regenerate it
+# in Discord and update the GitHub secret — the workflow keeps working.
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  announce:
+    runs-on: ubuntu-latest
+    # Skip drafts and pre-releases by default. Flip these if you want to
+    # also announce alphas / betas.
+    if: github.event.release.draft == false && github.event.release.prerelease == false
+    steps:
+      - name: Post to Discord
+        env:
+          WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          RELEASE_NAME: ${{ github.event.release.name || github.event.release.tag_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_URL: ${{ github.event.release.html_url }}
+          # GitHub auto-collapses the body for long releases; trim defensively
+          # so the embed fits Discord's 4096-char description limit.
+          RELEASE_BODY: ${{ github.event.release.body }}
+        run: |
+          if [ -z "$WEBHOOK_URL" ]; then
+            echo "::error::DISCORD_WEBHOOK_URL secret is not set; skipping announcement."
+            exit 1
+          fi
+
+          # Trim release body to 3500 chars to stay well under Discord's
+          # 4096-char description cap, accounting for the trailing CTA line.
+          TRIMMED_BODY=$(printf '%s' "$RELEASE_BODY" | head -c 3500)
+          if [ "${#RELEASE_BODY}" -gt 3500 ]; then
+            TRIMMED_BODY="$TRIMMED_BODY"$'\n\n…read the full notes on GitHub.'
+          fi
+
+          # Brand purple matches the website + electron-builder copyright
+          # styling. 0x7c3aed in decimal is 8147949.
+          PAYLOAD=$(jq -n \
+            --arg title "$RELEASE_NAME" \
+            --arg url   "$RELEASE_URL" \
+            --arg tag   "$RELEASE_TAG" \
+            --arg body  "$TRIMMED_BODY" \
+            '{
+              username: "VoidSoul Releases",
+              avatar_url: "https://voidsoulstudio.com/Logo.png",
+              embeds: [{
+                title: $title,
+                url:   $url,
+                description: $body,
+                color: 8147949,
+                footer: { text: "Download free at voidsoulstudio.com" },
+                fields: [{ name: "Tag", value: $tag, inline: true }]
+              }]
+            }')
+
+          # Discord returns 204 No Content on success. --fail makes curl
+          # exit nonzero on any 4xx/5xx so the workflow surfaces real errors
+          # (bad webhook URL, malformed payload, rate limit).
+          curl --fail --silent --show-error \
+            -H 'Content-Type: application/json' \
+            -X POST \
+            -d "$PAYLOAD" \
+            "$WEBHOOK_URL"

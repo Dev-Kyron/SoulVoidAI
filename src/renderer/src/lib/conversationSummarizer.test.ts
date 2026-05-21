@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { estimateTokens } from './conversationSummarizer'
-import type { ChatMessage } from '@shared/types'
+import { estimateTokens, estimateTurnTokens } from './conversationSummarizer'
+import type { ChatMessage, ChatTurn } from '@shared/types'
 
 const baseMsg: Omit<ChatMessage, 'id' | 'content'> = {
   role: 'user',
@@ -47,5 +47,48 @@ describe('estimateTokens', () => {
     // 4 chars → 4/3.5 = 1.14 → rounds to 1.
     const tokens = estimateTokens([{ id: 'm', ...baseMsg, content: 'abcd' }])
     expect(tokens).toBe(1)
+  })
+})
+
+describe('estimateTurnTokens', () => {
+  it('counts the user turn content', () => {
+    const turns: ChatTurn[] = [{ role: 'user', content: 'a'.repeat(350) }]
+    expect(estimateTurnTokens(turns)).toBe(100)
+  })
+
+  it('counts tool-call args and tool-result content', () => {
+    const turns: ChatTurn[] = [
+      {
+        role: 'assistant',
+        content: '',
+        toolCalls: [
+          { id: 't1', name: 'web_fetch', args: { url: 'a'.repeat(100) } }
+        ]
+      },
+      {
+        role: 'tool',
+        content: '',
+        toolResults: [{ id: 't1', name: 'web_fetch', content: 'a'.repeat(200) }]
+      }
+    ]
+    const tokens = estimateTurnTokens(turns)
+    // Tool-call: name(9) + JSON.stringify({url: 'a'.repeat(100)}) ~ 113
+    // Tool-result: 200
+    // Total roughly (9 + 113 + 200) / 3.5 ~ 92
+    expect(tokens).toBeGreaterThan(80)
+    expect(tokens).toBeLessThan(120)
+  })
+
+  it('charges images at ~4000 chars each (conservative)', () => {
+    const turns: ChatTurn[] = [
+      {
+        role: 'user',
+        content: '',
+        images: ['data:image/png;base64,...', 'data:image/png;base64,...']
+      }
+    ]
+    // 2 images × 4000 chars = 8000 chars → 8000/3.5 ≈ 2286 tokens
+    const tokens = estimateTurnTokens(turns)
+    expect(tokens).toBeGreaterThan(2000)
   })
 })

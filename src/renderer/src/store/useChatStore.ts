@@ -16,7 +16,11 @@ import { uid, basename } from '../lib/utils'
 import { runAgentTool } from '../lib/actions'
 import { detectArtifact } from '../lib/artifactDetector'
 import { extractFacts } from '../lib/factExtractor'
-import { summarizeOlderTurns, estimateTokens } from '../lib/conversationSummarizer'
+import {
+  summarizeOlderTurns,
+  estimateTokens,
+  compactTurnsIfNeeded
+} from '../lib/conversationSummarizer'
 import { canReuseSummary } from '../lib/summaryReuse'
 import { CHAT_STRINGS, formatErrorContent, formatPauseContent } from '../lib/chatStrings'
 import { pickProvider, deriveBudgetState, type AvailableProvider } from '../lib/router'
@@ -726,6 +730,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
         if (!isActive()) {
           exitReason = 'aborted'
           break
+        }
+        // Rolling-summary compaction. If the agent has accumulated
+        // enough context to threaten the model's window, fold the
+        // older turns into a STORY-SO-FAR recap before this step's
+        // invoke. No-op when we're well under the budget — cheap
+        // token estimate gates the actual LLM call so the per-step
+        // overhead is just a character count on the turns array.
+        const compaction = await compactTurnsIfNeeded(
+          turns,
+          effectiveModel,
+          !provider.needsKey
+        )
+        if (compaction.compacted) {
+          turns.splice(0, turns.length, ...compaction.turns)
         }
         const result = await vs.ai.invoke({
           requestId,

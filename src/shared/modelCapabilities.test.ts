@@ -64,7 +64,49 @@ describe('modelHasVision', () => {
   })
 
   it('exposes the same answer via capabilitiesOf', () => {
-    expect(capabilitiesOf('gpt-4o')).toEqual({ vision: true })
-    expect(capabilitiesOf('gpt-3.5-turbo')).toEqual({ vision: false })
+    // Vision is one dimension of the now-richer capabilities object;
+    // only assert the vision flag — the other dimensions (toolUse,
+    // reasoning, context, speed, cost) have their own dedicated tests.
+    expect(capabilitiesOf('gpt-4o').vision).toBe(true)
+    expect(capabilitiesOf('gpt-3.5-turbo').vision).toBe(false)
+  })
+
+  it('reports toolUse for known function-calling models', () => {
+    expect(capabilitiesOf('claude-sonnet-4-5').toolUse).toBe(true)
+    expect(capabilitiesOf('gpt-4o-mini').toolUse).toBe(true)
+    expect(capabilitiesOf('gemini-2.0-pro').toolUse).toBe(true)
+    expect(capabilitiesOf('qwen2.5-14b').toolUse).toBe(true)
+  })
+
+  it('classifies reasoning tiers from model names', () => {
+    expect(capabilitiesOf('o1-preview').reasoning).toBe('extended')
+    expect(capabilitiesOf('claude-opus-4-7').reasoning).toBe('extended')
+    expect(capabilitiesOf('deepseek-r1').reasoning).toBe('extended')
+    expect(capabilitiesOf('claude-sonnet-4-5').reasoning).toBe('strong')
+    expect(capabilitiesOf('gpt-4o').reasoning).toBe('strong')
+    expect(capabilitiesOf('gpt-4o-mini').reasoning).toBe('basic')
+    expect(capabilitiesOf('claude-3-haiku').reasoning).toBe('basic')
+  })
+
+  it('flags fast/slow tiers from model names', () => {
+    expect(capabilitiesOf('claude-3-haiku').speed).toBe('fast')
+    expect(capabilitiesOf('gpt-4o-mini').speed).toBe('fast')
+    expect(capabilitiesOf('gemini-1.5-flash').speed).toBe('fast')
+    expect(capabilitiesOf('o1-preview').speed).toBe('slow')
+    expect(capabilitiesOf('claude-opus-4-7').speed).toBe('slow')
+  })
+
+  it('marks local providers as free regardless of model', () => {
+    expect(capabilitiesOf('llama-3.1:8b', true).cost).toBe('free')
+    expect(capabilitiesOf('qwen2.5:14b', true).cost).toBe('free')
+    // Same model name, non-local context — falls into a paid tier.
+    expect(capabilitiesOf('claude-opus-4-7', false).cost).toBe('premium')
+    expect(capabilitiesOf('claude-3-haiku', false).cost).toBe('cheap')
+  })
+
+  it('returns a non-trivial context window for known families', () => {
+    expect(capabilitiesOf('claude-sonnet-4-5').contextWindow).toBeGreaterThanOrEqual(200_000)
+    expect(capabilitiesOf('gemini-1.5-pro').contextWindow).toBeGreaterThanOrEqual(1_000_000)
+    expect(capabilitiesOf('gpt-4o').contextWindow).toBeGreaterThanOrEqual(128_000)
   })
 })

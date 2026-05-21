@@ -19,6 +19,7 @@ import { extractFacts } from '../lib/factExtractor'
 import { summarizeOlderTurns, estimateTokens } from '../lib/conversationSummarizer'
 import { canReuseSummary } from '../lib/summaryReuse'
 import { CHAT_STRINGS, formatErrorContent } from '../lib/chatStrings'
+import { pickProvider, type AvailableProvider } from '../lib/router'
 import { getMode } from '@shared/modes'
 import { modelHasVision } from '@shared/modelCapabilities'
 import { useConfigStore } from './useConfigStore'
@@ -40,7 +41,17 @@ import {
   type ToolInvocation
 } from '@shared/types'
 
-const MAX_AGENT_STEPS = 6
+/**
+ * Hard ceiling on agent-loop iterations. Set high enough that legitimate
+ * multi-tool tasks (Discord bootstrap ~29 steps, multi-file refactor,
+ * batch automation) complete in a single pass, but low enough that a
+ * runaway loop still bails before incinerating tokens.
+ *
+ * Pre-v1.1 this was 6 — silently exited halfway through anything
+ * non-trivial. The new ceiling surfaces a clear "step cap reached"
+ * failure when hit, so the user always knows why the loop stopped.
+ */
+const MAX_AGENT_STEPS = 30
 /** Token estimate above which older turns roll into a "story so far" recap. */
 const SUMMARIZE_TRIGGER_TOKENS = 10_000
 /** Minimum recent messages to keep verbatim once a summary is in play. */
@@ -494,8 +505,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       useUiStore.getState().pushToast('error', 'Configuration is still loading.')
       return
     }
-    const provider = config.providers.find((p) => p.id === config.activeProvider)
-    if (!provider) {
+    const activeProvider = config.providers.find((p) => p.id === config.activeProvider)
+    if (!activeProvider) {
       // Active provider id doesn't resolve — config drift. Surface it so the
       // user isn't typing into the void.
       useUiStore
@@ -504,21 +515,54 @@ export const useChatStore = create<ChatState>((set, get) => ({
       void vs.window.openSettings()
       return
     }
-    if (provider.needsKey && !provider.hasKey) {
+    if (activeProvider.needsKey && !activeProvider.hasKey) {
       useUiStore
         .getState()
-        .pushToast('error', `${provider.label} needs an API key — opening Settings.`)
+        .pushToast('error', `${activeProvider.label} needs an API key — opening Settings.`)
       void vs.window.openSettings()
       return
     }
-    // Per-thread sticky override wins over the global provider default —
-    // lets the user say "this thread uses gpt-4o" without touching settings.
-    const effectiveModel = get().modelOverride || provider.model
-    // Image attached but the active model can't see images. Surface a warning
-    // so the user doesn't silently lose information — the request still goes
-    // through (the user may explicitly want to send text + ignored image),
-    // but they know the model only saw the text body.
+
+    // Router pass — if the user has multiple providers configured and
+    // hasn't set a per-thread sticky model override, pick the best
+    // provider+model for the task at hand (vision-capable for images,
+    // fast tool-use for agent loops, strong reasoning for analysis,
+    // etc.). The per-thread override is treated as the user's explicit
+    // intent and always wins — the router stays silent in that case.
+    const override = get().modelOverride
     const hasImage = attachments.some((a) => a.kind === 'image')
+    let provider = activeProvider
+    let effectiveModel = override || activeProvider.model
+    if (!override) {
+      const available = config.providers.map<AvailableProvider>((p) => ({
+        id: p.id,
+        model: p.model,
+        usable: p.needsKey ? p.hasKey : Boolean(p.localReady),
+        isLocal: !p.needsKey
+      }))
+      const pick = pickProvider({
+        prompt: content,
+        hasImages: hasImage,
+        agentMode: config.chat.agent,
+        available,
+        activeProviderId: config.activeProvider
+      })
+      if (pick && pick.overrideOfActive) {
+        const swapped = config.providers.find((p) => p.id === pick.providerId)
+        if (swapped) {
+          provider = swapped
+          effectiveModel = pick.modelId
+          // Quiet log only — the assistant bubble already shows the model
+          // it answered with via the `model:` stamp, so the user sees the
+          // routing decision in the bubble rather than as a separate toast.
+          void vs.logs.write('info', 'ai', `Routed to ${pick.reason}`)
+        }
+      }
+    }
+    // Image attached but the routed-to model can't see images. Should be
+    // rare now that the router prefers vision-capable models when an
+    // image is attached, but the warning stays as a safety net for the
+    // case where no vision-capable provider is configured at all.
     if (hasImage && !modelHasVision(effectiveModel)) {
       useUiStore
         .getState()
@@ -596,8 +640,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const turns: ChatTurn[] = [...baseTurns]
       const invocations: ToolInvocation[] = []
 
-      for (let step = 0; step < MAX_AGENT_STEPS; step++) {
-        if (!isActive()) break
+      // Track WHY the loop exited so the user always sees a reason. Without
+      // this distinction, hitting MAX_AGENT_STEPS, the model returning empty
+      // tools, and a clean completion all looked identical in the UI.
+      let exitReason: 'completed' | 'step-cap' | 'aborted' | 'error' = 'completed'
+      let step = 0
+      for (; step < MAX_AGENT_STEPS; step++) {
+        if (!isActive()) {
+          exitReason = 'aborted'
+          break
+        }
         const result = await vs.ai.invoke({
           requestId,
           provider: provider.id,
@@ -606,14 +658,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
           messages: turns
         })
         if (result.error) {
-          if (result.error !== 'aborted') failure = result.error
+          if (result.error !== 'aborted') {
+            failure = result.error
+            exitReason = 'error'
+          } else {
+            exitReason = 'aborted'
+          }
           break
         }
         if (result.text.trim()) {
           finalText = finalText ? `${finalText}\n\n${result.text}` : result.text
         }
         patch({ content: finalText, toolCalls: invocations.length ? [...invocations] : undefined })
-        if (result.toolCalls.length === 0) break
+        if (result.toolCalls.length === 0) {
+          exitReason = 'completed'
+          break
+        }
 
         turns.push({ role: 'assistant', content: result.text, toolCalls: result.toolCalls })
         const toolResults: Array<{ id: string; name: string; content: string }> = []
@@ -647,6 +707,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
             images: newImages
           })
         }
+      }
+      // Step cap hit while the model still wanted more tools — that's an
+      // incomplete run, NOT a successful one. Promote it to a failure so
+      // the user gets a clear message ("Hit the 30-step ceiling — say
+      // `continue` to resume") instead of a silent half-done bubble.
+      if (step >= MAX_AGENT_STEPS && exitReason === 'completed') {
+        exitReason = 'step-cap'
+        failure = `Reached the ${MAX_AGENT_STEPS}-step agent ceiling before finishing — type "continue" to keep going.`
       }
 
       // Preserve whatever the agent had already produced (multi-step finalText

@@ -25,6 +25,24 @@ Bring whichever AI you already love — **12 providers, one interface** — and 
 
 ---
 
+## 🆕 What's new in v1.1.0
+
+Two big systems landed in this release.
+
+**Auto-routing across providers.** Configure Anthropic + OpenAI + Gemini + Ollama and the assistant picks the right one per task. Attach a screenshot → routed to a vision model. Agent loop with 20+ tool calls → routed to a fast tool-use model (Sonnet, not Opus). Near your monthly budget cap → routed to local. You never touch the picker; your per-thread sticky overrides still win when you want manual control.
+
+**Long-running task resilience.** Agent runs now survive crash / restart / sleep / panel-close. Every step persists a checkpoint to SQLite; a recovery banner on the next launch offers to resume from where you stopped. The 30-step ceiling is up from 6. Rolling-summary compaction lets sustained runs fit in the model's context window. Close the panel and walk away — the tray shows live `⚙ step 23` progress, the loop keeps running, and when you come back the doc is in your thread.
+
+**Other improvements**
+
+- Step-cap pause UX — clear "type continue to resume" instead of silent half-done bubble
+- Provider `stop_reason` / `finish_reason` surfaced as real errors (was silent truncation)
+- 120s invoke timeout — hung providers no longer block the agent loop forever, friendly error message instead of `AbortError`
+- Cost dashboard signal feeds into routing — near-cap users auto-fall-back to free/local
+- Graceful pause-on-quit — closing the app while runs are live marks them as paused, not crashed
+
+---
+
 ## Why VoidSoul
 
 Today's AI apps split awkwardly:

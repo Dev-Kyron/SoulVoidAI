@@ -1,7 +1,7 @@
 /**
  * Google Gemini provider (Generative Language API, SSE streaming).
  */
-import { readSSE, httpError } from './stream'
+import { readSSE, httpError, invokeAbortSignal } from './stream'
 import { ProviderError } from './types'
 import type { AIProvider, CompletionOptions, CompletionResult, InvokeOptions } from './types'
 import type { ChatTurn } from '@shared/types'
@@ -117,7 +117,9 @@ export const geminiProvider: AIProvider = {
 
     const res = await fetch(`${opts.baseUrl}/v1beta/models/${opts.model}:generateContent`, {
       method: 'POST',
-      signal: opts.signal,
+      // 120s wall-clock cap combined with the user's Stop signal —
+      // matches Anthropic + OpenAI invoke behaviour.
+      signal: invokeAbortSignal(opts.signal),
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': opts.apiKey },
       body: JSON.stringify(body)
     })
@@ -131,9 +133,27 @@ export const geminiProvider: AIProvider = {
             functionCall?: { name: string; args?: Record<string, unknown> }
           }>
         }
+        finishReason?: string
       }>
     }
-    const parts = json.candidates?.[0]?.content?.parts ?? []
+    const candidate = json.candidates?.[0]
+    // Gemini finishReason — 'STOP' / 'TOOL_USE' (or 'TOOL_CALLS' in
+    // some variants) are clean exits. 'MAX_TOKENS' truncated the
+    // response; 'SAFETY' / 'RECITATION' blocked it outright. Surface
+    // these as ProviderError so the agent loop doesn't treat a
+    // half-thought or empty body as a final answer.
+    const finish = candidate?.finishReason
+    if (finish === 'MAX_TOKENS') {
+      throw new ProviderError(
+        'Gemini response truncated (finishReason: MAX_TOKENS). The conversation may exceed the model context window — try a shorter prompt or a larger-context model.'
+      )
+    }
+    if (finish === 'SAFETY' || finish === 'RECITATION') {
+      throw new ProviderError(
+        `Gemini blocked the response (finishReason: ${finish}). Rephrase the request or switch providers.`
+      )
+    }
+    const parts = candidate?.content?.parts ?? []
     let text = ''
     const toolCalls = []
     let index = 0

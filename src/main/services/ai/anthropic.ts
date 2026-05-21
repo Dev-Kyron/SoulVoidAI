@@ -1,7 +1,7 @@
 /**
  * Anthropic Claude provider (Messages API, streaming).
  */
-import { readSSE, httpError } from './stream'
+import { readSSE, httpError, invokeAbortSignal } from './stream'
 import { ProviderError } from './types'
 import type { AIProvider, CompletionOptions, CompletionResult, InvokeOptions } from './types'
 import type { ChatTurn } from '@shared/types'
@@ -143,7 +143,10 @@ export const anthropicProvider: AIProvider = {
 
     const res = await fetch(`${opts.baseUrl}/v1/messages`, {
       method: 'POST',
-      signal: opts.signal,
+      // Combines the user's Stop signal with a 120s wall-clock cap so a
+      // hung provider can't lock up the agent loop. AbortSignal.timeout
+      // emits an `AbortError` named TimeoutError if it fires solo.
+      signal: invokeAbortSignal(opts.signal),
       headers: {
         'Content-Type': 'application/json',
         'x-api-key': opts.apiKey,
@@ -161,6 +164,7 @@ export const anthropicProvider: AIProvider = {
         name?: string
         input?: Record<string, unknown>
       }>
+      stop_reason?: string
     }
     let text = ''
     const toolCalls = []
@@ -170,6 +174,16 @@ export const anthropicProvider: AIProvider = {
       } else if (block.type === 'tool_use' && block.id && block.name) {
         toolCalls.push({ id: block.id, name: block.name, args: block.input ?? {} })
       }
+    }
+    // Anthropic's stop_reason tells us WHY the assistant stopped. 'end_turn'
+    // and 'tool_use' are clean exits; 'max_tokens' means the response was
+    // truncated mid-thought (context exhausted or max_tokens hit). Surfacing
+    // this prevents the agent loop from treating a truncated response as a
+    // final answer and silently exiting with half the work done.
+    if (json.stop_reason === 'max_tokens') {
+      throw new ProviderError(
+        'Anthropic response truncated (stop_reason: max_tokens). The conversation may exceed the model context window — try a shorter prompt or a larger-context model.'
+      )
     }
     return { text, toolCalls }
   },

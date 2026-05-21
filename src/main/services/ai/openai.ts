@@ -2,7 +2,8 @@
  * OpenAI Chat Completions provider (also compatible with OpenAI-style
  * endpoints via a custom base URL).
  */
-import { readSSE, httpError, parseToolArgs, readJsonOrError } from './stream'
+import { readSSE, httpError, parseToolArgs, readJsonOrError, invokeAbortSignal } from './stream'
+import { ProviderError } from './types'
 import type { AIProvider, CompletionOptions, CompletionResult, InvokeOptions } from './types'
 import type { ChatTurn } from '@shared/types'
 
@@ -105,7 +106,9 @@ export const openaiProvider: AIProvider = {
 
     const res = await fetch(`${opts.baseUrl}/v1/chat/completions`, {
       method: 'POST',
-      signal: opts.signal,
+      // 120s cap combined with the user's Stop signal — prevents a hung
+      // provider from blocking the agent loop indefinitely.
+      signal: invokeAbortSignal(opts.signal),
       headers: authHeaders(opts.apiKey),
       body: JSON.stringify(body)
     })
@@ -117,9 +120,20 @@ export const openaiProvider: AIProvider = {
           content?: string | null
           tool_calls?: Array<{ id: string; function: { name: string; arguments: string } }>
         }
+        finish_reason?: string
       }>
     }>(res, 'OpenAI')
-    const message = json.choices?.[0]?.message
+    const choice = json.choices?.[0]
+    // OpenAI's finish_reason: 'stop' / 'tool_calls' are clean exits.
+    // 'length' means the response was truncated — context window full
+    // or max_tokens hit. Surface as a real error so the agent loop
+    // doesn't silently treat a half-thought as a final answer.
+    if (choice?.finish_reason === 'length') {
+      throw new ProviderError(
+        'OpenAI response truncated (finish_reason: length). The conversation may exceed the model context window — try a shorter prompt or a larger-context model.'
+      )
+    }
+    const message = choice?.message
     return {
       text: message?.content ?? '',
       toolCalls: (message?.tool_calls ?? []).map((tc) => ({

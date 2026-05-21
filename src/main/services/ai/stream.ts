@@ -5,6 +5,30 @@
  */
 import { ProviderError } from './types'
 
+/**
+ * Default upper bound on a single non-streaming provider invoke. Local
+ * Ollama on a slow CPU can take ~30-60s on a 14B-class model; reasoning
+ * models (o1, extended-thinking) can take longer. 120s covers the
+ * realistic worst case without leaving a truly hung provider blocking
+ * the agent loop forever.
+ */
+export const INVOKE_TIMEOUT_MS = 120_000
+
+/**
+ * Combines an optional caller-supplied abort signal with a wall-clock
+ * timeout. Returned signal aborts when EITHER source fires — the user
+ * clicking Stop OR the timer expiring. Used by every invoke() in the
+ * provider implementations so a hung HTTP call can't block the agent
+ * loop indefinitely.
+ *
+ * Node 18.17+ / Electron 28+ ship AbortSignal.any + AbortSignal.timeout
+ * natively; we're on Node 22 in CI and Electron 33 at runtime.
+ */
+export function invokeAbortSignal(userSignal: AbortSignal | undefined, ms = INVOKE_TIMEOUT_MS): AbortSignal {
+  const timeout = AbortSignal.timeout(ms)
+  return userSignal ? AbortSignal.any([userSignal, timeout]) : timeout
+}
+
 /** Yields the response body one text line at a time (CRLF tolerant). */
 export async function* readLines(
   body: ReadableStream<Uint8Array>

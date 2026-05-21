@@ -393,7 +393,7 @@ Use the official apps for their sandboxed exploration. Use VoidSoul when you wan
 - **Mobile companion** — iOS first, sync threads
 - **Browser extension** — chat overlay on any page
 - **Code signing** + notarisation (Windows EV cert + Apple Developer Program)
-- **Hosted share URLs** at `share.voidsoul.app` (replace gists)
+- **Hosted share URLs** at `share.voidsoulstudio.com` (replace gists)
 - **Team workspace** — shared projects, SSO, audit log
 - **Plugin / theme marketplace**
 - **Localization expansion** — Chinese, Korean, French, Portuguese

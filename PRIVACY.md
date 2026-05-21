@@ -98,6 +98,7 @@ If we change this policy materially, we will note it in the release notes of the
 
 ## 12. Contact
 
-Email: `hello@voidsoul.app` _(replace with your actual contact)_
-Repository: <https://github.com/Dev-Kyron/SoulVoidAI>
-Security reports: `security@voidsoul.app` _(replace with your actual contact)_
+- **General:** `hello@voidsoulstudio.com` or open a GitHub issue at <https://github.com/Dev-Kyron/SoulVoidAI/issues/new>
+- **Security reports:** Please use GitHub's private security advisory flow at <https://github.com/Dev-Kyron/SoulVoidAI/security/advisories/new> so the disclosure stays confidential until a fix is shipped.
+- **Community Discord:** <https://discord.gg/Tn78RHqT4> — fastest non-security reply, ask questions, share feedback.
+- **Repository:** <https://github.com/Dev-Kyron/SoulVoidAI>

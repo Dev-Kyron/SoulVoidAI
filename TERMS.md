@@ -122,8 +122,9 @@ _Replace this section with your actual governing law and jurisdiction (e.g. "the
 
 ## 16. Contact
 
-Email: `hello@voidsoul.app` _(replace with your actual contact)_
-Repository: <https://github.com/Dev-Kyron/SoulVoidAI>
+- **General:** `hello@voidsoulstudio.com` or open a GitHub issue at <https://github.com/Dev-Kyron/SoulVoidAI/issues/new>
+- **Community Discord:** <https://discord.gg/Tn78RHqT4>
+- **Repository:** <https://github.com/Dev-Kyron/SoulVoidAI>
 
 ---
 

@@ -35,7 +35,7 @@ VoidSoul → **Settings → MCP Servers → Add server**:
 | ------- | ------------------------------------------------------------------------------ |
 | Name    | `Discord`                                                                      |
 | Command | `node`                                                                         |
-| Args    | absolute path to `server.js`, e.g. `C:\Users\Kyron\VoidSoulAssistant\tools\discord-mcp\server.js` |
+| Args    | absolute path to `server.js`, e.g. `<repo-root>\tools\discord-mcp\server.js` |
 | Env     | `DISCORD_BOT_TOKEN=<the token>` and `DISCORD_GUILD_ID=<the server id>`          |
 
 Save → toggle the server on. The agent now has these tools:

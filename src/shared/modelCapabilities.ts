@@ -277,10 +277,14 @@ const CHEAP_PATTERNS: RegExp[] = [
   /haiku/i,
   /mini/i,
   /flash/i,
-  /^deepseek-chat/,
+  // The whole DeepSeek hosted lineup sits in the cheap tier — chat, coder,
+  // v2, v3 are all sub-$1/M input. Was previously only matching the
+  // bare `deepseek-chat` id, leaving `deepseek-v3` silently classified as
+  // STANDARD (the unknown-paid fallback).
+  /^deepseek/,
   /^mistral-small/,
   /^mistral-nemo/,
-  /\/(haiku|mini|flash|deepseek-chat)/
+  /\/(haiku|mini|flash|deepseek)/
 ]
 
 /* ----------------------------- machinery ------------------------------- */

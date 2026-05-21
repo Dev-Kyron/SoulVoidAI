@@ -109,4 +109,43 @@ describe('modelHasVision', () => {
     expect(capabilitiesOf('gemini-1.5-pro').contextWindow).toBeGreaterThanOrEqual(1_000_000)
     expect(capabilitiesOf('gpt-4o').contextWindow).toBeGreaterThanOrEqual(128_000)
   })
+
+  /**
+   * Parametrised coverage — sweeps the actual model IDs the audit
+   * flagged as "common in the wild but not previously tested". If a
+   * regex change ever silently drops one of these, this test catches it
+   * before users do.
+   */
+  it.each<[string, Partial<{ vision: boolean; toolUse: boolean; cost: string }>]>([
+    // Anthropic
+    ['claude-sonnet-4-5', { vision: true, toolUse: true }],
+    ['claude-opus-4-1', { vision: true, toolUse: true }],
+    ['claude-haiku-4', { vision: true, toolUse: true, cost: 'cheap' }],
+    // OpenAI
+    ['gpt-4o', { vision: true, toolUse: true }],
+    ['gpt-4o-mini', { vision: true, toolUse: true, cost: 'cheap' }],
+    ['gpt-4.1', { toolUse: true }],
+    ['o1-preview', { toolUse: false /* o1 disables tools */ }],
+    ['o3-mini', { cost: 'cheap' }],
+    // Google
+    ['gemini-2.0-flash', { vision: true, toolUse: true, cost: 'cheap' }],
+    ['gemini-2.5-pro', { vision: true, toolUse: true }],
+    // Local / open
+    ['llama-3.3-70b', { toolUse: true }],
+    ['qwen2.5-coder-32b', { toolUse: true }],
+    ['deepseek-v3', { cost: 'cheap' }],
+    ['deepseek-chat', { cost: 'cheap' }],
+    ['deepseek-r1', {}], // reasoning model — extended tier already covered
+    // OpenRouter namespaced
+    ['openai/gpt-4o', { vision: true, toolUse: true }],
+    ['anthropic/claude-3.5-sonnet', { vision: true, toolUse: true }]
+  ])('capability sweep — %s', (modelId, expected) => {
+    const caps = capabilitiesOf(modelId)
+    if (expected.vision !== undefined) expect(caps.vision).toBe(expected.vision)
+    if (expected.toolUse !== undefined) expect(caps.toolUse).toBe(expected.toolUse)
+    if (expected.cost !== undefined) expect(caps.cost).toBe(expected.cost)
+    // Every model in the table should at least have a non-default context window —
+    // catches the case where the pattern table doesn't cover the family at all.
+    expect(caps.contextWindow).toBeGreaterThan(8_000)
+  })
 })

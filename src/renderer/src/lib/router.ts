@@ -280,10 +280,18 @@ export function pickProvider(input: RouterInput): RouterPick | null {
   // warning rather than a hard "no provider" wall.
   if (candidates.length === 0) {
     const active = usable.find((p) => p.id === input.activeProviderId) ?? usable[0]
+    // Use a human-readable phrase per task kind rather than just the
+    // raw enum value ("vision" reads fine; "tool-heavy" reads as jargon).
+    const fallbackPhrase =
+      task.kind === 'vision'
+        ? 'no vision-capable provider configured'
+        : task.kind === 'tool-heavy'
+          ? 'no tool-use-capable provider configured (agent mode may misbehave)'
+          : `no ${task.kind}-capable provider configured`
     return {
       providerId: active.id,
       modelId: active.model,
-      reason: `${active.model} — no ${task.kind}-capable provider configured`,
+      reason: `${active.model} — ${fallbackPhrase}`,
       overrideOfActive: false
     }
   }
@@ -319,15 +327,23 @@ export function toAvailable(runtime: Record<ProviderId, ProviderRuntime>, provid
 }
 
 /**
+ * Threshold at which the budget signal flips to `nearCap`. 0.8 = within
+ * 20% of the monthly cap (or over it). Exported so the unit test and
+ * any future UI ("budget bias active") read from the same source.
+ */
+export const BUDGET_THRESHOLD = 0.8
+
+/**
  * Budget signal computation — `nearCap` fires when the user has a
- * monthly cap set AND has spent >= 80% of it. Below that threshold
- * the router stays cost-neutral; above it, cheap/local providers
- * get a scoring boost so a runaway agent loop doesn't blow the cap.
+ * monthly cap set AND has spent >= BUDGET_THRESHOLD of it. Below the
+ * threshold the router stays cost-neutral; above it, cheap/local
+ * providers get a scoring boost so a runaway agent loop doesn't blow
+ * past the cap.
  *
- * Pure function for testability — the caller fetches the numbers
- * via the usage IPC and hands them in.
+ * Pure function for testability — the caller fetches the numbers via
+ * the usage IPC and hands them in.
  */
 export function deriveBudgetState(totalSpentUsd: number, monthlyCapUsd: number | null): { nearCap: boolean } | undefined {
   if (monthlyCapUsd === null || monthlyCapUsd <= 0) return undefined
-  return { nearCap: totalSpentUsd / monthlyCapUsd >= 0.8 }
+  return { nearCap: totalSpentUsd / monthlyCapUsd >= BUDGET_THRESHOLD }
 }

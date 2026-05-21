@@ -203,6 +203,71 @@ describe('pickProvider', () => {
     expect(result).not.toBeNull()
     expect(result!.providerId).toBe('anthropic')
   })
+
+  /* ------------------- edge cases ------------------------- */
+
+  it('handles an empty prompt without throwing', () => {
+    const result = pickProvider({
+      prompt: '',
+      hasImages: false,
+      agentMode: false,
+      available: [provider('anthropic', 'claude-sonnet-4-5')],
+      activeProviderId: 'anthropic'
+    })
+    expect(result).not.toBeNull()
+  })
+
+  it('handles whitespace-only prompts as general (no false-positive classification)', () => {
+    const t = classifyTask({ prompt: '   \n  \t  ', hasImages: false, agentMode: false })
+    expect(t.kind).toBe('general')
+  })
+
+  it('handles very long prompts (>10k chars) with mixed signals', () => {
+    const longPrompt = 'analyse this and reason step by step. '.repeat(400)
+    const result = pickProvider({
+      prompt: longPrompt,
+      hasImages: false,
+      agentMode: false,
+      available: [
+        provider('anthropic', 'claude-sonnet-4-5'),
+        provider('openai', 'o1-preview')
+      ],
+      activeProviderId: 'anthropic'
+    })
+    // Reasoning won — should prefer the extended-thinking model.
+    expect(result).not.toBeNull()
+    expect(result!.modelId).toBe('o1-preview')
+  })
+
+  it('treats single-provider lists correctly (no spurious overrides)', () => {
+    const result = pickProvider({
+      prompt: 'anything',
+      hasImages: false,
+      agentMode: false,
+      available: [provider('anthropic', 'claude-sonnet-4-5')],
+      activeProviderId: 'anthropic'
+    })
+    expect(result).not.toBeNull()
+    expect(result!.overrideOfActive).toBe(false)
+  })
+
+  it('filters out providers with empty model strings before scoring', () => {
+    // A provider with a blank model is fundamentally unusable — filter it
+    // out so it doesn't pollute the candidate list with sentinel-empty
+    // scores or trip up downstream string comparisons.
+    const result = pickProvider({
+      prompt: 'hi',
+      hasImages: false,
+      agentMode: false,
+      available: [
+        { id: 'openai' as never, model: '', usable: true, isLocal: false },
+        provider('anthropic', 'claude-sonnet-4-5')
+      ],
+      activeProviderId: 'openai'
+    })
+    expect(result).not.toBeNull()
+    expect(result!.modelId).toBe('claude-sonnet-4-5')
+  })
 })
 
 /* ------------------------ deriveBudgetState -------------------------- */

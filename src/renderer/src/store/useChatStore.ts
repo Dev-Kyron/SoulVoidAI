@@ -18,7 +18,7 @@ import { detectArtifact } from '../lib/artifactDetector'
 import { extractFacts } from '../lib/factExtractor'
 import { summarizeOlderTurns, estimateTokens } from '../lib/conversationSummarizer'
 import { canReuseSummary } from '../lib/summaryReuse'
-import { CHAT_STRINGS, formatErrorContent } from '../lib/chatStrings'
+import { CHAT_STRINGS, formatErrorContent, formatPauseContent } from '../lib/chatStrings'
 import { pickProvider, deriveBudgetState, type AvailableProvider } from '../lib/router'
 import { getMode } from '@shared/modes'
 import { modelHasVision } from '@shared/modelCapabilities'
@@ -543,7 +543,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // Cost-aware bias. Fetch the current month's spend + cap so the
       // router can push toward cheap/local when the user is within 20%
       // of their cap. Failures are best-effort — usage IPC hiccups
-      // shouldn't block a chat send.
+      // shouldn't block a chat send, but they ARE logged so a pattern
+      // of failures is visible in the system log instead of silently
+      // turning the cost bias into a no-op.
       let budget: { nearCap: boolean } | undefined
       try {
         const [summary, budgetCfg] = await Promise.all([
@@ -551,8 +553,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
           vs.usage.getBudget()
         ])
         budget = deriveBudgetState(summary.totalCost, budgetCfg.monthlyUsd)
-      } catch {
-        // Stay cost-neutral on IPC failure.
+      } catch (err) {
+        void vs.logs.write(
+          'warn',
+          'ai',
+          'Router: usage IPC failed, routing without cost bias',
+          err instanceof Error ? err.message : String(err)
+        )
       }
       const pick = pickProvider({
         prompt: content,
@@ -633,6 +640,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     let finalText = ''
     let failure: string | null = null
+    // Distinguishes "agent paused mid-task, recoverable" from "agent
+    // failed, surface as error". Pause = no red orb, no error toast,
+    // softer bubble prefix. Currently only set when MAX_AGENT_STEPS
+    // is hit before the model finished — typing "continue" resumes
+    // the work because the conversation history already has the
+    // tool-call breadcrumbs.
+    let isPause = false
 
     // Wrap the whole send body — prepareConversation, agent loop, chat call,
     // tool runners — in a try/catch. Without this, any uncaught throw
@@ -724,11 +738,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }
       }
       // Step cap hit while the model still wanted more tools — that's an
-      // incomplete run, NOT a successful one. Promote it to a failure so
-      // the user gets a clear message ("Hit the 30-step ceiling — say
-      // `continue` to resume") instead of a silent half-done bubble.
+      // incomplete run, NOT a successful one. Surface it as a PAUSE
+      // (recoverable) rather than an ERROR (failed). Typing "continue"
+      // resumes the work because the conversation history already has
+      // the tool-call breadcrumbs and the agent re-orients from there.
       if (step >= MAX_AGENT_STEPS && exitReason === 'completed') {
         exitReason = 'step-cap'
+        isPause = true
         failure = `Reached the ${MAX_AGENT_STEPS}-step agent ceiling before finishing — type "continue" to keep going.`
       }
 
@@ -740,11 +756,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // the current chat.
       if (isActive()) {
         const currentAgent = get().messages.find((m) => m.id === assistantId)?.content ?? ''
+        const failureContent = isPause
+          ? `${finalText || currentAgent ? `${finalText || currentAgent}\n\n` : ''}${formatPauseContent(failure!)}`
+          : formatErrorContent(failure ?? '')
         patch({
           streaming: false,
-          error: Boolean(failure),
+          // Pause is NOT an error — bubble keeps its normal styling and
+          // the orb won't flash red downstream.
+          error: Boolean(failure) && !isPause,
           content: failure
-            ? finalText || currentAgent || formatErrorContent(failure)
+            ? failureContent
             : finalText || currentAgent || CHAT_STRINGS.noResponse,
           toolCalls: invocations.length ? invocations : undefined
         })
@@ -812,9 +833,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // wrong thread or an empty placeholder.
       return
     }
-    useWidgetStore.getState().setOrbState(failure ? 'error' : 'success')
-    if (failure) {
+    // Pause keeps the orb neutral (success) — the work is intact and
+    // recoverable via "continue", so flashing the red error state would
+    // misrepresent the situation. Real failures still flash red.
+    useWidgetStore
+      .getState()
+      .setOrbState(failure && !isPause ? 'error' : 'success')
+    if (failure && !isPause) {
       useUiStore.getState().pushToast('error', failure)
+    } else if (failure && isPause) {
+      // Pauses get an info toast — visible but non-alarming.
+      useUiStore.getState().pushToast('info', failure)
     } else {
       // Persist the updated transcript and quietly extract any new long-term
       // facts in the background — unless private mode is on, in which case

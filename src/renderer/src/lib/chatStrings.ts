@@ -10,6 +10,13 @@ export const CHAT_STRINGS = {
   stopped: '_Generation stopped._',
   /** Prefix an error message with this when the assistant bubble surfaces it. */
   errorPrefix: '⚠️ ',
+  /**
+   * Prefix used when the agent loop paused mid-task (e.g. hit
+   * MAX_AGENT_STEPS) rather than failed. Visually distinct from
+   * errorPrefix so the user reads "paused, can resume" instead of
+   * "something broke" — and the orb does not flash red for a pause.
+   */
+  pausePrefix: '⏸ ',
   privateOn: 'Private mode on — this conversation isn’t saved or remembered.',
   privateOff: 'Private mode off — new messages will save and be remembered.',
   busyExtractingRunning: 'Looking for what to remember…',
@@ -22,4 +29,9 @@ export const CHAT_STRINGS = {
 /** Formats an error message for an assistant bubble. */
 export function formatErrorContent(message: string): string {
   return `${CHAT_STRINGS.errorPrefix}${message}`
+}
+
+/** Formats a pause message for an assistant bubble (mid-task halt, recoverable). */
+export function formatPauseContent(message: string): string {
+  return `${CHAT_STRINGS.pausePrefix}${message}`
 }

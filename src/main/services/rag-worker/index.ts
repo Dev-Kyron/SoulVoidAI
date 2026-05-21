@@ -179,8 +179,17 @@ function call<P, R>(op: WorkerOp, payload: P): Promise<R> {
       const handle = lane.handle
       lane.handle = null
       if (handle) {
-        void handle.terminate().catch(() => {
-          /* best-effort */
+        void handle.terminate().catch((err) => {
+          // Termination failure on Windows occasionally happens if the
+          // worker process is already crashed — not catastrophic (the
+          // OS will reap the orphan on quit), but worth a trace so
+          // we can investigate if it becomes a pattern.
+          log(
+            'warn',
+            'rag',
+            `RAG worker [${lane.name}] terminate() rejected after timeout`,
+            err instanceof Error ? err.message : String(err)
+          )
         })
       }
     }, timeoutMs)
@@ -214,18 +223,25 @@ export function transcribeAudioViaWorker(
 
 /** Shuts both workers down (called on app quit). */
 export async function disposeWorker(): Promise<void> {
-  const handles: Worker[] = []
-  for (const lane of Object.values(lanes)) {
+  const handles: Array<{ worker: Worker; name: string }> = []
+  for (const [name, lane] of Object.entries(lanes)) {
     if (!lane.handle) continue
-    handles.push(lane.handle)
+    handles.push({ worker: lane.handle, name })
     lane.handle = null
     rejectAllPending(lane, new Error(`RAG worker [${lane.name}] disposed`))
   }
-  await Promise.all(
-    handles.map((h) =>
-      h.terminate().catch(() => {
-        /* best-effort */
-      })
-    )
-  )
+  // allSettled so a single hanging worker can't block quit. Log every
+  // termination failure individually so we don't lose the signal.
+  const results = await Promise.allSettled(handles.map(({ worker }) => worker.terminate()))
+  for (let i = 0; i < results.length; i++) {
+    const r = results[i]
+    if (r.status === 'rejected') {
+      log(
+        'warn',
+        'rag',
+        `RAG worker [${handles[i].name}] terminate() rejected on dispose`,
+        r.reason instanceof Error ? r.reason.message : String(r.reason)
+      )
+    }
+  }
 }

@@ -86,10 +86,24 @@ async function boot(): Promise<void> {
       await vs.ai.transcribe({ pcm: new Float32Array(1600), sampleRate: 16_000 })
       whisperModelWarm = true
       if (generation !== bootGen) return
-    } catch {
-      // If warmup failed (no provider key, network down, etc.) the engine's
-      // first real scan will surface the same error — let it. Skipping the
-      // toast on the actual start path keeps the failure mode singular.
+    } catch (err) {
+      // Cold download failure (offline, disk full, model server 503) used to
+      // silently swallow here and the engine's first real scan would surface
+      // the same error mid-listen — bad UX. Surface it now, before flipping
+      // the orb, with a retry-able message. Also disarm the session so the
+      // user's next "Arm now" click triggers a fresh download attempt.
+      const message = err instanceof Error ? err.message : String(err)
+      if (generation === bootGen) {
+        void vs.logs.write('error', 'system', 'Wake-word model warmup failed', message)
+        useUiStore
+          .getState()
+          .pushToast(
+            'error',
+            'Wake-word model could not load. Check connection or disk space and re-arm to retry.'
+          )
+        useWidgetStore.getState().setWakeArmed(false)
+      }
+      return
     }
   }
 

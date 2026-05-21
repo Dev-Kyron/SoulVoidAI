@@ -566,11 +566,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
     })
     useWidgetStore.getState().setOrbState('processing')
 
-    // Trim the conversation to fit the model's window. When the chat is long
-    // enough, this rolls older turns into a cached "story so far" summary and
-    // only sends the recent tail verbatim — keeping continuity without us
-    // silently dropping the front of the conversation.
-    const { system, turns: baseTurns } = await prepareConversation([...messages, userMessage])
     const patch = (changes: Partial<ChatMessage>): void =>
       set((state) => ({
         messages: state.messages.map((m) => (m.id === assistantId ? { ...m, ...changes } : m))
@@ -580,7 +575,24 @@ export const useChatStore = create<ChatState>((set, get) => ({
     let finalText = ''
     let failure: string | null = null
 
-    if (config.chat.agent) {
+    // Wrap the whole send body — prepareConversation, agent loop, chat call,
+    // tool runners — in a try/catch. Without this, any uncaught throw
+    // (prepareConversation parse failure, JSON crash inside a tool, a
+    // type error in the response handler) left `streaming: true` set
+    // forever and the assistant bubble animating the dots with no way to
+    // recover short of refreshing the panel.
+    try {
+      // Trim the conversation to fit the model's window. When the chat is
+      // long enough, this rolls older turns into a cached "story so far"
+      // summary and only sends the recent tail verbatim — keeping
+      // continuity without us silently dropping the front of the
+      // conversation.
+      const { system, turns: baseTurns } = await prepareConversation([
+        ...messages,
+        userMessage
+      ])
+
+      if (config.chat.agent) {
       const turns: ChatTurn[] = [...baseTurns]
       const invocations: ToolInvocation[] = []
 
@@ -681,6 +693,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
           content: failure
             ? streamed || formatErrorContent(done.error ?? 'Request failed')
             : done.text || streamed || CHAT_STRINGS.noResponse
+        })
+      }
+    }
+    } catch (err) {
+      // Uncaught throw from prepareConversation, the agent loop, a tool
+      // runner, or somewhere in the response handler. Without this guard
+      // the streaming flag never reset — assistant bubble animated the
+      // dots forever and the user had to refresh the panel to recover.
+      failure = err instanceof Error ? err.message : String(err)
+      if (isActive()) {
+        const streamed = get().streamingContent
+        patch({
+          streaming: false,
+          error: true,
+          content: streamed || formatErrorContent(failure)
         })
       }
     }

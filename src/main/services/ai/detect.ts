@@ -189,10 +189,32 @@ function activeProviderIsUsable(detected: DetectedProvider[]): boolean {
 }
 
 /**
- * Runs detection and, if the user has no working provider yet, adopts the
- * first detected local one — seeding its default model from whatever's
- * actually loaded so the chat works on the first message. Idempotent: a user
- * who already has a real provider configured is never overridden.
+ * First keyed provider that has a stored API key — used as a last-resort
+ * fallback when the active provider isn't usable and no local provider
+ * was detected. Returns null if no keyed provider has been configured.
+ */
+function firstUsableKeyedProvider(): ProviderId | null {
+  const cfg = getConfig()
+  const ids = Object.keys(cfg.providers) as ProviderId[]
+  for (const id of ids) {
+    const meta = PROVIDER_META[id]
+    if (meta?.needsKey && hasApiKey(id)) return id
+  }
+  return null
+}
+
+/**
+ * Runs detection and, if the user has no working provider yet, adopts a
+ * usable one — preferring a detected local provider, falling back to any
+ * keyed provider with a stored API key. Idempotent: a user who already
+ * has a working active provider is never overridden.
+ *
+ * The fallback chain matters on fresh-install / cold-boot:
+ *   1. active provider already usable → no-op
+ *   2. local provider running → switch to it (seed model from probe)
+ *   3. any keyed provider configured → switch to it
+ *   4. nothing usable → leave activeProvider alone so the FirstRunBanner
+ *      surfaces and the user can pick one explicitly.
  */
 export async function autoDetectAndAdopt(): Promise<void> {
   const detected = await detectLocalProviders()
@@ -201,7 +223,6 @@ export async function autoDetectAndAdopt(): Promise<void> {
   // Build the new set in full, THEN swap the reference in one assignment so
   // readers never see a transient empty state.
   lastDetected = new Set(detected.map((d) => d.id))
-  if (detected.length === 0) return
 
   // Always update the seeded default model for *any* detected local provider —
   // this keeps the model picker accurate when the user manually switches over
@@ -220,21 +241,44 @@ export async function autoDetectAndAdopt(): Promise<void> {
 
   if (activeProviderIsUsable(detected)) {
     if (modelChanged) broadcast('config:updated', getClientConfig())
-    log(
-      'info',
-      'system',
-      `Local AI detected (${detected.map((d) => d.id).join(', ')}); active provider already usable.`
-    )
+    if (detected.length > 0) {
+      log(
+        'info',
+        'system',
+        `Local AI detected (${detected.map((d) => d.id).join(', ')}); active provider already usable.`
+      )
+    }
     return
   }
 
-  // No usable active provider — switch to the first detected one.
-  const pick = detected[0]
-  updateConfig({ activeProvider: pick.id })
-  log(
-    'success',
-    'system',
-    `Local AI detected — switched active provider to ${PROVIDER_META[pick.id].label} (${pick.models[0]}).`
-  )
-  broadcast('config:updated', getClientConfig())
+  // Active provider isn't usable. Prefer detected local first — keeps the
+  // local-first ethos of the app for users with Ollama already installed.
+  if (detected.length > 0) {
+    const pick = detected[0]
+    updateConfig({ activeProvider: pick.id })
+    log(
+      'success',
+      'system',
+      `Local AI detected — switched active provider to ${PROVIDER_META[pick.id].label} (${pick.models[0]}).`
+    )
+    broadcast('config:updated', getClientConfig())
+    return
+  }
+
+  // No local providers running. Try a keyed provider with a stored key —
+  // this is the fresh-install path for users who paste an OpenAI/Anthropic
+  // key without ever firing up Ollama.
+  const keyed = firstUsableKeyedProvider()
+  if (keyed) {
+    updateConfig({ activeProvider: keyed })
+    log(
+      'info',
+      'system',
+      `No local provider running; falling back to keyed provider ${PROVIDER_META[keyed].label}.`
+    )
+    broadcast('config:updated', getClientConfig())
+    return
+  }
+
+  // Nothing usable anywhere — FirstRunBanner takes over from here.
 }

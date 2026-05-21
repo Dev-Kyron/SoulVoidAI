@@ -135,18 +135,39 @@ if (!app.requestSingleInstanceLock()) {
     event.preventDefault()
     const FLUSH_BUDGET_MS = 1500
     const SHUTDOWN_BUDGET_MS = 3500
+    const HARD_EXIT_BUDGET_MS = 6000
     // Flush every renderer's debounced state to disk BEFORE tearing down
     // IPC — otherwise the most recent chat turn could be lost if the user
     // quits during the 1.2s save-debounce window. After flush we move on
     // to the existing cleanup regardless (renderer might be hung).
+    //
+    // Wrapped in try/catch/finally: an uncaught throw inside the cleanup
+    // block used to leave app.quit() unreached and the app a hung process
+    // the user had to kill from Task Manager. A hard process.exit() backs
+    // up the soft quit if the cleanup itself wedges past the budget.
+    const hardExitTimer = setTimeout(() => {
+      // Failsafe — log to stderr (no log file write, IPC may be torn down)
+      // and force-exit. Better than leaving a zombie app behind.
+      // eslint-disable-next-line no-console
+      console.error('[shutdown] cleanup exceeded budget; forcing process.exit(1)')
+      process.exit(1)
+    }, HARD_EXIT_BUDGET_MS)
+    hardExitTimer.unref?.()
     void (async () => {
-      await requestFlushPending(FLUSH_BUDGET_MS)
-      disposeIpc()
-      await Promise.race([
-        Promise.all([disposeMcp(), disposeWorker()]),
-        new Promise<void>((resolve) => setTimeout(resolve, SHUTDOWN_BUDGET_MS))
-      ])
-      app.quit()
+      try {
+        await requestFlushPending(FLUSH_BUDGET_MS)
+        disposeIpc()
+        await Promise.race([
+          Promise.all([disposeMcp(), disposeWorker()]),
+          new Promise<void>((resolve) => setTimeout(resolve, SHUTDOWN_BUDGET_MS))
+        ])
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('[shutdown] cleanup threw:', err)
+      } finally {
+        clearTimeout(hardExitTimer)
+        app.quit()
+      }
     })()
   })
 

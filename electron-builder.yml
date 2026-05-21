@@ -33,9 +33,13 @@ win:
   artifactName: VoidSoul-Assistant-Setup.${ext}
 
 nsis:
-  oneClick: false
-  allowToChangeInstallationDirectory: true
+  # One-click install — no wizard, no per-user/per-machine choice page
+  # (which silently 404s the Next button when "all users" needs UAC the
+  # user can't grant). Matches modern desktop-app norms: Discord, Slack,
+  # Notion, Linear all ship this way. Installs to %LOCALAPPDATA%\Programs.
+  oneClick: true
   perMachine: false
+  runAfterFinish: true
 
 mac:
   target: dmg

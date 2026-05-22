@@ -31,7 +31,7 @@ import { useWidgetStore } from './useWidgetStore'
 import { useUiStore } from './useUiStore'
 import { useMemoryStore } from './useMemoryStore'
 import { useProjectsStore } from './useProjectsStore'
-import { speakWith, stopSpeaking } from '../lib/voice'
+import { stopSpeaking, StreamingSpeaker } from '../lib/voice'
 import {
   WELCOME_MESSAGE_ID,
   isQuietNow,
@@ -518,6 +518,15 @@ interface ChatState {
  */
 let streamArtifactDismissed = false
 
+/**
+ * Active streaming-TTS speaker for the current send(). Lives at module
+ * scope because applyChunk (which feeds the speaker) runs in a different
+ * call context than send() (which constructs it). The `requestId` field
+ * makes stale instances safe to ignore — if a new send replaces this,
+ * any late chunk for an older requestId no-ops out.
+ */
+let activeSpeaker: { speaker: StreamingSpeaker; requestId: string } | null = null
+
 export const useChatStore = create<ChatState>((set, get) => ({
   messages: [welcomeMessage()],
   summary: null,
@@ -662,6 +671,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
 
     stopSpeaking()
+    // Streaming-TTS speaker: built ONCE per send so the persona / voice
+    // URI / rate stay consistent across the run, even if the user opens
+    // Settings and changes them mid-reply. Skipped when voice is off
+    // or DND is silencing — leaves `activeSpeaker` null and applyChunk
+    // / agent-step feeders no-op out.
+    activeSpeaker = null
+    if (config.voice.enabled && !isQuietNow(config.appearance.dnd)) {
+      activeSpeaker = {
+        speaker: new StreamingSpeaker(config.voice),
+        requestId
+      }
+    }
     set({
       messages: [...messages, userMessage, assistantMessage],
       attachments: [],
@@ -795,6 +816,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
           finalText = finalText ? `${finalText}\n\n${result.text}` : result.text
         }
         patch({ content: finalText, toolCalls: invocations.length ? [...invocations] : undefined })
+        // Streaming TTS for the agent path. Each step's text lands all
+        // at once (invoke is non-streaming, unlike chat), so feed the
+        // accumulated finalText after every step. The speaker tracks
+        // its own spokenIndex so already-spoken content isn't repeated.
+        if (activeSpeaker && activeSpeaker.requestId === requestId && result.text.trim()) {
+          activeSpeaker.speaker.feed(finalText)
+        }
         if (result.toolCalls.length === 0) {
           exitReason = 'completed'
           break
@@ -1035,17 +1063,24 @@ export const useChatStore = create<ChatState>((set, get) => ({
         scheduleHistorySave()
         void extractFacts(get().messages)
       }
-      if (finalText) {
-        const cfg = useConfigStore.getState().config
-        if (cfg?.voice.enabled && !isQuietNow(cfg.appearance.dnd)) {
-          speakWith(cfg.voice, finalText)
-        }
+      if (finalText && activeSpeaker && activeSpeaker.requestId === requestId) {
+        // Flush the trailing fragment — covers a final sentence that
+        // didn't end in punctuation, or any text the chunker held back
+        // behind an unclosed code fence that closed at the end of the
+        // stream. enqueueSpeak no-ops on an empty tail, so calling
+        // this unconditionally is safe even when the speaker already
+        // emitted everything mid-stream.
+        activeSpeaker.speaker.flush(finalText)
       }
+      activeSpeaker = null
     }
   },
 
   stop: () => {
     stopSpeaking()
+    // Drop the streaming speaker so a stale feed() from an in-flight chunk
+    // can't queue more sentences after the user hit Stop.
+    activeSpeaker = null
     const state = get()
     const requestId = state.pendingRequestId
     const assistantId = state.pendingAssistantId
@@ -1386,6 +1421,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // don't re-render at all during a stream.
     const next = get().streamingContent + chunk.delta
     set({ streamingContent: next })
+    // Streaming TTS — speak any sentences that just completed. The
+    // requestId guard skips this if a newer send has rotated the
+    // speaker out; the speaker itself no-ops on chunks that don't
+    // contain a sentence boundary, so this stays cheap.
+    if (activeSpeaker && activeSpeaker.requestId === pendingRequestId) {
+      activeSpeaker.speaker.feed(next)
+    }
     // Streaming-artifact detection. If the assistant is currently writing a
     // substantial fenced code block, push it into the Canvas dialog live so
     // the user watches the code grow — Claude's "Artifacts" paradigm. The

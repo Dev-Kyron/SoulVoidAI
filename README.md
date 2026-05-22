@@ -25,6 +25,38 @@ Bring whichever AI you already love — **12 providers, one interface** — and 
 
 ---
 
+## 🆕 What's new in v1.1.1
+
+Polish pass from beta-tester feedback — UX cleanup across the board, no breaking changes.
+
+**Voice + TTS**
+
+- **Streaming TTS** — the assistant starts talking on the first complete sentence instead of waiting for the whole reply to finish typing. Drops perceived latency from "wait for paragraph, then voice" to "voice within the first sentence."
+- **Smoother voice picks** — `guessVoice()` now prefers neural OS voices (Windows Aria/Guy Online, macOS Premium/Enhanced) before falling back to the older SAPI Zira/David defaults beta testers complained about.
+- **Speech volume slider** — independent of the OS / app volume mixer, so users can dial Void/Soul down without muting everything else from the app.
+- **Per-message mute toggle** — the speaker icon on every assistant message doubles as a quick mute while TTS is active. One-click silence on long replies.
+
+**Nexus panel**
+
+- **Rolling-line voice preview** — the response area is now a clean single-line "teleprompter" that ticks to the next sentence as TTS reads. No more scrollable text-spill.
+- **Inline composer** — compact send box right on the Nexus panel so you can ship a quick follow-up without switching to the full chat tab.
+
+**Chat composer**
+
+- **Ctrl+V image paste** — pasting a screenshot (Snipping Tool, browser "copy image", anything on the clipboard) attaches it as an image attachment, exactly like drag-and-drop.
+
+**Settings + onboarding**
+
+- **Frameless Settings window** — drops the OS title bar + File/Edit/View menu, keeps native min/max/close as a slim overlay. Cleaner, more app-like.
+- **Honest voice banner** — replaced the misleading "install Aria/Guy from Narrator" copy (those voices are gated behind a private Microsoft API and unreachable to third-party apps) with a straight explanation + a deep link to Speech → Add voices for voices that actually work.
+- **In-app reviews** — Settings → About → "Leave a review" opens a star-rating + comment dialog. Submissions email the studio; the best ones land on the marketing site's Reactions wall.
+
+**Installer**
+
+- **Windows .ico icon** — Start Menu shortcut, Desktop shortcut, and the EXE itself now show the VoidSoul orb instead of the generic Electron icon.
+
+---
+
 ## 🆕 What's new in v1.1.0
 
 Two big systems landed in this release.

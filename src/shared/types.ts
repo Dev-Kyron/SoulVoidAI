@@ -659,6 +659,13 @@ export interface VoiceConfig {
   /** Speech rate (0.5 – 1.6). */
   rate: number
   /**
+   * Speech volume (0 – 1). 1 = system volume, 0 = silent (but still queues —
+   * use `enabled: false` to actually stop scheduling utterances). Independent
+   * of the OS / app volume mixer so users can mute Void/Soul without muting
+   * everything else from the app.
+   */
+  volume: number
+  /**
    * Wake-word listener. Off by default — needs a Picovoice access key and a
    * .ppn keyword file per persona (Settings → Integrations → Picovoice).
    */

@@ -178,7 +178,12 @@ function Sidebar({
     : GROUPS
   return (
     <aside className="flex h-full w-56 shrink-0 flex-col border-r border-white/5 bg-black/30">
-      <div className="flex items-center gap-2 px-4 pb-3 pt-5">
+      {/*
+        Drag region — paired with the header's drag strip on the right pane,
+        the whole top edge of the Settings window is grabbable. Without a
+        native title bar this is how users move the window.
+      */}
+      <div className="drag flex items-center gap-2 px-4 pb-3 pt-5">
         <span className="flex h-7 w-7 items-center justify-center rounded-md bg-[var(--accent-soft)] text-[var(--accent)]">
           <SettingsIcon size={14} />
         </span>
@@ -309,7 +314,16 @@ export function SettingsRoot(): JSX.Element {
     <div className="relative flex h-screen w-screen bg-void-700 text-slate-200">
       <Sidebar active={active} onPick={setActive} />
       <main className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-center justify-between border-b border-white/5 px-6 pb-3 pt-4">
+        {/*
+          The whole header is the drag region — there's no OS title bar to
+          grab anymore, so this strip is how users move the window. The
+          right padding (`pr-36`) keeps the in-app close button (and any
+          future header controls) clear of the native min/max/close
+          overlay that Electron paints in the top-right corner via
+          `titleBarOverlay`. The close button itself opts back out of
+          dragging via `-webkit-app-region: no-drag` so clicks register.
+        */}
+        <header className="drag flex items-center justify-between border-b border-white/5 px-6 pb-3 pr-36 pt-4">
           <div>
             <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
               {current.label}
@@ -320,7 +334,7 @@ export function SettingsRoot(): JSX.Element {
             type="button"
             onClick={() => void vs.window.closeSettings()}
             title="Close (Esc)"
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition hover:bg-white/5 hover:text-white"
+            className="no-drag flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition hover:bg-white/5 hover:text-white"
           >
             <X size={15} />
           </button>

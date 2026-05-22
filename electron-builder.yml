@@ -33,7 +33,11 @@ win:
     - target: nsis
       arch:
         - x64
-  icon: build/icon.png
+  # Multi-resolution ICO — electron-builder uses this for the installer's
+  # NSIS UI, the embedded EXE icon, and the Start Menu / Desktop shortcuts.
+  # PNG works for runtime BrowserWindow icons but Windows shortcuts fall
+  # back to a generic Electron icon without a real .ico.
+  icon: build/icon.ico
   artifactName: VoidSoul-Assistant-Setup.${ext}
 
 nsis:

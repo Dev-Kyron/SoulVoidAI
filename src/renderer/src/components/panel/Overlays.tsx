@@ -2,12 +2,20 @@
  * Floating overlays rendered above the panel: transient toast notifications
  * and the modal permission-approval dialog.
  */
+import { Suspense, lazy } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { Check, X, Info, AlertTriangle, Undo2, ShieldQuestion } from 'lucide-react'
 import { useUiStore, type ToastKind } from '../../store/useUiStore'
 import { undoAction } from '../../lib/actions'
 import { PERMISSIONS } from '@shared/permissions'
 import { cn } from '../../lib/utils'
+
+// Lazy-loaded — the review dialog mounts at most once per beta tester's
+// lifetime, so there's no reason to weigh down the initial bundle with it.
+// The boundary only fetches when `reviewDialogOpen` flips true.
+const ReviewDialog = lazy(() =>
+  import('../settings/ReviewDialog').then((m) => ({ default: m.ReviewDialog }))
+)
 
 const TOAST_STYLE: Record<ToastKind, string> = {
   success: 'border-emerald-500/40 bg-emerald-500/15 text-emerald-100',
@@ -131,10 +139,18 @@ function PermissionDialog(): JSX.Element {
 }
 
 export function Overlays(): JSX.Element {
+  // Gate the lazy import on the open flag so the chunk only loads when the
+  // user actually opens the dialog — not on every app launch.
+  const reviewOpen = useUiStore((s) => s.reviewDialogOpen)
   return (
     <>
       <ToastHost />
       <PermissionDialog />
+      {reviewOpen && (
+        <Suspense fallback={null}>
+          <ReviewDialog />
+        </Suspense>
+      )}
     </>
   )
 }

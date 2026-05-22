@@ -4,13 +4,14 @@
  * shown as thumbnails; an empty streaming reply shows animated dots.
  */
 import { motion } from 'framer-motion'
-import { FileText, Volume2, Wrench, Check, X, Maximize2 } from 'lucide-react'
+import { FileText, Volume2, VolumeX, Wrench, Check, X, Maximize2 } from 'lucide-react'
 import { Markdown } from './Markdown'
 import { useConfigStore } from '../../store/useConfigStore'
 import { useChatStore } from '../../store/useChatStore'
-import { speakWith } from '../../lib/voice'
+import { speakWith, stopSpeaking } from '../../lib/voice'
+import { useIsSpeaking } from '../../hooks/useCurrentSpoken'
 import { cn, formatTime } from '../../lib/utils'
-import type { ChatMessage, ToolInvocation } from '@shared/types'
+import type { ChatMessage, ToolInvocation, VoiceConfig } from '@shared/types'
 
 function argsSummary(args: Record<string, unknown>): string {
   const parts = Object.values(args).map((v) => {
@@ -289,17 +290,40 @@ export function MessageBubble({
           </span>
         )}
         {canSpeak && voice && (
-          <button
-            type="button"
-            onClick={() => speakWith(voice, displayContent)}
-            title="Read aloud"
-            className="text-slate-500 transition hover:text-[var(--accent)]"
-          >
-            <Volume2 size={11} />
-          </button>
+          <SpeakerButton voice={voice} text={displayContent} />
         )}
       </div>
     </motion.div>
   )
 }
 
+/**
+ * Per-message speaker control / mute toggle. Beta testers asked for a
+ * quick way to silence a reply mid-read without hunting for global stop,
+ * so the same button doubles as mute while TTS is active.
+ *
+ * Subscribes to the boolean `useIsSpeaking` rather than `useCurrentSpoken`
+ * so a 50-sentence reply doesn't trigger a re-render in every visible
+ * bubble each time the synth ticks to the next sentence — only the
+ * speaking ↔ idle transition flips the icon, so the boolean is all we need.
+ */
+function SpeakerButton({ voice, text }: { voice: VoiceConfig; text: string }): JSX.Element {
+  const speaking = useIsSpeaking()
+  return (
+    <button
+      type="button"
+      onClick={() => (speaking ? stopSpeaking() : speakWith(voice, text))}
+      title={speaking ? 'Mute — stop reading aloud' : 'Read aloud'}
+      aria-label={speaking ? 'Mute' : 'Read aloud'}
+      aria-pressed={speaking}
+      className={cn(
+        'transition',
+        speaking
+          ? 'text-[var(--accent)] hover:text-rose-400'
+          : 'text-slate-500 hover:text-[var(--accent)]'
+      )}
+    >
+      {speaking ? <VolumeX size={11} /> : <Volume2 size={11} />}
+    </button>
+  )
+}

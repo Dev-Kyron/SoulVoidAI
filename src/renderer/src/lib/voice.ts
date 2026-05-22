@@ -31,9 +31,43 @@ export interface SimpleVoice {
  */
 const NEURAL_HINT = /\b(online|premium|enhanced|natural|neural|wavenet|studio)\b/i
 
-const MALE_HINT = /\b(david|mark|george|james|guy|paul|ryan|eric|daniel|alex|fred|tom|william|davis|tony|brandon|nathan)\b/i
+/**
+ * Per-persona "first-choice" name lists, ordered from best to worst quality.
+ * The picker walks these one at a time before falling back to the broad
+ * MALE_HINT / FEMALE_HINT regex — so "Microsoft Guy Online (Natural)" wins
+ * over "Microsoft Mark Desktop (SAPI)" even though both match the male hint.
+ *
+ * Listed names are limited to what's actually reachable via the Web Speech
+ * API (SAPI on Windows, NSSpeechSynthesizer on macOS, espeak/etc. on Linux).
+ * The newer Microsoft "Natural HD" voices (Andrew, Ava, Brian, Emma)
+ * installed via Narrator are deliberately omitted — Microsoft has gated
+ * them behind a private API that third-party apps can't reach, so even if
+ * they appear in Narrator's picker they never surface here.
+ */
+const PREFERRED_VOID_VOICES = [
+  'guy',    // Natural (Win, when available via en-US locale pack)
+  'davis',  // Natural (Win)
+  'tony',   // Natural (Win)
+  'christopher',
+  'eric',
+  'roger',
+  'steffan',
+  'mark',   // SAPI fallback
+  'david'   // SAPI default
+]
+const PREFERRED_SOUL_VOICES = [
+  'aria',   // Natural (Win, when available)
+  'jenny',  // Natural (Win)
+  'michelle',
+  'sara',
+  'nancy',
+  'emma',   // some non-HD installs surface Emma via SAPI
+  'zira'    // SAPI default
+]
+
+const MALE_HINT = /\b(david|mark|george|james|guy|paul|ryan|eric|daniel|alex|fred|tom|william|davis|tony|brandon|nathan|andrew|brian|christopher|roger|steffan)\b/i
 const FEMALE_HINT =
-  /\b(zira|hazel|susan|catherine|linda|eva|aria|jenny|sonia|samantha|victoria|karen|moira|tessa|nancy|emma|ava|jane|female)\b/i
+  /\b(zira|hazel|susan|catherine|linda|eva|aria|jenny|sonia|samantha|victoria|karen|moira|tessa|nancy|emma|ava|jane|michelle|sara|female)\b/i
 
 let cache: SpeechSynthesisVoice[] = []
 const listeners = new Set<() => void>()
@@ -41,6 +75,37 @@ const listeners = new Set<() => void>()
 function refresh(): void {
   cache = window.speechSynthesis?.getVoices() ?? []
   listeners.forEach((listener) => listener())
+}
+
+/* ---------- currently-spoken-sentence signal -----------------------------
+ *
+ * A small reactive slot pointing at the sentence the synthesizer is reading
+ * RIGHT NOW. Drives the Nexus panel's rolling-line preview — instead of
+ * spilling the whole reply into a scrollable box, the panel shows just the
+ * line being voiced and lets it tick to the next as TTS progresses.
+ *
+ * Updated from the SpeechSynthesisUtterance.onstart hook attached in
+ * enqueueSpeak(). Cleared when the synth queue drains, when stopSpeaking()
+ * cancels, or on an utterance error.
+ * ------------------------------------------------------------------------- */
+let currentSpoken: string | null = null
+const currentSpokenListeners = new Set<(s: string | null) => void>()
+
+function setCurrentSpoken(value: string | null): void {
+  if (value === currentSpoken) return
+  currentSpoken = value
+  currentSpokenListeners.forEach((listener) => listener(value))
+}
+
+/** Subscribe to changes in the currently-spoken sentence. */
+export function subscribeCurrentSpoken(callback: (sentence: string | null) => void): () => void {
+  currentSpokenListeners.add(callback)
+  return () => currentSpokenListeners.delete(callback)
+}
+
+/** Read the currently-spoken sentence synchronously (for `useState` seeding). */
+export function getCurrentSpoken(): string | null {
+  return currentSpoken
 }
 
 if (window.speechSynthesis) {
@@ -61,24 +126,41 @@ export function onVoicesChanged(callback: () => void): () => void {
 
 /**
  * Best-guess default voice for a persona — preferred order:
- *   1. English neural voice matching the persona hint
+ *   1. A name from the per-persona preferred list, in list order
+ *      (Andrew → Void, Ava → Soul win when installed; Aria/Guy next; etc.)
+ *   2. English neural voice matching the persona hint
  *      (e.g. "Microsoft Aria Online (Natural)" for Soul)
- *   2. Any English voice matching the persona hint
+ *   3. Any English voice matching the persona hint
  *      (e.g. "Microsoft Zira Desktop" for Soul)
- *   3. Any English neural voice
- *   4. First English voice
- *   5. First voice overall
+ *   4. Any English neural voice
+ *   5. First English voice
+ *   6. First voice overall
  *
- * Neural-first ordering closes the "robotic / choppy" complaint for
- * users on Windows 10/11 (which ships SAPI Zira/David by default but
- * Aria/Guy/Jenny are one settings-click away) and macOS (where
- * "Samantha (Premium)" is downloadable but not the default).
+ * Walking the preferred-name list first lets us steer the default at
+ * "Andrew (Natural HD)" over "Guy (Natural)" over "Mark (SAPI)" without
+ * the regex caring — each is a strictly better choice than the next.
+ * Beta testers who install just one new voice get the best one auto-
+ * selected, which closes the "the voices still sound robotic after I
+ * installed Andrew" loop.
  */
 export function guessVoice(persona: VoicePersona): string {
   refresh()
   const english = cache.filter((v) => v.lang.toLowerCase().startsWith('en'))
   const pool = english.length > 0 ? english : cache
   const personaHint = persona === 'void' ? MALE_HINT : FEMALE_HINT
+  const preferred = persona === 'void' ? PREFERRED_VOID_VOICES : PREFERRED_SOUL_VOICES
+
+  // First-pick walk: try each preferred name in order, prioritising
+  // neural variants when both an SAPI and a neural copy exist (some
+  // installs surface "Microsoft Eric" as both a desktop voice AND a
+  // Natural voice — we want the Natural one).
+  for (const name of preferred) {
+    const needle = new RegExp(`\\b${name}\\b`, 'i')
+    const neural = pool.find((v) => needle.test(v.name) && NEURAL_HINT.test(v.name))
+    if (neural) return neural.voiceURI
+    const plain = pool.find((v) => needle.test(v.name))
+    if (plain) return plain.voiceURI
+  }
 
   const neuralPersona = pool.find((v) => NEURAL_HINT.test(v.name) && personaHint.test(v.name))
   if (neuralPersona) return neuralPersona.voiceURI
@@ -110,33 +192,74 @@ function forSpeech(text: string): string {
  */
 const VOICE_PITCH = 1.05
 
-export function speak(text: string, voiceURI: string, rate = 1): void {
+/**
+ * Wires the currently-spoken signal up to an utterance. `display` is the
+ * sentence shown in the Nexus rolling preview — it's the ORIGINAL text
+ * (with markdown intact), not the speech-stripped variant, so the user
+ * sees what they'd read on screen rather than the bracket-free TTS prompt.
+ *
+ * The onend clear only fires when no more utterances are pending — if the
+ * synth queue still has work, the next utterance's onstart will overwrite
+ * the signal cleanly without an in-between flicker to null.
+ */
+function attachSpokenSignal(utterance: SpeechSynthesisUtterance, display: string): void {
   const synth = window.speechSynthesis
-  if (!synth || !text.trim()) return
-  synth.cancel()
+  utterance.onstart = (): void => setCurrentSpoken(display)
+  const clearIfIdle = (): void => {
+    if (!synth || (!synth.speaking && !synth.pending)) setCurrentSpoken(null)
+  }
+  utterance.onend = clearIfIdle
+  utterance.onerror = clearIfIdle
+}
+
+/** Clamp a volume to the [0, 1] range the Web Speech API expects. */
+function clampVolume(volume: number): number {
+  if (!Number.isFinite(volume)) return 1
+  return Math.min(1, Math.max(0, volume))
+}
+
+/**
+ * Build a configured `SpeechSynthesisUtterance` for the given text, voice,
+ * rate and volume — with rate/volume clamped to the platform's accepted
+ * range and the spoken-signal hooks already attached. Shared between
+ * `speak` and `enqueueSpeak` so the utterance setup stays in one place;
+ * the only thing the callers differ on is whether they cancel the queue
+ * first (`speak`) or append to it (`enqueueSpeak`).
+ */
+function buildUtterance(
+  text: string,
+  voiceURI: string,
+  rate: number,
+  volume: number
+): SpeechSynthesisUtterance {
   const utterance = new SpeechSynthesisUtterance(forSpeech(text))
   const voice = cache.find((v) => v.voiceURI === voiceURI)
   if (voice) utterance.voice = voice
   utterance.rate = Math.min(1.6, Math.max(0.5, rate))
   utterance.pitch = VOICE_PITCH
-  synth.speak(utterance)
+  utterance.volume = clampVolume(volume)
+  attachSpokenSignal(utterance, text.trim())
+  return utterance
+}
+
+export function speak(text: string, voiceURI: string, rate = 1, volume = 1): void {
+  const synth = window.speechSynthesis
+  if (!synth || !text.trim()) return
+  synth.cancel()
+  setCurrentSpoken(null)
+  synth.speak(buildUtterance(text, voiceURI, rate, volume))
 }
 
 /**
  * Like speak() but does NOT cancel the existing queue first. Use this
- * when feeding streaming-TTS sentence chunks — each chunk queues
- * behind whatever's already playing, so the voice flows continuously
- * as new text arrives.
+ * when feeding streaming-TTS sentence chunks — each chunk queues behind
+ * whatever's already playing, so the voice flows continuously as new
+ * text arrives.
  */
-export function enqueueSpeak(text: string, voiceURI: string, rate = 1): void {
+export function enqueueSpeak(text: string, voiceURI: string, rate = 1, volume = 1): void {
   const synth = window.speechSynthesis
   if (!synth || !text.trim()) return
-  const utterance = new SpeechSynthesisUtterance(forSpeech(text))
-  const voice = cache.find((v) => v.voiceURI === voiceURI)
-  if (voice) utterance.voice = voice
-  utterance.rate = Math.min(1.6, Math.max(0.5, rate))
-  utterance.pitch = VOICE_PITCH
-  synth.speak(utterance)
+  synth.speak(buildUtterance(text, voiceURI, rate, volume))
 }
 
 /** Resolves the configured voice URI for the active persona, with a fallback. */
@@ -145,13 +268,14 @@ export function resolveVoiceURI(voice: VoiceConfig): string {
   return stored || guessVoice(voice.persona)
 }
 
-/** Speaks text using the active persona's configured voice. */
+/** Speaks text using the active persona's configured voice + rate + volume. */
 export function speakWith(voice: VoiceConfig, text: string): void {
-  speak(text, resolveVoiceURI(voice), voice.rate)
+  speak(text, resolveVoiceURI(voice), voice.rate, voice.volume)
 }
 
 export function stopSpeaking(): void {
   window.speechSynthesis?.cancel()
+  setCurrentSpoken(null)
 }
 
 /* --------------------------- streaming TTS --------------------------------
@@ -228,17 +352,19 @@ export class StreamingSpeaker {
   private spokenIndex = 0
   private readonly voiceURI: string
   private readonly rate: number
+  private readonly volume: number
 
   constructor(voice: VoiceConfig) {
     this.voiceURI = resolveVoiceURI(voice)
     this.rate = voice.rate
+    this.volume = voice.volume
   }
 
   /** Append newly-arrived text; emit any sentences that just completed. */
   feed(text: string): void {
     const { sentences, nextIndex } = extractCompleteSentences(text, this.spokenIndex)
     for (const sentence of sentences) {
-      enqueueSpeak(sentence, this.voiceURI, this.rate)
+      enqueueSpeak(sentence, this.voiceURI, this.rate, this.volume)
     }
     this.spokenIndex = nextIndex
   }

@@ -14,7 +14,8 @@ import {
   Heart,
   RefreshCw,
   ShieldCheck,
-  Sparkles
+  Sparkles,
+  Star
 } from 'lucide-react'
 import { CollapsibleSection } from './CollapsibleSection'
 import { vs } from '../../lib/bridge'
@@ -66,6 +67,19 @@ export function About(): JSX.Element {
         {/* Action row — a real "what can I do with this About section" set */}
         <div className="grid grid-cols-2 gap-1.5 p-2.5">
           <ActionButton
+            icon={<Star size={12} />}
+            label="Leave a review"
+            onClick={() => useUiStore.getState().setReviewDialogOpen(true)}
+            hint="Star rating + a note — sent privately to the studio."
+          />
+          <ActionButton
+            icon={<Heart size={12} />}
+            label="Report an issue"
+            onClick={() => openUrl(ISSUES_URL)}
+            external
+            hint="Bug, feature request, weird behaviour."
+          />
+          <ActionButton
             icon={<FolderOpen size={12} />}
             label="Open data folder"
             onClick={() => void vs.system.openDataFolder()}
@@ -77,13 +91,6 @@ export function About(): JSX.Element {
             onClick={() => openUrl(REPO_URL)}
             external
             hint="Source available on GitHub for transparency."
-          />
-          <ActionButton
-            icon={<Heart size={12} />}
-            label="Report an issue"
-            onClick={() => openUrl(ISSUES_URL)}
-            external
-            hint="Bug, feature request, weird behaviour."
           />
           <ActionButton
             icon={<ShieldCheck size={12} />}

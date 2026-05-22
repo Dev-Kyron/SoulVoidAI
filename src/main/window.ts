@@ -276,7 +276,17 @@ export function openSettingsWindow(): BrowserWindow {
     minWidth: SETTINGS_WINDOW.minWidth,
     minHeight: SETTINGS_WINDOW.minHeight,
     title: 'VoidSoul · Settings',
-    frame: true,
+    // titleBarStyle: 'hidden' drops the OS title bar (icon + "VoidSoul
+    // Assistant" caption + File/Edit/View menu) while titleBarOverlay
+    // keeps the native minimise / maximise / close buttons as a thin
+    // platform-styled overlay in the top-right. autoHideMenuBar belt-
+    // and-suspenders the menu away on Windows variants that draw it
+    // independently of the title bar. The renderer's header gets an
+    // -webkit-app-region: drag strip so the window stays draggable from
+    // the top edge despite having no native chrome.
+    titleBarStyle: 'hidden',
+    titleBarOverlay: { color: '#0e0e16', symbolColor: '#94a3b8', height: 36 },
+    autoHideMenuBar: true,
     transparent: false,
     resizable: true,
     minimizable: true,

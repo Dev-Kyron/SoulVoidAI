@@ -28,6 +28,7 @@ import { cn } from '../../lib/utils'
 import { CHAT_STRINGS } from '../../lib/chatStrings'
 import { MicButton } from '../common/MicButton'
 import { useFileDrop } from '../../lib/useFileDrop'
+import { useClipboardPaste } from '../../lib/useClipboardPaste'
 import { modelHasVision } from '@shared/modelCapabilities'
 import { WELCOME_MESSAGE_ID } from '@shared/types'
 import { useT } from '../../lib/i18n'
@@ -277,6 +278,10 @@ export function ChatComposer(): JSX.Element {
   // list. Matches the pick-via-button flow's semantics so users with no
   // mouse-button preference get identical results.
   const drop = useFileDrop()
+  // Ctrl+V image / file paste — same attachment semantics as drag-and-drop
+  // so a clipboard screenshot lands the same way a dragged screenshot would.
+  // Text paste still falls through to the textarea's default handler.
+  const onPaste = useClipboardPaste()
 
   return (
     <div
@@ -367,6 +372,7 @@ export function ChatComposer(): JSX.Element {
             setText(e.target.value)
             resize()
           }}
+          onPaste={onPaste}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
               e.preventDefault()

@@ -1,11 +1,18 @@
 /**
  * Generates the VoidSoul Assistant orb icons (app icon + tray icon) as PNG
- * files using a minimal, dependency-free PNG encoder. Run via `npm run icons`.
+ * files plus a multi-resolution Windows ICO using a minimal,
+ * dependency-free encoder pair. Run via `npm run icons`.
  *
  * Output:
- *   build/icon.png      512x512  - packaging icon (electron-builder)
+ *   build/icon.ico      multi-res (16,24,32,48,64,128,256) — installer + EXE
+ *   build/icon.png      512x512  - packaging icon (mac/linux + fallback)
  *   resources/icon.png  256x256  - runtime window icon
  *   resources/tray.png   32x32   - system tray icon
+ *
+ * Why ICO matters: electron-builder embeds the Windows EXE icon and Start
+ * Menu / Desktop shortcut icons from a .ico file. Pointing it at a .png
+ * leaves those shortcuts showing the generic Electron logo — which is
+ * exactly what beta testers reported on installed builds.
  */
 import zlib from 'node:zlib'
 import { writeFileSync, mkdirSync } from 'node:fs'
@@ -127,7 +134,51 @@ function write(relPath, size) {
   console.log(`  ✓ ${relPath} (${size}x${size})`)
 }
 
+/* ---- minimal ICO encoder ------------------------------------------------
+ * ICO is a tiny directory that points to one image payload per entry. Each
+ * payload can be a BMP or — since Vista — a PNG, which is what we use so
+ * the 256×256 entry doesn't bloat the file. Windows reads the directory
+ * and picks whichever size best matches the surface it's painting (taskbar,
+ * Start Menu, Alt-Tab, file-Explorer thumbnail).
+ *
+ * Layout: ICONDIR(6) | ICONDIRENTRY*N(16 each) | imageData*N
+ * For 256×256 the width/height bytes are stored as 0 (per spec).
+ */
+function encodeICO(sizes) {
+  const images = sizes.map((size) => encodePNG(size, drawOrb(size)))
+  const dir = Buffer.alloc(6)
+  dir.writeUInt16LE(0, 0) // reserved
+  dir.writeUInt16LE(1, 2) // image type: 1 = icon
+  dir.writeUInt16LE(images.length, 4)
+
+  const entries = Buffer.alloc(16 * images.length)
+  let offset = 6 + 16 * images.length
+  images.forEach((png, i) => {
+    const size = sizes[i]
+    const e = i * 16
+    entries[e + 0] = size >= 256 ? 0 : size // width
+    entries[e + 1] = size >= 256 ? 0 : size // height
+    entries[e + 2] = 0 // no colour palette
+    entries[e + 3] = 0 // reserved
+    entries.writeUInt16LE(1, e + 4) // colour planes
+    entries.writeUInt16LE(32, e + 6) // bits per pixel
+    entries.writeUInt32LE(png.length, e + 8) // image data size
+    entries.writeUInt32LE(offset, e + 12) // image data offset
+    offset += png.length
+  })
+
+  return Buffer.concat([dir, entries, ...images])
+}
+
+function writeICO(relPath, sizes) {
+  const full = resolve(root, relPath)
+  mkdirSync(dirname(full), { recursive: true })
+  writeFileSync(full, encodeICO(sizes))
+  console.log(`  ✓ ${relPath} (${sizes.join(',')})`)
+}
+
 console.log('Generating VoidSoul orb icons…')
+writeICO('build/icon.ico', [16, 24, 32, 48, 64, 128, 256])
 write('build/icon.png', 512)
 write('resources/icon.png', 256)
 write('resources/tray.png', 32)

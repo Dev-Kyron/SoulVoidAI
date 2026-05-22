@@ -8,24 +8,37 @@
  *
  * Which one renders is driven by `appearance.nexusStyle`.
  */
-import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { Activity, AppWindow, Clock, MessageSquare, Plus, Volume2, VolumeX, X } from 'lucide-react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import {
+  Activity,
+  AppWindow,
+  Clock,
+  MessageSquare,
+  Plus,
+  SendHorizontal,
+  Square,
+  Volume2,
+  VolumeX,
+  X
+} from 'lucide-react'
 import { HudCore } from './HudCore'
 import { Gauge } from './Gauge'
 import { Orb } from '../widget/Orb'
 import { MicButton } from '../common/MicButton'
-import { Markdown } from '../chat/Markdown'
 import { useConfigStore } from '../../store/useConfigStore'
 import { useUiStore } from '../../store/useUiStore'
 import { useWidgetStore, useVisibleOrbState } from '../../store/useWidgetStore'
 import { useChatStore } from '../../store/useChatStore'
 import { useMemoryStore } from '../../store/useMemoryStore'
 import { useSystemStats } from '../../hooks/useSystemStats'
+import { useCurrentSpoken } from '../../hooks/useCurrentSpoken'
 import { getMode } from '@shared/modes'
 import { resolveIcon } from '../../lib/icons'
 import { runAction } from '../../lib/actions'
 import { guessVoice, speak, stopSpeaking } from '../../lib/voice'
 import { useDndActive } from '../../lib/useDndActive'
+import { useClipboardPaste } from '../../lib/useClipboardPaste'
+import { useT } from '../../lib/i18n'
 import { cn } from '../../lib/utils'
 import {
   WELCOME_MESSAGE_ID,
@@ -131,7 +144,8 @@ function VoiceBar(): JSX.Element | null {
     speak(
       persona === 'void' ? 'Void online.' : 'Soul online.',
       persona === 'void' ? uris.voidVoiceURI : uris.soulVoiceURI,
-      voice.rate
+      voice.rate,
+      voice.volume
     )
   }
 
@@ -191,32 +205,91 @@ function VoiceBar(): JSX.Element | null {
   )
 }
 
-/** Shows the latest assistant reply inline on the HUD — no tab switch. */
+/**
+ * Strip markdown / code-fence chrome to a flat single line for the
+ * teleprompter preview. Mirrors `forSpeech` in voice.ts (so what the user
+ * reads matches what they hear) but collapses harder — no paragraph
+ * breaks, no fenced code blocks, no list markers.
+ */
+function flattenForPreview(text: string): string {
+  return text
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/[*_#>~|`]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+/**
+ * Best preview line for the assistant's latest reply when TTS is idle —
+ * the first sentence or, failing that, the first ~140 chars flattened.
+ */
+function previewLine(content: string): string {
+  const flat = flattenForPreview(content)
+  if (!flat) return ''
+  const firstBoundary = flat.search(/[.!?](\s|$)/)
+  if (firstBoundary >= 0 && firstBoundary < 140) return flat.slice(0, firstBoundary + 1)
+  return flat.length > 140 ? flat.slice(0, 137).trimEnd() + '…' : flat
+}
+
+/**
+ * Rolling-line preview of the assistant's reply.
+ *
+ * Three visual states:
+ *  · TTS speaking — shows the sentence currently being voiced, ticking to
+ *    the next as the synth queue advances. Teleprompter feel.
+ *  · Streaming text but no TTS yet — shows the first sentence/line of the
+ *    partial reply, kept to a single row so it doesn't push the layout.
+ *  · Idle (reply landed, nothing speaking) — shows the first sentence of
+ *    the latest reply as a static preview, with the "Full conversation →"
+ *    link as the natural next step.
+ *
+ * One line throughout, no internal scrollbar. The user opens the full
+ * conversation for the rest — that's what the link is for.
+ */
 function NexusResponse(): JSX.Element | null {
   const messages = useChatStore((s) => s.messages)
+  const streaming = useChatStore((s) => s.streaming)
+  const streamingContent = useChatStore((s) => s.streamingContent)
   const setTab = useWidgetStore((s) => s.setTab)
-  const ref = useRef<HTMLDivElement>(null)
+  const spoken = useCurrentSpoken()
 
-  let assistant: ChatMessage | undefined
-  let prompt: ChatMessage | undefined
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const m = messages[i]
-    if (!assistant && m.role === 'assistant' && m.id !== WELCOME_MESSAGE_ID) assistant = m
-    else if (assistant && !prompt && m.role === 'user') {
-      prompt = m
-      break
+  const { assistant, prompt } = useMemo(() => {
+    let a: ChatMessage | undefined
+    let p: ChatMessage | undefined
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i]
+      if (!a && m.role === 'assistant' && m.id !== WELCOME_MESSAGE_ID) a = m
+      else if (a && !p && m.role === 'user') {
+        p = m
+        break
+      }
     }
+    return { assistant: a, prompt: p }
+  }, [messages])
+
+  // Nothing to show: no past reply AND no live streaming text either.
+  if (!assistant && !streamingContent) return null
+
+  const toolCount = assistant?.toolCalls?.length ?? 0
+  const baseContent = streaming && streamingContent ? streamingContent : assistant?.content ?? ''
+
+  // Priority: live spoken sentence > preview of the latest content > nothing.
+  let line = ''
+  let label: 'speaking' | 'streaming' | 'idle' = 'idle'
+  if (spoken) {
+    line = flattenForPreview(spoken)
+    label = 'speaking'
+  } else if (streaming && streamingContent) {
+    line = previewLine(streamingContent)
+    label = 'streaming'
+  } else if (baseContent) {
+    line = previewLine(baseContent)
   }
 
-  useEffect(() => {
-    if (assistant) ref.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
-  }, [assistant?.id, assistant?.content])
-
-  if (!assistant) return null
-  const toolCount = assistant.toolCalls?.length ?? 0
-
   return (
-    <div ref={ref} className="glass-soft mt-2 shrink-0 rounded-xl px-3 py-2.5">
+    <div className="glass-soft mt-2 shrink-0 rounded-xl px-3 py-2">
       {prompt && (
         <p className="mb-1 truncate text-[10px] italic text-slate-500">“{prompt.content}”</p>
       )}
@@ -225,12 +298,19 @@ function NexusResponse(): JSX.Element | null {
           ran {toolCount} action{toolCount === 1 ? '' : 's'}
         </p>
       )}
-      {assistant.content ? (
-        <div className="markdown selectable scrollbar-void max-h-[150px] overflow-y-auto text-[12px] text-slate-100">
-          <Markdown>{assistant.content}</Markdown>
-        </div>
+      {line ? (
+        // The `key` change on each new spoken sentence retriggers the fade
+        // transition, giving the teleprompter that crisp roll-over feel
+        // instead of a jarring instant swap.
+        <p
+          key={`${label}:${line}`}
+          className="animate-nexus-roll truncate text-[12px] leading-snug text-slate-100"
+          title={line}
+        >
+          {line}
+        </p>
       ) : (
-        <p className="animate-pulse py-1 text-[11px] text-slate-400">Thinking…</p>
+        <p className="animate-pulse py-0.5 text-[11px] text-slate-400">Thinking…</p>
       )}
       <button
         type="button"
@@ -238,6 +318,67 @@ function NexusResponse(): JSX.Element | null {
         className="mt-1.5 text-[10px] text-[var(--accent)] transition hover:underline"
       >
         Full conversation →
+      </button>
+    </div>
+  )
+}
+
+/**
+ * Compact one-line composer for the Nexus panel — lets users send a quick
+ * message without switching to the full chat tab. Mirrors the chat
+ * composer's send/stop semantics (Enter to send, Shift+Enter for newline,
+ * single button toggles send/stop while streaming) so muscle memory carries
+ * over for users who DO open the full conversation. Attachments / OCR /
+ * model picker stay in the full composer — this slot is for fast follow-ups.
+ */
+function NexusComposer(): JSX.Element {
+  const [text, setText] = useState('')
+  const streaming = useChatStore((s) => s.streaming)
+  const send = useChatStore((s) => s.send)
+  const stop = useChatStore((s) => s.stop)
+  const onPaste = useClipboardPaste()
+  const t = useT()
+
+  const submit = (): void => {
+    if (streaming) return
+    const trimmed = text.trim()
+    if (!trimmed) return
+    void send(trimmed)
+    setText('')
+  }
+
+  const canSend = streaming || text.trim().length > 0
+
+  return (
+    <div className="flex items-center gap-1.5">
+      <input
+        type="text"
+        value={text}
+        placeholder={t('composer.placeholder')}
+        onChange={(e) => setText(e.target.value)}
+        onPaste={onPaste}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault()
+            submit()
+          }
+        }}
+        className="flex-1 rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-[12px] text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-[var(--accent-ring)]"
+      />
+      <button
+        type="button"
+        onClick={() => (streaming ? stop() : submit())}
+        disabled={!canSend}
+        title={streaming ? t('composer.stop') : t('composer.send')}
+        aria-label={streaming ? t('composer.stop') : t('composer.send')}
+        className={cn(
+          'flex h-9 w-9 shrink-0 items-center justify-center rounded-xl transition disabled:cursor-not-allowed disabled:opacity-40',
+          streaming
+            ? 'bg-rose-500/80 text-white hover:bg-rose-500'
+            : 'bg-[var(--accent)] text-white hover:brightness-110'
+        )}
+      >
+        {streaming ? <Square size={12} className="fill-current" /> : <SendHorizontal size={14} />}
       </button>
     </div>
   )
@@ -373,8 +514,9 @@ function AdvancedNexus(): JSX.Element | null {
         <AdvancedTelemetry />
       </div>
 
-      {/* Bottom — voice and the conversation entry point. */}
+      {/* Bottom — quick composer, voice controls, and the full-chat entry. */}
       <div className="shrink-0 space-y-2">
+        <NexusComposer />
         <VoiceBar />
         <OpenConversation />
       </div>
@@ -486,8 +628,9 @@ function SimpleNexus(): JSX.Element | null {
         <NexusResponse />
       </div>
 
-      {/* Speak controls, kept low, with the conversation entry point. */}
+      {/* Composer + speak controls + conversation entry point, kept low. */}
       <div className="shrink-0 space-y-2 pt-3">
+        <NexusComposer />
         <VoiceBar />
         <OpenConversation />
       </div>

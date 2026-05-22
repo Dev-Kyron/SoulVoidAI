@@ -30,6 +30,7 @@ interface UiState {
   paletteOpen: boolean
   addActionOpen: boolean
   helpOpen: boolean
+  reviewDialogOpen: boolean
   /** Global cross-thread search dialog open state. Bound to Cmd/Ctrl+F. */
   globalSearchOpen: boolean
   /** Code currently shown in the Canvas dialog (open when non-null). */
@@ -51,6 +52,7 @@ interface UiState {
   setPalette: (open: boolean) => void
   setAddActionOpen: (open: boolean) => void
   setHelpOpen: (open: boolean) => void
+  setReviewDialogOpen: (open: boolean) => void
   setGlobalSearchOpen: (open: boolean) => void
   setCanvas: (content: { code: string; language: string } | null) => void
   setActionToDelete: (target: { id: string; label: string } | null) => void
@@ -65,6 +67,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   paletteOpen: false,
   addActionOpen: false,
   helpOpen: false,
+  reviewDialogOpen: false,
   globalSearchOpen: false,
   canvasContent: null,
   actionToDelete: null,
@@ -98,6 +101,8 @@ export const useUiStore = create<UiState>((set, get) => ({
   setAddActionOpen: (open) => set({ addActionOpen: open }),
 
   setHelpOpen: (open) => set({ helpOpen: open }),
+
+  setReviewDialogOpen: (open) => set({ reviewDialogOpen: open }),
 
   setGlobalSearchOpen: (open) => set({ globalSearchOpen: open }),
 

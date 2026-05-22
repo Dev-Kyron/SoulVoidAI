@@ -3,7 +3,7 @@
  * Soul — to concrete system speech-synthesis voices, with a test button each.
  */
 import { useEffect, useReducer, useState } from 'react'
-import { Play, FolderOpen, Ear } from 'lucide-react'
+import { Play, FolderOpen, Ear, Sparkles, ExternalLink } from 'lucide-react'
 import { useConfigStore } from '../../store/useConfigStore'
 import { useUiStore } from '../../store/useUiStore'
 import { useWidgetStore } from '../../store/useWidgetStore'
@@ -29,7 +29,8 @@ function VoicePicker({
     speak(
       persona === 'void' ? 'This is the Void voice.' : 'This is the Soul voice.',
       current,
-      voice.rate
+      voice.rate,
+      voice.volume
     )
   }
 
@@ -108,6 +109,9 @@ export function VoiceSettings(): JSX.Element | null {
         onPick={(uri) => void setVoice({ soulVoiceURI: uri })}
       />
 
+      <NeuralVoiceTip />
+
+
       <div className="py-1.5">
         <div className="mb-1 flex items-center justify-between">
           <label className="text-[10px] text-slate-400">Speech rate</label>
@@ -120,6 +124,26 @@ export function VoiceSettings(): JSX.Element | null {
           step={0.1}
           value={voice.rate}
           onChange={(e) => void setVoice({ rate: Number(e.target.value) })}
+          className="w-full accent-[var(--accent)]"
+        />
+      </div>
+
+      {/* Separate from the OS / app volume mixer — lets users dial Void/Soul
+          down without muting everything else from the app. 0 silences TTS but
+          the queue still runs; flip the "Spoken replies" toggle off to stop
+          scheduling utterances entirely. */}
+      <div className="py-1.5">
+        <div className="mb-1 flex items-center justify-between">
+          <label className="text-[10px] text-slate-400">Speech volume</label>
+          <span className="text-[10px] text-slate-500">{Math.round(voice.volume * 100)}%</span>
+        </div>
+        <input
+          type="range"
+          min={0}
+          max={1}
+          step={0.05}
+          value={voice.volume}
+          onChange={(e) => void setVoice({ volume: Number(e.target.value) })}
           className="w-full accent-[var(--accent)]"
         />
       </div>
@@ -278,6 +302,102 @@ function WakeWordRow({ voice }: { voice: VoiceConfig }): JSX.Element {
           Open folder
         </button>
       </div>
+    </div>
+  )
+}
+
+/**
+ * Beta-tester nudge for the "voices sound robotic" complaint. Windows ships
+ * the older SAPI defaults (David / Mark / Zira) on a fresh install — the
+ * modern "* Online (Natural)" voices (Aria, Guy, Jenny…) live behind a
+ * one-click install in Windows Settings. macOS has a similar Premium /
+ * Enhanced voice download path under Accessibility → Spoken Content.
+ *
+ * The banner is platform-aware:
+ *  · Windows — copy targets Aria/Guy + a button that deep-links to
+ *    `ms-settings:speech`, the Speech settings page (no further clicks).
+ *  · macOS — copy points at System Settings → Accessibility → Spoken
+ *    Content → System Voice → Manage Voices.
+ *  · Linux — generic note; voice quality is distro-dependent.
+ *
+ * Once the user installs a new voice, `onVoicesChanged` in voice.ts
+ * fires and the VoicePicker selects refresh with the new entries
+ * available — no app restart needed.
+ */
+// `navigator.userAgent` is constant for the renderer's lifetime — compute the
+// platform booleans once at module scope so we don't redo the lowercase +
+// includes on every settings re-render.
+const UA = typeof navigator === 'undefined' ? '' : navigator.userAgent.toLowerCase()
+const IS_WINDOWS = UA.includes('windows')
+const IS_MAC = UA.includes('mac os')
+
+function NeuralVoiceTip(): JSX.Element {
+  const openSpeechSettings = (): void => {
+    // Speech → Add voices installs additional SAPI language packs. This is
+    // the only Windows path that adds voices visible to the Web Speech API
+    // that Electron uses. The Narrator "Natural HD" voices (Andrew, Ava,
+    // Brian, Emma) live in a private Microsoft pipeline and don't surface
+    // here — see the banner copy below for why.
+    if (IS_WINDOWS) {
+      window.open('ms-settings:speech', '_blank')
+    } else if (IS_MAC) {
+      window.open('x-apple.systempreferences:com.apple.preference.universalaccess', '_blank')
+    }
+  }
+
+  return (
+    <div className="mt-3 rounded-lg border border-[var(--accent-ring)] bg-[var(--accent-soft)] p-3">
+      <div className="mb-1.5 flex items-center gap-1.5">
+        <Sparkles size={12} className="text-[var(--accent)]" />
+        <p className="text-[12px] font-semibold text-white">Want smoother voices?</p>
+      </div>
+
+      {IS_WINDOWS ? (
+        <>
+          {/* Honest framing: the new Microsoft "Natural HD" voices (Andrew,
+              Ava, Brian, Emma) installed via Narrator are gated behind a
+              private API that no third-party app can reach — not via SAPI,
+              not via WinRT, not even via the undocumented Edge cloud
+              endpoint (Microsoft has hardened it against scraping). We
+              point users at Speech → Add voices, which actually does
+              install additional SAPI voices we can use. Linking honestly
+              beats sending them down a 30-minute install dead-end. */}
+          <p className="mb-1.5 text-[10px] leading-relaxed text-slate-300">
+            VoidSoul uses the Web Speech API, which reads voices from the Windows{' '}
+            <span className="text-[var(--accent)]">SAPI</span> registry. Speech → Add voices lets
+            you install extra language packs (e.g., English UK, Australian, Indian) that come with
+            their own SAPI voices.
+          </p>
+          <p className="mb-2 text-[10px] leading-relaxed text-slate-400">
+            <span className="font-semibold text-slate-300">Heads up:</span> the new{' '}
+            <span className="text-slate-200">Natural HD</span> voices (Andrew, Ava, Brian, Emma)
+            installed via Narrator are NOT exposed to third-party apps — Microsoft has kept them
+            private to Narrator. We can&apos;t access them, and neither can Chrome or any other
+            non-Microsoft app.
+          </p>
+        </>
+      ) : IS_MAC ? (
+        <p className="mb-2 text-[10px] leading-relaxed text-slate-300">
+          macOS Premium / Enhanced voices sound far smoother than the basic defaults. Install them
+          under System Settings → Accessibility → Spoken Content → System Voice → Manage Voices.
+        </p>
+      ) : (
+        <p className="mb-2 text-[10px] leading-relaxed text-slate-300">
+          Voice quality depends on your distro&apos;s speech synthesis backend. Installing
+          espeak-ng-mbrola or Mimic 3 gives noticeably more natural results than the espeak default.
+        </p>
+      )}
+
+      {(IS_WINDOWS || IS_MAC) && (
+        <button
+          type="button"
+          onClick={openSpeechSettings}
+          className="flex items-center gap-1 rounded-md border border-white/10 bg-black/20 px-2.5 py-1 text-[10px] font-medium text-slate-200 transition hover:border-[var(--accent-ring)] hover:bg-[var(--accent-soft)] hover:text-white"
+        >
+          {IS_WINDOWS ? 'Open Windows Speech settings' : 'Open Accessibility settings'}
+          <ExternalLink size={9} />
+        </button>
+      )}
     </div>
   )
 }

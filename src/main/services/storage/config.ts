@@ -92,6 +92,7 @@ const DEFAULT_CONFIG: AppConfigFile = {
     voidVoiceURI: '',
     soulVoiceURI: '',
     rate: 1,
+    volume: 1,
     wakeWord: { enabled: false }
   },
   chat: {

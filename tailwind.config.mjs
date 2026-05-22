@@ -41,11 +41,19 @@ export default {
         shimmer: {
           '0%': { backgroundPosition: '-200% 0' },
           '100%': { backgroundPosition: '200% 0' }
+        },
+        // Used by the Nexus rolling-line preview: each sentence rolls up
+        // from below and fades in so the teleprompter ticks over cleanly
+        // rather than swapping instantaneously.
+        'nexus-roll': {
+          '0%': { transform: 'translateY(6px)', opacity: '0' },
+          '100%': { transform: 'translateY(0)', opacity: '1' }
         }
       },
       animation: {
         'orb-float': 'orb-float 4s ease-in-out infinite',
-        shimmer: 'shimmer 2.4s linear infinite'
+        shimmer: 'shimmer 2.4s linear infinite',
+        'nexus-roll': 'nexus-roll 220ms ease-out'
       }
     }
   },

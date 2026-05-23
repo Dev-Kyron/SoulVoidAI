@@ -22,6 +22,13 @@
  */
 import { vs } from './bridge'
 import type { VoiceConfig, VoicePersona } from '@shared/types'
+import {
+  parseVoiceSegments,
+  stripVoiceTagsOnly,
+  StreamingVoiceExtractor,
+  type ToneTag,
+  type VoiceSegment
+} from '@shared/voiceMarkers'
 
 /* ---------------- currently-spoken-sentence signal ---------------------
  *
@@ -260,7 +267,8 @@ function queueOne(
   displayText: string,
   persona: VoicePersona,
   rate: number,
-  volume: number
+  volume: number,
+  tone?: ToneTag
 ): void {
   const myGen = synthGeneration
   synthChain = synthChain.then(async () => {
@@ -269,8 +277,10 @@ function queueOne(
     // queue audio after the user explicitly stopped.
     if (myGen !== synthGeneration) return
     try {
-      console.info(`[voice] synth start (${persona}, ${text.length} chars)`)
-      const bytes = await vs.voice.synthesise({ persona, text, rate })
+      console.info(
+        `[voice] synth start (${persona}${tone ? `/${tone}` : ''}, ${text.length} chars)`
+      )
+      const bytes = await vs.voice.synthesise({ persona, text, rate, tone })
       if (myGen !== synthGeneration) {
         console.info('[voice] synth result dropped — superseded by stop')
         return
@@ -297,27 +307,73 @@ function queueOne(
 /**
  * Speak text immediately, replacing anything currently playing. Used by
  * the test buttons in voice settings, the persona-greet on toggle, etc.
+ *
+ * `tone` (v1.3.0+) selects the Piper preset that shapes length_scale /
+ * noise_scale / noise_w. Defaults to 'casual' which matches the
+ * pre-v1.3.0 sound.
  */
-export function speak(text: string, persona: VoicePersona, rate = 1, volume = 1): void {
+export function speak(
+  text: string,
+  persona: VoicePersona,
+  rate = 1,
+  volume = 1,
+  tone?: ToneTag
+): void {
   stopSpeaking()
-  enqueueSpeak(text, persona, rate, volume)
+  enqueueSpeak(text, persona, rate, volume, tone)
 }
 
 /**
  * Append a sentence to the playback queue without clearing what's
- * already playing. Used by `StreamingSpeaker` to feed sentence-chunks
- * as a streaming reply arrives.
+ * already playing. Used by `StreamingSpeaker` to feed voice-tagged
+ * segments as a streaming reply arrives.
  */
-export function enqueueSpeak(text: string, persona: VoicePersona, rate = 1, volume = 1): void {
+export function enqueueSpeak(
+  text: string,
+  persona: VoicePersona,
+  rate = 1,
+  volume = 1,
+  tone?: ToneTag
+): void {
   if (!text.trim()) return
   const spoken = forSpeech(text)
   if (!spoken) return
-  queueOne(spoken, text.trim(), persona, rate, volume)
+  queueOne(spoken, text.trim(), persona, rate, volume, tone)
 }
 
-/** Speak text using the given config's persona + rate + volume. */
+/**
+ * Queue a single VoiceSegment extracted from the model's <voice> markup.
+ * Thin convenience wrapper around enqueueSpeak — the chat store streams
+ * segments via this so call sites don't have to thread tone manually.
+ */
+export function queueSpeakSegment(segment: VoiceSegment, voice: VoiceConfig): void {
+  enqueueSpeak(segment.text, voice.persona, voice.rate, voice.volume, segment.tone)
+}
+
+/**
+ * Speak a stored message (the speaker button on a chat bubble, the
+ * persona greet on toggle, etc). If the message contains `<voice>` tags,
+ * speak just those segments with their tones — that's the voice layer
+ * the user heard live, replayed faithfully. Otherwise strip any stray
+ * markup and speak the whole thing as one casual utterance.
+ */
 export function speakWith(voice: VoiceConfig, text: string): void {
-  speak(text, voice.persona, voice.rate, voice.volume)
+  const { segments } = parseVoiceSegments(text)
+  stopSpeaking()
+  if (segments.length > 0) {
+    for (const seg of segments) {
+      queueSpeakSegment(seg, voice)
+    }
+    return
+  }
+  // No tags: speak the stripped chat text. Casual tone — we can't infer
+  // a richer one from raw prose without an extra classifier call, and
+  // beta sessions show the manual speaker button is rarely a "be
+  // dramatic" moment anyway.
+  const fallback = stripVoiceTagsOnly(text).trim()
+  if (fallback) {
+    enqueueSpeak(fallback, voice.persona, voice.rate, voice.volume, 'casual')
+  }
 }
 
 /**
@@ -333,85 +389,77 @@ export function stopSpeaking(): void {
 
 /* --------------------------- streaming TTS ---------------------------- *
  *
- * Same architecture as v1.1.x — chunk on sentence boundaries, enqueue
- * each as it closes. The chunking logic is identical because Piper
- * speaks sentences the same way Web Speech did. Only the per-chunk
- * dispatch is different (IPC → piper → WAV vs. utterance.speak).
+ * v1.3.0 architecture: voice layer is whatever the model wraps in
+ * <voice tone="...">...</voice> markers. Everything outside those
+ * markers is chat-only (silent). The model has full context to decide
+ * what's worth speaking — code blocks, file paths, long lists go
+ * outside the tags; reactions, key insights, questions, nudges go
+ * inside with an appropriate tone.
+ *
+ * The chat store calls feed(fullText) on every streaming delta with
+ * the accumulated text so far. We compute the delta (slice past
+ * lastFeedLength), feed it to a StreamingVoiceExtractor, and queue
+ * any newly-completed segments. flush() at stream end handles any
+ * trailing content + the fallback heuristic (speak first paragraph
+ * if the model emitted zero tags and the reply isn't code-heavy).
+ *
+ * Pre-v1.3.0 path (sentence-boundary chunking) is gone — it
+ * mechanically spoke everything in the reply including code blocks,
+ * which is exactly what this update is meant to fix.
  * --------------------------------------------------------------------- */
 
-/**
- * Walks `text` from `startIndex` looking for completed sentence
- * boundaries. Returns the new sentences ready to be spoken, plus the
- * `nextIndex` the caller should pass back on the following call.
- *
- * Unclosed code fences are respected — text past an unclosed ```
- * is held back until the fence closes, otherwise we'd speak half a
- * code block and it sounds awful.
- */
-export function extractCompleteSentences(
-  text: string,
-  startIndex: number
-): { sentences: string[]; nextIndex: number } {
-  if (startIndex >= text.length) return { sentences: [], nextIndex: startIndex }
-  let tail = text.slice(startIndex)
-  const fenceMatches = tail.match(/```/g)
-  if (fenceMatches && fenceMatches.length % 2 === 1) {
-    const lastFence = tail.lastIndexOf('```')
-    tail = tail.slice(0, lastFence)
-  }
-  // Period / question / exclamation + whitespace, OR paragraph break.
-  const boundary = /[.!?]+\s+|\n{2,}/g
-  const sentences: string[] = []
-  let pos = 0
-  let match: RegExpExecArray | null
-  while ((match = boundary.exec(tail)) !== null) {
-    const end = match.index + match[0].length
-    const sentence = tail.slice(pos, end).trim()
-    if (sentence) sentences.push(sentence)
-    pos = end
-  }
-  return { sentences, nextIndex: startIndex + pos }
-}
-
-/**
- * Stateful helper around enqueueSpeak — owns the spokenIndex pointer
- * so the agent loop doesn't have to manage it. One instance per send()
- * (or per agent run); the caller resets via `new` each turn.
- *
- *   const speaker = new StreamingSpeaker(cfg.voice)
- *   // on every chunk arrival:
- *   speaker.feed(updatedText)
- *   // when the stream finishes:
- *   speaker.flush(finalText)
- */
 export class StreamingSpeaker {
-  private spokenIndex = 0
+  private readonly extractor = new StreamingVoiceExtractor()
+  /** Index in the most-recent feed text past which we've already
+   *  fed deltas to the extractor. The chat store hands us accumulated
+   *  text each call, so we slice the new tail off here. */
+  private lastFeedLength = 0
   private readonly persona: VoicePersona
   private readonly rate: number
   private readonly volume: number
+  private readonly fallbackOnNoTags: boolean
 
-  constructor(voice: VoiceConfig) {
+  /**
+   * @param voice  active voice config — persona / rate / volume
+   * @param opts   `fallbackOnNoTags` (default true) controls whether
+   *               flush() should emit a soft "speak the first paragraph"
+   *               fallback if the model never wrapped any segment in
+   *               <voice> tags. Set false for fully-agentic replies
+   *               where pure silence on untagged output is correct.
+   */
+  constructor(voice: VoiceConfig, opts: { fallbackOnNoTags?: boolean } = {}) {
     this.persona = voice.persona
     this.rate = voice.rate
     this.volume = voice.volume
+    this.fallbackOnNoTags = opts.fallbackOnNoTags ?? true
   }
 
-  /** Append newly-arrived text; emit any sentences that just completed. */
-  feed(text: string): void {
-    const { sentences, nextIndex } = extractCompleteSentences(text, this.spokenIndex)
-    for (const sentence of sentences) {
-      enqueueSpeak(sentence, this.persona, this.rate, this.volume)
+  /** Called per streaming delta with the accumulated text so far. */
+  feed(fullText: string): void {
+    if (fullText.length <= this.lastFeedLength) return
+    const delta = fullText.slice(this.lastFeedLength)
+    this.lastFeedLength = fullText.length
+    const segments = this.extractor.feed(delta)
+    for (const segment of segments) {
+      this.enqueue(segment)
     }
-    this.spokenIndex = nextIndex
   }
 
   /**
-   * Speak the trailing fragment that didn't close with punctuation.
-   * Call at end-of-stream so the last bare-tail-sentence still gets read.
+   * Called when the stream ends. Catches any trailing content, then
+   * applies the no-tags fallback if appropriate.
    */
-  flush(text: string): void {
-    const tail = text.slice(this.spokenIndex).trim()
-    if (tail) enqueueSpeak(tail, this.persona, this.rate, this.volume)
-    this.spokenIndex = text.length
+  flush(finalText: string): void {
+    if (finalText.length > this.lastFeedLength) {
+      this.feed(finalText)
+    }
+    const tail = this.extractor.flush({ fallbackOnNoTags: this.fallbackOnNoTags })
+    for (const segment of tail) {
+      this.enqueue(segment)
+    }
+  }
+
+  private enqueue(segment: VoiceSegment): void {
+    enqueueSpeak(segment.text, this.persona, this.rate, this.volume, segment.tone)
   }
 }

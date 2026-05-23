@@ -34,6 +34,7 @@ import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { log } from '../logger'
 import { ensureDataPath } from '../storage/store'
+import type { ToneTag } from '@shared/voiceMarkers'
 
 /* ------------------------------ paths --------------------------------- */
 
@@ -231,14 +232,51 @@ export async function migrateLegacyVoices(): Promise<{ copied: number }> {
 
 /* ----------------------------- synthesis ------------------------------ */
 
+/**
+ * Per-tone Piper parameter presets. The voice pipeline emits segments
+ * tagged with a ToneTag (from the model's <voice tone="..."> markup);
+ * each tone maps to a (length_scale, noise_scale, noise_w) triple that
+ * Piper interprets as:
+ *   · length_scale — phoneme duration multiplier. Higher = slower.
+ *   · noise_scale  — variability of synthesised audio. Higher = more
+ *                    expressive but less predictable.
+ *   · noise_w      — phoneme duration variability. Higher = more
+ *                    natural rhythm at the cost of consistency.
+ *
+ * The user's `rate` setting in voice config stacks UNDER the tone preset:
+ * tone gives the personality, rate gives the user's preferred speed.
+ *
+ * Baselines match piper's documented defaults (0.667 / 0.8) for `casual`
+ * so the existing rate-only path keeps sounding identical.
+ */
+export const TONE_PRESETS: Record<ToneTag, {
+  length_scale: number
+  noise_scale: number
+  noise_w: number
+}> = {
+  casual: { length_scale: 1.0, noise_scale: 0.667, noise_w: 0.8 },
+  focused: { length_scale: 0.92, noise_scale: 0.5, noise_w: 0.7 },
+  excited: { length_scale: 0.85, noise_scale: 0.8, noise_w: 0.95 },
+  serious: { length_scale: 1.15, noise_scale: 0.4, noise_w: 0.65 },
+  dry: { length_scale: 1.05, noise_scale: 0.45, noise_w: 0.7 }
+}
+
 export interface SynthesiseOptions {
   text: string
   persona: VoicePersona
   /**
    * Speech rate (0.5 – 1.6). Maps inversely to piper's `--length_scale`
    * (higher = slower), so we invert + clamp. 1.0 = normal speed.
+   * Stacks on top of any tone preset: final length_scale =
+   * preset.length_scale / rate.
    */
   rate?: number
+  /**
+   * Tone preset selected by the model (or by the caller for direct
+   * speak() invocations). Defaults to 'casual' which matches the
+   * pre-v1.3.0 default sound.
+   */
+  tone?: ToneTag
 }
 
 /**
@@ -291,11 +329,14 @@ export function synthesise(opts: SynthesiseOptions): Promise<Buffer> {
       return
     }
 
-    // Invert + clamp the rate. Piper's length_scale is the inverse of
-    // perceived speed: 0.8 length_scale ≈ 1.25× speed. 0.5-1.6 input
-    // range maps to 2.0-0.625 length_scale.
+    // Tone preset gives the personality (length_scale baseline + noise
+    // variability); user's rate stacks on top as a multiplicative speed
+    // override. Defaults to 'casual' which matches the pre-v1.3.0 sound,
+    // so existing callers that don't pass tone keep their behaviour.
+    const tone = opts.tone ?? 'casual'
+    const preset = TONE_PRESETS[tone]
     const rateInput = Math.min(1.6, Math.max(0.5, opts.rate ?? 1))
-    const lengthScale = 1 / rateInput
+    const lengthScale = preset.length_scale / rateInput
 
     // Temp file in the OS temp dir — gets unlinked after we read it back.
     // UUID suffix so concurrent synth calls (rare but possible during
@@ -305,7 +346,9 @@ export function synthesise(opts: SynthesiseOptions): Promise<Buffer> {
     const args = [
       '--model', voice.modelPath,
       '--output_file', outPath,
-      '--length_scale', lengthScale.toFixed(3)
+      '--length_scale', lengthScale.toFixed(3),
+      '--noise_scale', preset.noise_scale.toFixed(3),
+      '--noise_w', preset.noise_w.toFixed(3)
     ]
 
     const proc = spawn(binary, args, {

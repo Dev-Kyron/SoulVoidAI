@@ -11,6 +11,7 @@ import { useChatStore } from '../../store/useChatStore'
 import { speakWith, stopSpeaking } from '../../lib/voice'
 import { useIsSpeaking } from '../../hooks/useCurrentSpoken'
 import { cn, formatTime } from '../../lib/utils'
+import { stripVoiceTagsOnly } from '@shared/voiceMarkers'
 import type { ChatMessage, ToolInvocation, VoiceConfig } from '@shared/types'
 
 function argsSummary(args: Record<string, unknown>): string {
@@ -160,7 +161,12 @@ export function MessageBubble({
   const pendingTool = useChatStore((s) =>
     s.pendingAssistantId === message.id ? s.pendingTool : null
   )
-  const displayContent = message.content + streamingExtra
+  // v1.3.0: assistant replies may contain <voice tone="...">...</voice>
+  // markers (the voice pipeline reads them to drive TTS). Strip the tag
+  // tokens out before rendering — the content inside the tags STAYS
+  // visible in chat (the voice layer is a subset of the chat layer, not
+  // a parallel narrative), only the angle-bracket wrappers come out.
+  const displayContent = stripVoiceTagsOnly(message.content + streamingExtra)
   const images = (message.attachments ?? []).filter((a) => a.kind === 'image' && a.dataUrl)
   const textFiles = (message.attachments ?? []).filter((a) => a.kind === 'text')
   // Two flavours: preview-eligible (has dataUrl) and oversize (text-only).

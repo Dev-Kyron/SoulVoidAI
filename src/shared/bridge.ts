@@ -441,11 +441,17 @@ export interface VoidSoulBridge {
      * Synthesise a chunk of text via Piper. Returns WAV bytes as a
      * Uint8Array — the renderer wraps in a Blob URL + plays via the
      * standard HTMLAudioElement queue.
+     *
+     * Optional `tone` (v1.3.0+) selects a Piper parameter preset that
+     * shapes length_scale + noise_scale + noise_w to give the voice
+     * personality (casual / focused / excited / serious / dry). Stacks
+     * UNDER the user's `rate` setting.
      */
     synthesise(args: {
       persona: VoicePersona
       text: string
       rate?: number
+      tone?: import('./voiceMarkers').ToneTag
     }): Promise<Uint8Array>
     /** Opens the per-user voices folder in the OS file explorer. */
     openFolder(): Promise<string>

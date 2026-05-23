@@ -800,7 +800,15 @@ export function registerIpc(): void {
   ipcMain.handle('voice:status', () => getVoiceSetupStatus())
   ipcMain.handle(
     'voice:synthesise',
-    async (_e, args: { persona: VoicePersona; text: string; rate?: number }) => {
+    async (
+      _e,
+      args: {
+        persona: VoicePersona
+        text: string
+        rate?: number
+        tone?: import('@shared/voiceMarkers').ToneTag
+      }
+    ) => {
       const wav = await piperSynthesise(args)
       // Buffer transfers across IPC as Uint8Array — explicit conversion
       // keeps the wire format predictable across Electron versions.

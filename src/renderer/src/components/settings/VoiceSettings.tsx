@@ -180,10 +180,111 @@ export function VoiceSettings(): JSX.Element | null {
         switch between Void and Soul from the Nexus HUD.
       </p>
 
+      <VoiceDirectionRow voice={voice} />
+
       <PiperCredit />
 
       <WakeWordRow voice={voice} />
     </CollapsibleSection>
+  )
+}
+
+/**
+ * v1.3.0 Voice direction — explains the five tone presets the model can
+ * pick from (via <voice tone="..."> markup) and gives the user a sample
+ * line per tone so they can hear how each one sounds. Read-only — tones
+ * aren't user-configurable here; the model picks them per segment based
+ * on context. This row is purely informational + audition.
+ */
+const TONE_SAMPLES: ReadonlyArray<{
+  tone: 'casual' | 'focused' | 'excited' | 'serious' | 'dry'
+  label: string
+  hint: string
+  sample: string
+}> = [
+  {
+    tone: 'casual',
+    label: 'Casual',
+    hint: 'relaxed, conversational, short',
+    sample: "Alright — here's the gist of what I just shipped."
+  },
+  {
+    tone: 'focused',
+    label: 'Focused',
+    hint: 'direct, minimal filler, task mode',
+    sample: "Two changes — schema migration and the API patch. Both look clean."
+  },
+  {
+    tone: 'excited',
+    label: 'Excited',
+    hint: 'energy up, faster cadence',
+    sample: "Big one — the tests are green and the build's down to nine seconds!"
+  },
+  {
+    tone: 'serious',
+    label: 'Serious',
+    hint: 'slower, deliberate, weighted',
+    sample: "One thing worth pausing on. This change touches every user's session."
+  },
+  {
+    tone: 'dry',
+    label: 'Dry',
+    hint: 'understated, deadpan, one-liner energy',
+    sample: "Well. That's one way to handle a null pointer."
+  }
+]
+
+function VoiceDirectionRow({ voice }: { voice: VoiceConfig }): JSX.Element {
+  const [playing, setPlaying] = useState<string | null>(null)
+  return (
+    <div className="mt-3 border-t border-white/5 pt-2">
+      <div className="mb-1 flex items-center gap-1.5 py-1">
+        <Sparkles size={12} className="text-[var(--accent)]" />
+        <p className="text-[12px] text-slate-200">Voice direction</p>
+      </div>
+      <p className="mb-2 text-[10px] leading-relaxed text-slate-500">
+        Replies have a chat layer (what you read) and a voice layer (what gets
+        spoken aloud). The model picks one of five tones per spoken segment
+        based on context. Tap any tone to audition it with the active persona.
+      </p>
+      <div className="space-y-1">
+        {TONE_SAMPLES.map((t) => {
+          const isPlaying = playing === t.tone
+          return (
+            <button
+              key={t.tone}
+              type="button"
+              onClick={() => {
+                setPlaying(t.tone)
+                speak(t.sample, voice.persona, voice.rate, voice.volume, t.tone)
+                // The voice queue doesn't expose "finished" — guard the
+                // spinner with a generous timer matching the sample length.
+                window.setTimeout(() => setPlaying((cur) => (cur === t.tone ? null : cur)), 4000)
+              }}
+              disabled={isPlaying}
+              className="flex w-full items-center gap-2 rounded-md border border-white/5 bg-black/20 px-2 py-1.5 text-left transition hover:border-white/15 hover:bg-black/30 disabled:opacity-60"
+            >
+              {isPlaying ? (
+                <Loader2 size={11} className="shrink-0 animate-spin text-[var(--accent)]" />
+              ) : (
+                <Play size={11} className="shrink-0 text-slate-400" />
+              )}
+              <div className="min-w-0 flex-1">
+                <p className="text-[11px] font-semibold text-white">
+                  {t.label}
+                  <span className="ml-1.5 text-[9px] font-normal text-slate-500">
+                    · {t.hint}
+                  </span>
+                </p>
+                <p className="truncate font-mono text-[9px] italic text-slate-500">
+                  "{t.sample}"
+                </p>
+              </div>
+            </button>
+          )
+        })}
+      </div>
+    </div>
   )
 }
 

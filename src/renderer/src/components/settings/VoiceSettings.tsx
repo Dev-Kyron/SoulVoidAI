@@ -31,6 +31,7 @@ import { CollapsibleSection } from './CollapsibleSection'
 import { speak } from '../../lib/voice'
 import { vs } from '../../lib/bridge'
 import { cn } from '../../lib/utils'
+import { getTimeWindow, getDefaultTone, getWindowLabel } from '@shared/voicePersona'
 import { Ear } from 'lucide-react'
 import type { InstalledVoice, VoiceConfig, VoicePersona, VoiceSetupStatus } from '@shared/types'
 
@@ -236,6 +237,18 @@ const TONE_SAMPLES: ReadonlyArray<{
 
 function VoiceDirectionRow({ voice }: { voice: VoiceConfig }): JSX.Element {
   const [playing, setPlaying] = useState<string | null>(null)
+  // Recompute the current window every time the panel renders — the
+  // user might keep settings open across a window boundary (e.g. 8:59
+  // → 9:00 day flip). Memoising on a 1-minute ticker would be cleaner
+  // but is overkill: the settings panel re-renders on every config
+  // change anyway, which is more than often enough.
+  const now = new Date()
+  // Local name `timeWindow` (not `window`) so we don't shadow the global
+  // `window` — the audition button below uses `window.setTimeout`.
+  const timeWindow = getTimeWindow(now)
+  const defaultTone = getDefaultTone(timeWindow)
+  const windowLabel = getWindowLabel(timeWindow)
+  const personaName = voice.persona === 'void' ? 'Void' : 'Soul'
   return (
     <div className="mt-3 border-t border-white/5 pt-2">
       <div className="mb-1 flex items-center gap-1.5 py-1">
@@ -247,6 +260,18 @@ function VoiceDirectionRow({ voice }: { voice: VoiceConfig }): JSX.Element {
         spoken aloud). The model picks one of five tones per spoken segment
         based on context. Tap any tone to audition it with the active persona.
       </p>
+      {/* Current-window indicator. Tells the user what tone the model
+       *  will default to right now and why. Updates on next render. */}
+      <div className="mb-2 rounded-md border border-[var(--accent-ring)] bg-[var(--accent-soft)] px-2 py-1.5">
+        <p className="text-[10px] font-semibold text-white">
+          {personaName} · current window
+        </p>
+        <p className="mt-0.5 text-[10px] text-slate-300">{windowLabel}</p>
+        <p className="mt-0.5 text-[10px] text-slate-400">
+          Default tone right now:{' '}
+          <span className="font-mono text-[var(--accent)]">{defaultTone}</span>
+        </p>
+      </div>
       <div className="space-y-1">
         {TONE_SAMPLES.map((t) => {
           const isPlaying = playing === t.tone

@@ -26,6 +26,7 @@ import { CHAT_STRINGS, formatErrorContent, formatPauseContent } from '../lib/cha
 import { pickProvider, deriveBudgetState, type AvailableProvider } from '../lib/router'
 import { getMode } from '@shared/modes'
 import { modelHasVision } from '@shared/modelCapabilities'
+import { buildVoiceDirection } from '@shared/voicePersona'
 import { useConfigStore } from './useConfigStore'
 import { useWidgetStore } from './useWidgetStore'
 import { useUiStore } from './useUiStore'
@@ -207,39 +208,14 @@ function buildSystemPrompt(historySummary?: string): string {
       'sensitive. Chain tools for multi-step tasks, then summarise briefly.'
   }
 
-  // Voice instructions (v1.3.0+). Only injected when voice output is on —
-  // for muted sessions there's no point steering the model toward markup
-  // that the user won't hear. The persona name comes from voice config
-  // ('void' or 'soul') so the model knows whose mouth it's speaking from
-  // when crafting the spoken layer. Persona-specific tone direction is
-  // Phase 2 work; this block just teaches the markup.
+  // Voice direction (v1.3.0 markup + v1.3.1 persona + time-of-day).
+  // Gated on the voice toggle — no point steering the model toward
+  // markup the user won't hear. The full block (persona character,
+  // current-window context, tone catalogue, silence rules) lives in
+  // @shared/voicePersona so it can be tested in isolation and the
+  // copy stays in one place.
   if (config.voice.enabled) {
-    const persona = config.voice.persona === 'void' ? 'Void' : 'Soul'
-    prompt +=
-      `\n\nVOICE LAYER (${persona} speaks) — your reply has TWO layers. The ` +
-      'CHAT layer is everything you write, rendered in the UI as usual. The ' +
-      'VOICE layer is whatever you wrap inside <voice tone="..."> tags — ' +
-      'that gets spoken aloud through TTS. Voice content STAYS visible in ' +
-      'chat (do not write parallel narratives — tag the parts of your normal ' +
-      'reply that are worth speaking).\n\n' +
-      'Markup: <voice tone="casual">spoken text here</voice>. Place tags ' +
-      'around the prose you want spoken; everything outside them is silent.\n\n' +
-      'Tones (one word each, you pick one per segment based on context):\n' +
-      '- casual  — relaxed, conversational, short. Default.\n' +
-      '- focused — direct, minimal filler, task mode.\n' +
-      '- excited — energy up, faster cadence; use sparingly so it lands.\n' +
-      '- serious — slower, deliberate, weighted; for cautions or important news.\n' +
-      '- dry     — understated, deadpan, one-liner energy.\n\n' +
-      'SILENT by default (do NOT wrap in voice tags): code blocks, file paths, ' +
-      'URLs, long lists, raw command output, JSON. Reading those aloud is bad UX.\n\n' +
-      'SPOKEN by default (DO wrap in voice tags): reactions, key insights or ' +
-      'summary of technical content, questions back to the user, proactive ' +
-      'nudges, personality beats. Keep each voice segment short (one-two ' +
-      'sentences) — the TTS reads them aloud and long monologues drag.\n\n' +
-      'If a reply is purely a code dump or a list, it is fine to emit zero ' +
-      'voice tags — the chat layer carries the value, the voice layer stays ' +
-      'quiet. Conversely, a chatty reply should ALWAYS have at least one ' +
-      'voice segment so the user hears you respond.'
+    prompt += '\n\n' + buildVoiceDirection(config.voice.persona, new Date())
   }
 
   // Collaborative-decisions card. Injected at request time rather than baked

@@ -261,6 +261,24 @@ export const TONE_PRESETS: Record<ToneTag, {
   dry: { length_scale: 1.05, noise_scale: 0.45, noise_w: 0.7 }
 }
 
+/**
+ * Per-persona noise_scale offset added on top of whatever the tone preset
+ * picks. Gives each persona a consistent character baseline so Soul sounds
+ * more expressive than Void in every tone window, without having to clone
+ * the whole TONE_PRESETS table per persona.
+ *
+ *   Soul:  +0.05 — slightly more variability, expressive
+ *   Void:  -0.10 — steadier, more controlled, deadpan-friendly
+ *
+ * The result is clamped to [0.1, 1.0] so an extreme combination (e.g.
+ * Void + serious which is already 0.4) can't dip into negative territory
+ * Piper would reject.
+ */
+const PERSONA_NOISE_OFFSET: Record<VoicePersona, number> = {
+  soul: 0.05,
+  void: -0.1
+}
+
 export interface SynthesiseOptions {
   text: string
   persona: VoicePersona
@@ -337,6 +355,13 @@ export function synthesise(opts: SynthesiseOptions): Promise<Buffer> {
     const preset = TONE_PRESETS[tone]
     const rateInput = Math.min(1.6, Math.max(0.5, opts.rate ?? 1))
     const lengthScale = preset.length_scale / rateInput
+    // Persona character offset on top of the tone preset's noise_scale.
+    // Clamped to [0.1, 1.0] so an extreme combination can't dip into a
+    // value Piper rejects.
+    const noiseScale = Math.min(
+      1.0,
+      Math.max(0.1, preset.noise_scale + PERSONA_NOISE_OFFSET[opts.persona])
+    )
 
     // Temp file in the OS temp dir — gets unlinked after we read it back.
     // UUID suffix so concurrent synth calls (rare but possible during
@@ -347,7 +372,7 @@ export function synthesise(opts: SynthesiseOptions): Promise<Buffer> {
       '--model', voice.modelPath,
       '--output_file', outPath,
       '--length_scale', lengthScale.toFixed(3),
-      '--noise_scale', preset.noise_scale.toFixed(3),
+      '--noise_scale', noiseScale.toFixed(3),
       '--noise_w', preset.noise_w.toFixed(3)
     ]
 

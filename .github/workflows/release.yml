@@ -28,7 +28,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        # Windows pinned to 2022 — see ci.yml for the rationale (win25/*
+        # image + Git 2.54 + actions/checkout@v4 token-auth flake). Release
+        # builds especially can't afford the flake: a failed leg means no
+        # installer for that platform on the draft release.
+        os: [ubuntu-latest, windows-2022, macos-latest]
 
     steps:
       - uses: actions/checkout@v4

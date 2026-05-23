@@ -35,7 +35,12 @@ jobs:
         # (better-sqlite3 + Whisper-tiny ONNX on arm64). The added minutes
         # only burn on PRs that touch main-process code; renderer-only PRs
         # cache through quickly.
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        #
+        # Windows pinned to 2022 (not -latest) — the win25/* image rollout
+        # in May 2026 ships Git 2.54 which intermittently fails token auth
+        # on actions/checkout@v4 ("could not read Username for github.com").
+        # Re-evaluate when checkout@v5 is stable or GitHub fixes the image.
+        os: [ubuntu-latest, windows-2022, macos-latest]
 
     steps:
       - uses: actions/checkout@v4

@@ -771,6 +771,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
     })
     useWidgetStore.getState().setOrbState('processing')
 
+    // v1.5.0 — bump the proactive idle tracker. The "Long idle" watch
+    // task measures from this timestamp, so every real user send resets
+    // the clock. Fire-and-forget IPC; the timestamp lives in main proc.
+    void vs.proactive.bumpInteraction().catch(() => {
+      /* non-fatal — proactive subsystem is optional */
+    })
+
     // v1.4.0 emotional-context hook. Fire-and-forget — the sentiment
     // scheduler counts user messages per-thread and classifies in the
     // background every N exchanges. The renderer doesn't wait on it;

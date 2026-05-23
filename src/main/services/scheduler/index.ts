@@ -27,10 +27,11 @@ import {
   isQuietNow,
   type ChatRequest,
   type ScheduledTask,
-  type ScheduleKind
+  type ScheduleKind,
+  type TaskKind
 } from '@shared/types'
 
-export type { ScheduledTask, ScheduleKind }
+export type { ScheduledTask, ScheduleKind, TaskKind }
 
 /** Main-only input shape — `id`/timestamps are server-assigned. */
 export interface ScheduledTaskInput {
@@ -44,6 +45,8 @@ interface TaskRow {
   id: string
   name: string
   prompt: string
+  /** v1.5.0+ — 'cron' (default for back-compat) or 'watch'. */
+  kind: string
   schedule_kind: string
   schedule_value: string
   enabled: number
@@ -63,6 +66,9 @@ function rowToTask(row: TaskRow): ScheduledTask {
     id: row.id,
     name: row.name,
     prompt: row.prompt,
+    // Defensive — pre-v1.5 rows that pre-date the column have NULL or
+    // missing kind values; treat them as 'cron' (the original behaviour).
+    kind: (row.kind as TaskKind) ?? 'cron',
     scheduleKind: row.schedule_kind as ScheduleKind,
     scheduleValue: row.schedule_value,
     enabled: Boolean(row.enabled),
@@ -111,8 +117,11 @@ export function computeNextRun(
 /* ------------------------------- crud ---------------------------------- */
 
 export function listTasks(): ScheduledTask[] {
+  // Returns CRON tasks only — the existing Settings panel for
+  // "Scheduled tasks" shouldn't show watch tasks mixed in. Watch tasks
+  // have their own listWatchTasks() surface in services/proactive/.
   const rows = db()
-    .prepare(`SELECT * FROM scheduled_tasks ORDER BY created_at DESC`)
+    .prepare(`SELECT * FROM scheduled_tasks WHERE kind = 'cron' ORDER BY created_at DESC`)
     .all() as TaskRow[]
   return rows.map(rowToTask)
 }
@@ -124,8 +133,8 @@ export function addTask(input: ScheduledTaskInput): ScheduledTask {
   db()
     .prepare(
       `INSERT INTO scheduled_tasks
-       (id, name, prompt, schedule_kind, schedule_value, enabled, created_at, next_run)
-       VALUES (?, ?, ?, ?, ?, 1, ?, ?)`
+       (id, kind, name, prompt, schedule_kind, schedule_value, enabled, created_at, next_run)
+       VALUES (?, 'cron', ?, ?, ?, ?, 1, ?, ?)`
     )
     .run(id, input.name, input.prompt, input.scheduleKind, input.scheduleValue, now, next)
   log('info', 'system', `Added scheduled task "${input.name}" (${input.scheduleKind}).`)
@@ -162,16 +171,21 @@ export function setEnabled(id: string, enabled: boolean): ScheduledTask | null {
  * runs on the importing machine.
  */
 export function replaceTasks(tasks: ScheduledTask[]): void {
+  // Restore-from-backup path. Only handles cron tasks — watch tasks
+  // are restored separately by services/proactive/. Backups created
+  // by pre-v1.5 builds don't include the kind column; treat them as
+  // cron (the only kind that existed at backup time).
   const database = db()
   const tx = database.transaction(() => {
-    database.prepare(`DELETE FROM scheduled_tasks`).run()
+    database.prepare(`DELETE FROM scheduled_tasks WHERE kind = 'cron'`).run()
     const insert = database.prepare(
       `INSERT INTO scheduled_tasks
-       (id, name, prompt, schedule_kind, schedule_value, enabled, created_at, next_run)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+       (id, kind, name, prompt, schedule_kind, schedule_value, enabled, created_at, next_run)
+       VALUES (?, 'cron', ?, ?, ?, ?, ?, ?, ?)`
     )
     for (const t of tasks) {
       if (!t || typeof t.id !== 'string') continue
+      if (t.kind && t.kind !== 'cron') continue // skip non-cron in cron restore path
       const nextRun = t.enabled
         ? computeNextRun(t.scheduleKind, t.scheduleValue)
         : null
@@ -361,7 +375,30 @@ export function initScheduler(): void {
   void import('electron').then(({ powerMonitor }) => {
     powerMonitor.on('resume', onResume)
   })
+  // Lazy import — proactive subsystem lives in a sibling folder and
+  // we only want to pay the cost when the scheduler is actually up.
+  // The poll loop calls checkPolledWatchTasks() once per tick for the
+  // idle-duration + time-of-day watch types (event-driven watches like
+  // task-complete + sentiment-shift dispatch immediately from their
+  // emitters, not from this loop).
+  void import('../proactive/watchTasks').then(({ checkPolledWatchTasks }) => {
+    // Run once immediately on init so the user doesn't wait 60s for
+    // the first idle-duration evaluation.
+    checkPolledWatchTasks()
+  })
   tickTimer = setInterval(() => {
+    void import('../proactive/watchTasks').then(({ checkPolledWatchTasks }) => {
+      try {
+        checkPolledWatchTasks()
+      } catch (err) {
+        log(
+          'error',
+          'system',
+          'Watch-task poll threw',
+          err instanceof Error ? err.message : String(err)
+        )
+      }
+    })
     void tick().catch((err) => {
       log(
         'error',

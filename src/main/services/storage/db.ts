@@ -238,6 +238,29 @@ const MIGRATIONS: Array<{ version: number; sql: string }> = [
       CREATE INDEX IF NOT EXISTS session_sentiment_computed_at
         ON session_sentiment(computed_at DESC);
     `
+  },
+  {
+    // v1.5.0 Phase 4 — proactive watch tasks. Reuses the scheduled_tasks
+    // table (no point in a parallel table when the storage shape is
+    // identical) and disambiguates via the new `kind` column:
+    //   'cron'  — existing schedule-driven tasks (default for back-compat)
+    //   'watch' — fires when a condition becomes true rather than at a
+    //             specific time
+    // Watch tasks reuse:
+    //   schedule_value — JSON-encoded WatchCondition spec
+    //   last_run       — last time the condition was last satisfied
+    //   next_run       — null for watch tasks (the polling loop checks
+    //                    conditions instead of comparing to a target time)
+    //
+    // Adding a CHECK constraint at the column level keeps the union
+    // narrow without needing migration glue every time scheduler grows
+    // a new kind.
+    version: 9,
+    sql: `
+      ALTER TABLE scheduled_tasks
+        ADD COLUMN kind TEXT NOT NULL DEFAULT 'cron';
+      CREATE INDEX IF NOT EXISTS scheduled_tasks_kind ON scheduled_tasks(kind);
+    `
   }
 ]
 

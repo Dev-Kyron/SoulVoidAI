@@ -31,6 +31,7 @@ const bridge: VoidSoulBridge = {
     setPrivateChat: (enabled) => invoke('config:set-private-chat', enabled),
     setRagEnabled: (enabled) => invoke('config:set-rag-enabled', enabled),
     setMemory: (patch) => invoke('config:set-memory', patch),
+    setProactiveVoice: (patch) => invoke('config:set-proactive-voice', patch),
     setEmbeddingProvider: (provider) =>
       invoke('config:set-embedding-provider', provider),
     setOnboarded: (value) => invoke('config:set-onboarded', value),
@@ -81,6 +82,12 @@ const bridge: VoidSoulBridge = {
     sentimentPromptBlock: () => invoke('memory:sentiment-prompt-block'),
     recentSentiments: (limit) => invoke('memory:recent-sentiments', limit),
     forgetRecentSentiment: (days) => invoke('memory:forget-recent-sentiment', days)
+  },
+  proactive: {
+    list: () => invoke('proactive:list'),
+    setEnabled: (id, enabled) => invoke('proactive:set-enabled', id, enabled),
+    remove: (id) => invoke('proactive:remove', id),
+    bumpInteraction: () => invoke('proactive:bump-interaction')
   },
   history: {
     summaries: () => invoke('history:summaries'),
@@ -254,6 +261,7 @@ const bridge: VoidSoulBridge = {
     onBudgetWarning: (cb) => subscribe('usage:budget-warning', cb),
     onNewModels: (cb) => subscribe('ai:new-models', cb),
     onProviderFallback: (cb) => subscribe('ai:fallback', cb),
+    onProactiveSpeak: (cb) => subscribe('voice:proactive-speak', cb),
     onFilesRagProgress: (cb) => subscribe('files-rag:progress', cb),
     onFilesRagDone: (cb) => subscribe('files-rag:done', cb),
     onConfigUpdated: (cb) => subscribe('config:updated', cb),

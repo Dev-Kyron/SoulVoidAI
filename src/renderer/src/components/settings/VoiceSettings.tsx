@@ -1,15 +1,20 @@
 /**
- * Voice settings — v1.2.0 (Piper edition).
+ * Voice settings panel — v1.5.0 layout.
  *
- * Two voice cards (Void / Soul) show the .onnx model picked up from each
- * persona's folder under `<userData>/voices/<persona>/`, with a preview
- * button that synthesises a one-sentence sample. The legacy SAPI voice
- * picker is gone — Piper voices are bundled neural models, not OS voice
- * dropdowns, so there's no "pick from a system list" surface to expose.
+ * Lives in its own top-level Settings tab as of v1.5. Four sibling
+ * collapsible sections, each independently foldable so the user can
+ * focus on just the surface they're tuning:
  *
- * A credit / promo strip at the bottom links out to rhasspy/piper —
- * Michael Hansen's work is what makes this whole feature possible, and
- * the user explicitly asked for the attribution to be visible.
+ *   1. Voice picker     — Piper .onnx per persona + rate/volume sliders.
+ *                         Default-expanded; this is the everyday surface.
+ *   2. Voice direction  — tone catalogue + time-of-day window. Read-only
+ *                         audition strip; the model picks tones itself.
+ *   3. Proactive voice  — v1.5 watch-task master + per-task toggles.
+ *   4. Wake word        — continuous-listening arm + .ppn config.
+ *
+ * Piper credit lives inside (1) since it's specifically about the voice
+ * picker; Michael Hansen (rhasspy) maintains Piper on his own time and
+ * the user explicitly asked for the attribution to stay visible.
  */
 import { useCallback, useEffect, useState } from 'react'
 import {
@@ -30,9 +35,8 @@ import { Toggle } from '../common/ui'
 import { CollapsibleSection } from './CollapsibleSection'
 import { speak } from '../../lib/voice'
 import { vs } from '../../lib/bridge'
-import { cn } from '../../lib/utils'
+import { cn, relativeTime } from '../../lib/utils'
 import { getTimeWindow, getDefaultTone, getWindowLabel } from '@shared/voicePersona'
-import { Ear } from 'lucide-react'
 import type { InstalledVoice, VoiceConfig, VoicePersona, VoiceSetupStatus } from '@shared/types'
 
 const PIPER_REPO = 'https://github.com/rhasspy/piper'
@@ -77,11 +81,63 @@ export function VoiceSettings(): JSX.Element | null {
   if (!config) return null
   const voice = config.voice
 
+  // Four sibling sections, each independently foldable. Picker is the
+  // only one default-expanded — it's the daily-driver surface; the rest
+  // open when the user goes looking for them.
   return (
-    <CollapsibleSection
-      title="Voice"
-      hint="Spoken replies powered by Piper TTS — neural voices that run locally on your machine. No cloud, no API key, no rate limits."
-    >
+    <>
+      <CollapsibleSection
+        title="Voice picker"
+        hint="Piper TTS — neural voices running locally on your machine. No cloud, no API key, no rate limits."
+        defaultOpen
+      >
+        <VoicePickerBody
+          voice={voice}
+          status={status}
+          setVoice={setVoice}
+        />
+      </CollapsibleSection>
+
+      <CollapsibleSection
+        title="Voice direction"
+        hint="The tones the model can pick from when speaking — audition each."
+      >
+        <VoiceDirectionBody voice={voice} />
+      </CollapsibleSection>
+
+      <CollapsibleSection
+        title="Proactive voice"
+        hint="Let Soul initiate — nudges when a long task finishes, when you've been idle, when you're stuck."
+      >
+        <ProactiveVoiceBody />
+      </CollapsibleSection>
+
+      <CollapsibleSection
+        title="Wake word"
+        hint="Continuous listening for &quot;Hey Void&quot; / &quot;Hey Soul&quot;."
+      >
+        <WakeWordBody voice={voice} />
+      </CollapsibleSection>
+    </>
+  )
+}
+
+/**
+ * The picker body — voice toggle, binary warning, the two persona cards,
+ * shortcut buttons, rate/volume sliders, active-persona text, Piper
+ * credit. Lives inside the "Voice picker" CollapsibleSection.
+ */
+function VoicePickerBody({
+  voice,
+  status,
+  setVoice
+}: {
+  voice: VoiceConfig
+  status: VoiceSetupStatus | null
+  setVoice: (patch: Partial<VoiceConfig>) => Promise<void>
+}): JSX.Element {
+  return (
+    <>
       <div className="flex items-center justify-between py-1.5">
         <div>
           <p className="text-[12px] text-slate-200">Spoken replies</p>
@@ -192,12 +248,8 @@ export function VoiceSettings(): JSX.Element | null {
         switch between Void and Soul from the Nexus HUD.
       </p>
 
-      <VoiceDirectionRow voice={voice} />
-
       <PiperCredit />
-
-      <WakeWordRow voice={voice} />
-    </CollapsibleSection>
+    </>
   )
 }
 
@@ -278,7 +330,7 @@ const TONE_SAMPLES: ReadonlyArray<{
   }
 ]
 
-function VoiceDirectionRow({ voice }: { voice: VoiceConfig }): JSX.Element {
+function VoiceDirectionBody({ voice }: { voice: VoiceConfig }): JSX.Element {
   const [playing, setPlaying] = useState<string | null>(null)
   // Recompute the current window every time the panel renders — the
   // user might keep settings open across a window boundary (e.g. 8:59
@@ -293,11 +345,7 @@ function VoiceDirectionRow({ voice }: { voice: VoiceConfig }): JSX.Element {
   const windowLabel = getWindowLabel(timeWindow)
   const personaName = voice.persona === 'void' ? 'Void' : 'Soul'
   return (
-    <div className="mt-3 border-t border-white/5 pt-2">
-      <div className="mb-1 flex items-center gap-1.5 py-1">
-        <Sparkles size={12} className="text-[var(--accent)]" />
-        <p className="text-[12px] text-slate-200">Voice direction</p>
-      </div>
+    <>
       <p className="mb-2 text-[10px] leading-relaxed text-slate-500">
         Replies have a chat layer (what you read) and a voice layer (what gets
         spoken aloud). {personaName} picks the tone for each spoken segment —
@@ -361,7 +409,7 @@ function VoiceDirectionRow({ voice }: { voice: VoiceConfig }): JSX.Element {
           )
         })}
       </div>
-    </div>
+    </>
   )
 }
 
@@ -474,6 +522,142 @@ function formatSize(bytes: number): string {
  * (rhasspy) maintains it on his own time, so a "View on GitHub" link is
  * both a nice gesture and the right thing to do.
  */
+/**
+ * v1.5.0 Phase 4 — proactive voice settings. Master toggle + per-task
+ * enable/disable + last-fired timestamps. All four built-in watch tasks
+ * are seeded disabled on first boot; user opts into the ones they want.
+ *
+ * Settings panel is intentionally lightweight — surfaces what's running
+ * without a Quick-Settings depth of customisation. Custom watch tasks
+ * (UI to create new ones) deferred to v1.5.1.
+ */
+function ProactiveVoiceBody(): JSX.Element {
+  const config = useConfigStore((s) => s.config)
+  const pushToast = useUiStore((s) => s.pushToast)
+  const [tasks, setTasks] = useState<import('@shared/types').WatchTask[]>([])
+  const [loading, setLoading] = useState(false)
+
+  const refresh = useCallback(async (): Promise<void> => {
+    try {
+      const list = await vs.proactive.list()
+      setTasks(list)
+    } catch {
+      /* non-fatal */
+    }
+  }, [])
+
+  useEffect(() => {
+    void refresh()
+    // Re-fetch every 60s so lastRun timestamps stay current while panel open.
+    const id = window.setInterval(() => void refresh(), 60_000)
+    return () => window.clearInterval(id)
+  }, [refresh])
+
+  if (!config) return <></>
+
+  const masterOn = config.proactiveVoice.enabled
+
+  const handleMaster = async (next: boolean): Promise<void> => {
+    await useConfigStore.getState().setProactiveVoice({ enabled: next })
+  }
+
+  const handleTaskToggle = async (
+    id: string,
+    name: string,
+    next: boolean
+  ): Promise<void> => {
+    if (loading) return
+    setLoading(true)
+    try {
+      await vs.proactive.setEnabled(id, next)
+      pushToast(
+        'success',
+        next
+          ? `Enabled "${name}" — Soul will speak when this condition trips.`
+          : `Disabled "${name}".`
+      )
+      await refresh()
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const summarise = (task: import('@shared/types').WatchTask): string => {
+    const t = task.spec.type
+    if (t === 'idle-duration') {
+      return `After ${task.spec.params.minutes ?? 30} min idle`
+    }
+    if (t === 'task-complete') {
+      return `When a long task (>${task.spec.params.minDurationSec ?? 10}s) finishes`
+    }
+    if (t === 'sentiment-shift') {
+      return `When session sentiment turns ${task.spec.params.to ?? 'any'}`
+    }
+    if (t === 'time-of-day-window') {
+      return `Daily at ${task.spec.params.at ?? '09:00'}`
+    }
+    return t
+  }
+
+  return (
+    <>
+      <p className="mb-2 text-[10px] leading-relaxed text-slate-500">
+        Soul can initiate without being asked — a quick nudge when a long
+        task finishes, when you've been idle a while, when she notices
+        you're stuck. All four below ship OFF — opt into the ones you
+        want. DND + voice mute always override.
+      </p>
+
+      <div className="mb-2 flex items-center justify-between rounded-lg border border-white/5 bg-black/20 px-2.5 py-2">
+        <div>
+          <p className="text-[11px] font-semibold text-slate-200">
+            Master switch
+          </p>
+          <p className="text-[10px] text-slate-500">
+            Off = no proactive speech regardless of per-task toggles.
+          </p>
+        </div>
+        <Toggle checked={masterOn} onChange={(v) => void handleMaster(v)} />
+      </div>
+
+      {masterOn && (
+        <div className="space-y-1">
+          {tasks.length === 0 ? (
+            <p className="text-[10px] italic text-slate-500">
+              Loading built-in tasks…
+            </p>
+          ) : (
+            tasks.map((task) => (
+              <div
+                key={task.id}
+                className="rounded-md border border-white/5 bg-black/20 px-2.5 py-2"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[11px] font-semibold text-white">
+                      {task.name}
+                    </p>
+                    <p className="text-[10px] text-slate-500">{summarise(task)}</p>
+                    {task.lastRun && (
+                      <p className="mt-0.5 text-[9px] text-slate-600">
+                        Last fired {relativeTime(task.lastRun)}
+                      </p>
+                    )}
+                  </div>
+                  <Toggle
+                    checked={task.enabled}
+                    onChange={(v) => void handleTaskToggle(task.id, task.name, v)}
+                  />
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+    </>
+  )
+}
+
 function PiperCredit(): JSX.Element {
   return (
     <div className="my-3 rounded-lg border border-[var(--accent-ring)] bg-gradient-to-br from-[var(--accent-soft)] to-transparent p-3">
@@ -543,7 +727,7 @@ function ArmRow(): JSX.Element {
   )
 }
 
-function WakeWordRow({ voice }: { voice: VoiceConfig }): JSX.Element {
+function WakeWordBody({ voice }: { voice: VoiceConfig }): JSX.Element {
   const setVoice = useConfigStore((s) => s.setVoice)
   const pushToast = useUiStore((s) => s.pushToast)
   const [hasKey, setHasKey] = useState(false)
@@ -571,12 +755,8 @@ function WakeWordRow({ voice }: { voice: VoiceConfig }): JSX.Element {
   }
 
   return (
-    <div className="mt-3 border-t border-white/5 pt-2">
-      <div className="mb-1 flex items-center justify-between py-1">
-        <div className="flex items-center gap-1.5">
-          <Ear size={12} className="text-[var(--accent)]" />
-          <p className="text-[12px] text-slate-200">Wake word</p>
-        </div>
+    <>
+      <div className="mb-1 flex items-center justify-end py-1">
         <Toggle
           checked={voice.wakeWord.enabled}
           onChange={(enabled) => {
@@ -631,6 +811,6 @@ function WakeWordRow({ voice }: { voice: VoiceConfig }): JSX.Element {
           Open folder
         </button>
       </div>
-    </div>
+    </>
   )
 }

@@ -13,6 +13,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import {
   Cpu,
   Lock,
+  Mic,
   Plug,
   Search,
   Settings as SettingsIcon,
@@ -86,7 +87,7 @@ const About = lazyNamed(() => import('./components/settings/About'), 'About')
 
 /* ------------------------------- groups ------------------------------- */
 
-type GroupId = 'general' | 'ai' | 'tools' | 'advanced'
+type GroupId = 'general' | 'voice' | 'ai' | 'tools' | 'advanced'
 
 interface SectionGroup {
   id: GroupId
@@ -101,15 +102,24 @@ const GROUPS: SectionGroup[] = [
   {
     id: 'general',
     label: 'General',
-    description: 'Mode, appearance, voice — the everyday surface.',
+    description: 'Mode and appearance — the everyday surface.',
     icon: Sparkles,
     render: () => (
       <>
         <ModeSettings />
         <AppearanceSettings />
-        <VoiceSettings />
       </>
     )
+  },
+  {
+    id: 'voice',
+    label: 'Voice',
+    // Voice picker, tone direction, proactive nudges, wake word — all
+    // the things that make Soul speak (and listen). Split out of General
+    // in v1.5 because the voice surface grew past one tab's worth.
+    description: 'Voices, tone direction, proactive nudges, wake word.',
+    icon: Mic,
+    render: () => <VoiceSettings />
   },
   {
     id: 'ai',

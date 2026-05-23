@@ -353,6 +353,15 @@ export function registerIpc(): void {
       return emitConfig(e.sender.id)
     }
   )
+  ipcMain.handle(
+    'config:set-proactive-voice',
+    (e, patch: Partial<import('@shared/types').ProactiveVoiceConfig>) => {
+      updateConfig({
+        proactiveVoice: { ...getConfig().proactiveVoice, ...patch }
+      })
+      return emitConfig(e.sender.id)
+    }
+  )
 
   ipcMain.handle(
     'config:set-embedding-provider',
@@ -660,6 +669,28 @@ export function registerIpc(): void {
   ipcMain.handle('memory:forget-recent-sentiment', (_e, days?: number) => {
     resetSentimentCache()
     return forgetRecentSentiment(days)
+  })
+
+  // v1.5.0 — proactive watch tasks. CRUD + interaction bump (chat
+  // store calls bump on every user send so idle-duration watches
+  // measure from real activity, not from app start).
+  ipcMain.handle('proactive:list', async () => {
+    const { listWatchTasks } = await import('../services/proactive/watchTasks')
+    return listWatchTasks()
+  })
+  ipcMain.handle('proactive:set-enabled', async (_e, id: string, enabled: boolean) => {
+    const { setWatchEnabled } = await import('../services/proactive/watchTasks')
+    return setWatchEnabled(id, enabled)
+  })
+  ipcMain.handle('proactive:remove', async (_e, id: string) => {
+    const { removeWatchTask } = await import('../services/proactive/watchTasks')
+    removeWatchTask(id)
+    return { ok: true }
+  })
+  ipcMain.handle('proactive:bump-interaction', async () => {
+    const { bumpInteraction } = await import('../services/proactive/watchTasks')
+    bumpInteraction()
+    return { ok: true }
   })
 
   /* ----------------------------- history ------------------------------- */

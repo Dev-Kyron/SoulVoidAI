@@ -85,6 +85,11 @@ export function recordSentiment(input: {
     }
   }
 
+  // Capture the previous label BEFORE the insert so we can detect a
+  // genuine label shift below. Same query that finds `current` above
+  // — already in scope. Use it before the new row replaces it.
+  const previousLabel = current?.sentiment ?? null
+
   const result = handle
     .prepare(
       `INSERT INTO session_sentiment
@@ -94,6 +99,31 @@ export function recordSentiment(input: {
     .run(sessionStart, input.sentiment, input.intensity, input.summary, now)
 
   const id = Number(result.lastInsertRowid)
+
+  // v1.5.0 — emit sentiment-shift ONLY when the label actually changed.
+  // Earlier draft emitted on every classification + relied on the watch
+  // task throttle (30 min default) to suppress noise; that's correct
+  // semantics but bad signal — a productive→stuck→productive flicker
+  // within the throttle window would fire on the first stuck without
+  // surfacing the second. Now: real shifts only, watch task's own
+  // params.to filter narrows further (e.g. "only when shifting TO stuck").
+  // First-ever classification with no previous label also counts as a
+  // shift — the user's first emotional state of the session is a signal
+  // worth surfacing.
+  const isShift = previousLabel !== input.sentiment
+  if (isShift) {
+    void import('../proactive/watchTasks')
+      .then(({ onWatchEvent }) => {
+        onWatchEvent({
+          type: 'sentiment-shift',
+          payload: { sentiment: input.sentiment }
+        })
+      })
+      .catch(() => {
+        /* proactive subsystem not loaded — non-fatal */
+      })
+  }
+
   return {
     id,
     sessionStart,

@@ -16,6 +16,7 @@ import type {
   ClientConfig,
   MemoryConfig,
   ModeId,
+  ProactiveVoiceConfig,
   ProviderId,
   ProviderRuntime,
   SeenModels,
@@ -38,6 +39,8 @@ export interface AppConfigFile {
   chat: ChatBehaviourConfig
   /** v1.4.0+ emotional context + sentiment classifier config. */
   memory: MemoryConfig
+  /** v1.5.0+ proactive watch tasks master switch. */
+  proactiveVoice: ProactiveVoiceConfig
   /** When each model id was first observed from a `listModels` call, per provider. */
   seenModels: SeenModels
   syncFolder: string
@@ -53,11 +56,22 @@ export interface AppConfigFile {
   systemPrompt: string
 }
 
+// Default base prompt — the runtime composer layers persona, mode, recent
+// emotional state, and time-of-day blocks on top of this at call time, so
+// this string only has to establish character + the four house rules
+// (concrete, read-the-room, voice-aware, permission-flow). Last rewritten
+// for v1.5.0: the v1.0 wording called this an "AI operating layer", which
+// is app marketing not a self-concept the model can act on.
 const DEFAULT_SYSTEM_PROMPT =
-  'You are VoidSoul, a futuristic AI operating layer for creators and developers. ' +
-  'Be precise, fast and practical. Prefer concrete steps and runnable code. ' +
-  'When the user asks you to do something on their machine, describe the action ' +
-  'clearly — the app will request the matching permission before anything runs.'
+  "You are Soul (or Void — your active persona is in context), a local AI companion " +
+  "living inside the user's VoidSoul desktop app. Be precise and concrete: prefer " +
+  "runnable code, tight steps, and direct answers over hedge. Read the room — the " +
+  "user's mode, recent emotional state, and time of day are all in your context. " +
+  "Let them shape your tone without narrating them. Your replies may be heard aloud " +
+  "via Piper TTS; mark genuine tone shifts with <voice tone=\"casual\"> style markers " +
+  "when a different delivery would land better. When the user asks you to act on " +
+  "their machine, describe what you're about to do — the app will request the " +
+  "matching permission before anything runs."
 
 const DEFAULT_PROVIDERS = (Object.keys(PROVIDER_META) as ProviderId[]).reduce(
   (acc, id) => {
@@ -116,6 +130,13 @@ const DEFAULT_CONFIG: AppConfigFile = {
     // Auto-pick the cheapest model from the active provider unless the
     // user pins one explicitly in Settings.
     sentimentModel: null
+  },
+  proactiveVoice: {
+    // Master kill-switch ON by default so that when the user opts INTO
+    // a specific watch task (all four ship disabled), it actually fires.
+    // Flipping this off is the one-toggle way to silence the whole
+    // proactive subsystem without unticking every task individually.
+    enabled: true
   },
   seenModels: {},
   syncFolder: '',
@@ -200,6 +221,7 @@ function normalize(c: AppConfigFile): AppConfigFile {
     },
     chat,
     memory: { ...DEFAULT_CONFIG.memory, ...c.memory },
+    proactiveVoice: { ...DEFAULT_CONFIG.proactiveVoice, ...c.proactiveVoice },
     seenModels: c.seenModels ?? DEFAULT_CONFIG.seenModels,
     panel: { ...DEFAULT_CONFIG.panel, ...c.panel },
     permissions: { ...DEFAULT_CONFIG.permissions, ...c.permissions }
@@ -305,6 +327,7 @@ export function getClientConfig(): ClientConfig {
     voice: c.voice,
     chat: c.chat,
     memory: c.memory,
+    proactiveVoice: c.proactiveVoice,
     seenModels: c.seenModels,
     syncFolder: c.syncFolder,
     onboarded: c.onboarded,

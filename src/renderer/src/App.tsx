@@ -18,6 +18,7 @@ import {
 import { CHAT_STRINGS } from './lib/chatStrings'
 import { useWidgetStore } from './store/useWidgetStore'
 import { vs } from './lib/bridge'
+import { enqueueSpeak } from './lib/voice'
 import { useWakeWord } from './lib/useWakeWord'
 import { useAccentTheme, useConfigBroadcastSync } from './lib/useConfigBridge'
 import { useTheme } from './lib/useTheme'
@@ -155,6 +156,35 @@ export default function App(): JSX.Element {
     []
   )
 
+  // v1.5.0 — proactive watch tasks. Main process fires a broadcast when
+  // a watch task condition trips; we drop the supplied content into the
+  // existing Web Audio queue with the supplied tone (or speak a
+  // morning-recap placeholder if dynamicRecap is true — real summariser
+  // is a v1.5.1 follow-up). DND + voice mute + master toggle are
+  // enforced in main before this fires; we re-check voice.enabled
+  // defensively in case the config snapshot has drifted between
+  // processes.
+  useEffect(
+    () =>
+      vs.events.onProactiveSpeak(({ content, tone, taskName, dynamicRecap }) => {
+        const config = useConfigStore.getState().config
+        if (!config || !config.voice.enabled) return
+        const spoken = dynamicRecap
+          ? "Morning. I'll have a proper recap for you in the next update."
+          : content
+        if (!spoken) return
+        enqueueSpeak(
+          spoken,
+          config.voice.persona,
+          config.voice.rate,
+          config.voice.volume,
+          tone
+        )
+        useUiStore.getState().pushToast('info', `Proactive nudge: ${taskName}`)
+      }),
+    []
+  )
+
   // Scheduled-task completions surface as a toast (in addition to the OS
   // notification the scheduler fires). DND — both the manual override and
   // scheduled quiet hours — suppresses the toast entirely. The scheduler
@@ -217,6 +247,12 @@ export default function App(): JSX.Element {
         const widget = useWidgetStore.getState()
         if (intent === 'toggle') void widget.toggle()
         else if (!widget.expanded) void widget.expand()
+        // v1.5.0 — any summon (wake-word trigger, hotkey, tray click)
+        // is a fresh user signal. Bump the idle tracker so a "Long idle"
+        // watch doesn't fire moments after the user just woke Soul up.
+        void vs.proactive.bumpInteraction().catch(() => {
+          /* non-fatal */
+        })
       }),
     []
   )

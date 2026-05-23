@@ -17,6 +17,12 @@ import { reloadPlugins, pluginsDirectory } from '../plugins/plugins'
 import { getEntries as getUsageEntries, getBudget as getUsageBudget, replaceUsage } from '../usage/store'
 import { listFolders as listIndexedFolders, restoreFolders } from '../files-rag/manager'
 import { listTasks as listScheduledTasks, replaceTasks as replaceScheduledTasks } from '../scheduler'
+import {
+  listWatchTasks,
+  addWatchTask,
+  setWatchEnabled,
+  type WatchTask
+} from '../proactive/watchTasks'
 import { getServers as getMcpServers, setServers as setMcpServers } from '../mcp/store'
 import { log } from '../logger'
 import type {
@@ -68,6 +74,14 @@ interface SyncBundle {
    * machine for the connection to come up.
    */
   mcpServers?: McpServerConfig[]
+  /**
+   * v1.5.0+: proactive watch tasks. Persists per-task enable state so a
+   * user who opted into "Long idle" + "Task complete" doesn't have to
+   * re-toggle them after restoring on a new machine. The built-in seed
+   * runs on import too — duplicates are skipped by name, so restoring
+   * preserves user choices without doubling rows.
+   */
+  watchTasks?: WatchTask[]
 }
 
 function buildBundle(): SyncBundle {
@@ -105,7 +119,8 @@ function buildBundle(): SyncBundle {
     },
     filesRagFolders: listIndexedFolders().map((f) => f.path),
     scheduledTasks: listScheduledTasks(),
-    mcpServers: getMcpServers()
+    mcpServers: getMcpServers(),
+    watchTasks: listWatchTasks()
   }
 }
 
@@ -175,6 +190,39 @@ function applyBundle(raw: unknown): SyncResult {
   // referenced command on this machine for connections to actually come up.
   if (Array.isArray(bundle.mcpServers)) {
     setMcpServers(bundle.mcpServers)
+  }
+
+  // v1.5.0+: proactive watch tasks. The 4 built-ins are seeded on boot
+  // (idempotent — skipped by name if they already exist), but the
+  // user's per-task enable state lives in the backup. Walk the imported
+  // tasks: for built-in names that already exist, just sync the
+  // enabled flag; for user-created custom watch tasks, insert fresh.
+  if (Array.isArray(bundle.watchTasks)) {
+    const existing = new Map(listWatchTasks().map((t) => [t.name, t]))
+    for (const t of bundle.watchTasks) {
+      if (!t || typeof t.name !== 'string') continue
+      const match = existing.get(t.name)
+      if (match) {
+        // Built-in or previously-imported — just sync the enabled flag.
+        // We don't overwrite the spec to keep user-edited content if
+        // any, and to avoid migration churn when built-in defaults
+        // shift between releases.
+        if (match.enabled !== t.enabled) {
+          setWatchEnabled(match.id, t.enabled)
+        }
+      } else {
+        // Custom watch task this machine doesn't have yet. Insert.
+        try {
+          addWatchTask({ name: t.name, spec: t.spec, enabled: t.enabled })
+        } catch (err) {
+          log(
+            'warn',
+            'system',
+            `Skipped watch task "${t.name}" during import: ${err instanceof Error ? err.message : String(err)}`
+          )
+        }
+      }
+    }
   }
 
   log('success', 'system', 'Imported a VoidSoul backup.')

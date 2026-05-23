@@ -101,7 +101,18 @@ if (!app.requestSingleInstanceLock()) {
     void refreshAllModels()
 
     // Scheduled-task runner ticks once a minute and fires due prompts headlessly.
+    // The same tick loop now also evaluates v1.5.0 proactive watch tasks
+    // (idle-duration + time-of-day) — they live in services/proactive/.
     initScheduler()
+
+    // v1.5.0 — seed the 4 built-in watch tasks (Task complete, Long idle,
+    // Stuck loop, Morning recap). All ship disabled-by-default; user
+    // opts in via Settings → Voice → Proactive. Idempotent — re-running
+    // on each boot is fine because seedBuiltInWatchTasks() skips names
+    // that already exist.
+    void import('./services/proactive/watchTasks').then(({ seedBuiltInWatchTasks }) => {
+      seedBuiltInWatchTasks()
+    })
 
     // Auto-updater — silently checks GitHub Releases on boot and notifies
     // the renderer when a new version is available / downloaded. No-op in

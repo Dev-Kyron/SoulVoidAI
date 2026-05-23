@@ -62,7 +62,9 @@ import type {
   ChatTurn,
   EmotionalContextSnapshot,
   MemoryConfig,
+  ProactiveVoiceConfig,
   SessionSentiment,
+  WatchTask,
   SystemStats,
   VoicePersona,
   VoiceSetupStatus,
@@ -106,6 +108,9 @@ export interface VoidSoulBridge {
     /** v1.4.0 — patch any subset of the MemoryConfig (emotionalContext
      *  toggle, sentimentModel pin, etc). Merges with existing values. */
     setMemory(patch: Partial<MemoryConfig>): Promise<ClientConfig>
+    /** v1.5.0 — patch the proactive-voice master config. Mostly the
+     *  master toggle today; will expand if per-task config moves here. */
+    setProactiveVoice(patch: Partial<ProactiveVoiceConfig>): Promise<ClientConfig>
     setEmbeddingProvider(provider: EmbeddingProvider): Promise<ClientConfig>
     setOnboarded(value: boolean): Promise<ClientConfig>
     setApiKey(provider: ProviderId, key: string): Promise<ClientConfig>
@@ -172,6 +177,16 @@ export interface VoidSoulBridge {
     sentimentPromptBlock(): Promise<string>
     recentSentiments(limit?: number): Promise<SessionSentiment[]>
     forgetRecentSentiment(days?: number): Promise<{ deleted: number }>
+  }
+  /** v1.5.0 proactive watch tasks — Soul can initiate without being asked.
+   *  All four built-in tasks ship disabled; user opts in via Settings. */
+  proactive: {
+    list(): Promise<WatchTask[]>
+    setEnabled(id: string, enabled: boolean): Promise<WatchTask | null>
+    remove(id: string): Promise<{ ok: boolean }>
+    /** Chat store fires this on every user send so idle-duration watches
+     *  measure from real user activity, not from app start. */
+    bumpInteraction(): Promise<{ ok: boolean }>
   }
   history: {
     /** Lightweight thread list (no message bodies). */
@@ -519,6 +534,21 @@ export interface VoidSoulBridge {
         to: ProviderId
         toLabel: string
         reason: string
+      }) => void
+    ): Unsubscribe
+    /** v1.5.0 — a proactive watch task tripped its condition and wants
+     *  Soul to speak. Renderer queues `content` through the standard
+     *  Web Audio path with the supplied tone. `dynamicRecap` true means
+     *  the renderer should generate content from chat history instead of
+     *  using `content` verbatim (used by Morning recap). */
+    onProactiveSpeak(
+      cb: (info: {
+        taskId: string
+        taskName: string
+        content: string
+        tone: import('./voiceMarkers').ToneTag
+        allowInterrupt: boolean
+        dynamicRecap: boolean
       }) => void
     ): Unsubscribe
     /** Fired while a file-RAG scan walks the folder; nullable on completion. */

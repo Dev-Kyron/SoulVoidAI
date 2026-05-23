@@ -11,6 +11,7 @@ import type {
   EmbeddingProvider,
   MemoryConfig,
   ModeId,
+  ProactiveVoiceConfig,
   ProviderId,
   ProviderRuntime,
   VoiceConfig
@@ -43,6 +44,7 @@ interface ConfigState {
   setPrivateChat: (enabled: boolean) => Promise<void>
   setRagEnabled: (enabled: boolean) => Promise<void>
   setMemory: (patch: Partial<MemoryConfig>) => Promise<void>
+  setProactiveVoice: (patch: Partial<ProactiveVoiceConfig>) => Promise<void>
   setEmbeddingProvider: (provider: EmbeddingProvider) => Promise<void>
   setOnboarded: (value: boolean) => Promise<void>
   setSystemPrompt: (prompt: string) => Promise<void>
@@ -115,6 +117,10 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
 
   setMemory: async (patch) => {
     set({ config: await vs.config.setMemory(patch) })
+  },
+
+  setProactiveVoice: async (patch) => {
+    set({ config: await vs.config.setProactiveVoice(patch) })
   },
 
   setEmbeddingProvider: async (provider) => {

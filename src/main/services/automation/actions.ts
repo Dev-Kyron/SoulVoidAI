@@ -1122,6 +1122,7 @@ export async function executeAction(
     }
   }
 
+  const startedAt = Date.now()
   try {
     const result = await dispatch(req, signal)
     log(
@@ -1129,6 +1130,22 @@ export async function executeAction(
       'automation',
       `${descriptor.label}: ${result.output ?? result.error ?? 'done'}`
     )
+    // v1.5.0 — emit a task-complete event for the proactive watch
+    // subsystem. Watch tasks with type:'task-complete' subscribe via
+    // onWatchEvent and decide whether the duration crossed their
+    // threshold. Only fires on success — failed/cancelled work
+    // shouldn't trigger a celebratory "alright, that's done."
+    const durationSec = (Date.now() - startedAt) / 1000
+    if (result.ok && durationSec >= 5) {
+      // Lazy require to avoid renderer-side import cost. The watch
+      // module is main-only and the proactive subsystem is opt-in.
+      void import('../proactive/watchTasks').then(({ onWatchEvent }) => {
+        onWatchEvent({
+          type: 'task-complete',
+          payload: { durationSec }
+        })
+      })
+    }
     return result
   } catch (err) {
     // Surface aborts as a clean, non-error outcome so logs don't fill with

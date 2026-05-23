@@ -843,17 +843,101 @@ export interface NotebookSummary {
 
 export type ScheduleKind = 'daily' | 'interval' | 'once'
 
+/**
+ * Two flavours of stored task in the same `scheduled_tasks` table.
+ *   'cron'  — fires on a clock (the original v1.0 scheduled-tasks
+ *             feature; uses scheduleKind + scheduleValue + nextRun)
+ *   'watch' — fires when a runtime condition becomes true (v1.5.0
+ *             proactive voice). scheduleValue holds a JSON-encoded
+ *             WatchSpec; nextRun is unused.
+ */
+export type TaskKind = 'cron' | 'watch'
+
+/**
+ * Conditions a watch task can subscribe to. Polled types (idle-duration,
+ * time-of-day-window) are checked once per scheduler tick; event types
+ * (task-complete, sentiment-shift) are fired immediately from the
+ * subsystem that emits them.
+ */
+export type WatchConditionType =
+  | 'idle-duration' // fires when user has been silent for N minutes
+  | 'task-complete' // fires when a long-running tool call wraps
+  | 'sentiment-shift' // fires when the sentiment label changes
+  | 'time-of-day-window' // daily nudge at a specific local-time window
+
+export interface WatchSpec {
+  type: WatchConditionType
+  /** Per-type config:
+   *   idle-duration       — { minutes: number, activeFrom?: 'HH:mm', activeTo?: 'HH:mm' }
+   *   task-complete       — { minDurationSec: number }
+   *   sentiment-shift     — { to?: SessionSentimentLabel } (optional filter)
+   *   time-of-day-window  — { at: 'HH:mm' } */
+  params: Record<string, unknown>
+  /** The thing Soul says when this watch fires. */
+  action: ProactiveAction
+  /** Don't re-fire within this many minutes after the last fire. */
+  throttleMinutes: number
+}
+
+/**
+ * What a watch task does when its condition trips. Currently only
+ * 'speak' — but kept as a discriminated union so future actions
+ * (notify, run shell, etc) slot in without breaking the schema.
+ */
+export type ProactiveAction =
+  | {
+      type: 'speak'
+      /** Static text the model speaks. For 'morning-recap' this is
+       *  ignored; the runner generates content dynamically. */
+      content: string
+      tone?: import('./voiceMarkers').ToneTag
+      /** If true, an in-flight voice clip gets pre-empted. Default
+       *  false so users aren't interrupted mid-reply. */
+      allowInterrupt?: boolean
+      /** Special flag for built-in 'morning recap' — runner ignores
+       *  `content` and asks the cheap model to summarise yesterday. */
+      dynamicRecap?: boolean
+    }
+
 export interface ScheduledTask {
   id: string
   name: string
   prompt: string
+  /** v1.5.0+ — discriminator. Existing pre-v1.5 rows default to 'cron'
+   *  via the migration's column default. */
+  kind: TaskKind
   scheduleKind: ScheduleKind
-  /** `daily`: "HH:mm" · `interval`: minutes as string · `once`: ISO timestamp. */
+  /** `daily`: "HH:mm" · `interval`: minutes as string · `once`: ISO
+   *  timestamp · `watch` (kind='watch'): JSON-stringified WatchSpec. */
   scheduleValue: string
   enabled: boolean
   createdAt: string
   lastRun: string | null
   nextRun: string | null
+  lastResult: string | null
+  lastError: string | null
+}
+
+/**
+ * v1.5.0 master config for the proactive-voice subsystem. Master toggle
+ * is on by default; individual watch tasks ship disabled so a fresh
+ * install has zero unprompted speech until the user opts in.
+ */
+export interface ProactiveVoiceConfig {
+  /** Master kill-switch. Off = no watch task ever fires regardless
+   *  of per-task enabled flag. */
+  enabled: boolean
+}
+
+/** Renderer-facing shape of a watch task — id + name + per-task
+ *  enabled + the full spec + last-fire telemetry. */
+export interface WatchTask {
+  id: string
+  name: string
+  enabled: boolean
+  spec: WatchSpec
+  createdAt: string
+  lastRun: string | null
   lastResult: string | null
   lastError: string | null
 }
@@ -1057,6 +1141,8 @@ export interface ClientConfig {
   chat: ChatBehaviourConfig
   /** v1.4.0+ emotional context + sentiment classifier. */
   memory: MemoryConfig
+  /** v1.5.0+ proactive watch tasks master switch. */
+  proactiveVoice: ProactiveVoiceConfig
   /** Folder used for backup sync (e.g. a Dropbox/Drive folder). Empty = unset. */
   syncFolder: string
   /** True once the user has seen (or skipped) the first-boot tour. */

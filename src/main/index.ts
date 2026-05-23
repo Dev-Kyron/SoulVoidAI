@@ -114,6 +114,13 @@ if (!app.requestSingleInstanceLock()) {
       seedBuiltInWatchTasks()
     })
 
+    // v1.7 — start the screen-watch loop. No-op if config.screenWatch.enabled
+    // is false (default), so this is safe to run unconditionally. The loop
+    // re-arms itself on config changes via config:set-screen-watch IPC.
+    void import('./services/proactive/screenWatch').then(({ startScreenWatch }) => {
+      startScreenWatch()
+    })
+
     // Auto-updater — silently checks GitHub Releases on boot and notifies
     // the renderer when a new version is available / downloaded. No-op in
     // unpackaged dev. See `services/updater/index.ts` + `electron-builder.yml`

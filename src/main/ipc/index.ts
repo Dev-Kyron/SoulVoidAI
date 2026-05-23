@@ -362,6 +362,20 @@ export function registerIpc(): void {
       return emitConfig(e.sender.id)
     }
   )
+  ipcMain.handle(
+    'config:set-screen-watch',
+    async (e, patch: Partial<import('@shared/types').ScreenWatchConfig>) => {
+      updateConfig({
+        screenWatch: { ...getConfig().screenWatch, ...patch }
+      })
+      // Re-arm the loop so changes to enabled / intervalMinutes apply
+      // immediately (otherwise the old timer keeps running on the old
+      // cadence until app restart).
+      const { startScreenWatch } = await import('../services/proactive/screenWatch')
+      startScreenWatch()
+      return emitConfig(e.sender.id)
+    }
+  )
 
   ipcMain.handle(
     'config:set-embedding-provider',
@@ -705,6 +719,23 @@ export function registerIpc(): void {
       return addWatchTask(input)
     }
   )
+
+  // v1.7 — screen-watch loop. Settings UI calls these to drive the
+  // periodic vision observer. `observeNow` runs a one-off tick and
+  // returns the updated status (handy for a "Test now" button).
+  ipcMain.handle('screen-watch:status', async () => {
+    const { getScreenWatchStatus } = await import('../services/proactive/screenWatch')
+    return getScreenWatchStatus()
+  })
+  ipcMain.handle('screen-watch:restart', async () => {
+    const { startScreenWatch } = await import('../services/proactive/screenWatch')
+    startScreenWatch()
+    return { ok: true }
+  })
+  ipcMain.handle('screen-watch:observe-now', async () => {
+    const { observeNow } = await import('../services/proactive/screenWatch')
+    return observeNow()
+  })
 
   /* ----------------------------- history ------------------------------- */
 

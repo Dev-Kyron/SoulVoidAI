@@ -36,6 +36,7 @@ import { useWidgetStore } from '../../store/useWidgetStore'
 import { Toggle } from '../common/ui'
 import { CollapsibleSection } from './CollapsibleSection'
 import { CustomWatchTaskDialog } from './CustomWatchTaskDialog'
+import { ScreenWatchSectionBody } from './ScreenWatchSection'
 import { speak } from '../../lib/voice'
 import { vs } from '../../lib/bridge'
 import { cn, relativeTime } from '../../lib/utils'
@@ -113,6 +114,13 @@ export function VoiceSettings(): JSX.Element | null {
         hint="Let Soul initiate — nudges when a long task finishes, when you've been idle, when you're stuck."
       >
         <ProactiveVoiceBody />
+      </CollapsibleSection>
+
+      <CollapsibleSection
+        title="Screen watch"
+        hint="Soul periodically looks at your screen and speaks if she notices something worth saying. Permission-gated. Cost-aware with a daily cap."
+      >
+        <ScreenWatchSectionBody />
       </CollapsibleSection>
 
       <CollapsibleSection

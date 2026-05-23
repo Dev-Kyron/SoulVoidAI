@@ -510,7 +510,7 @@ export type CustomActionKind = 'app' | 'url' | 'folder'
 
 /* ------------------------------ Usage & cost --------------------------- */
 
-export type UsageKind = 'chat' | 'invoke' | 'image' | 'embedding'
+export type UsageKind = 'chat' | 'invoke' | 'image' | 'embedding' | 'screen-watch'
 
 /** One recorded API call — provider, model, tokens or image count, dollars. */
 export interface UsageEntry {
@@ -929,6 +929,47 @@ export interface ProactiveVoiceConfig {
   enabled: boolean
 }
 
+/**
+ * v1.7 screen-watch config — Soul periodically looks at your screen
+ * (with explicit opt-in) and may speak if she sees something useful.
+ * Ships disabled. Requires the screenCapture permission to actually
+ * fire. Wraps gating + cost-cap into config so the user has one place
+ * to tune the cadence/budget.
+ */
+export interface ScreenWatchConfig {
+  /** Master switch for the screen-watch loop. Ships off. */
+  enabled: boolean
+  /** Minutes between observation ticks. Each tick = one vision call. */
+  intervalMinutes: number
+  /** Optional local-time window. Both required to apply; format "HH:mm".
+   *  Soul stays silent outside this window even if enabled. */
+  activeFrom: string | null
+  activeTo: string | null
+  /** Hard cap on observation calls per day (resets at local midnight).
+   *  Once hit, the loop pauses until the next reset — protects against
+   *  runaway cost on cloud providers. */
+  dailyCap: number
+}
+
+/** Last observation result — surfaced in Settings so the user can see
+ *  what Soul saw and decided. Stored in memory only (volatile). */
+export interface ScreenWatchStatus {
+  enabled: boolean
+  intervalMinutes: number
+  /** Calls fired today (resets at local midnight). */
+  callsToday: number
+  /** Daily cap from config — mirrored here so the UI doesn't have to
+   *  pull config separately. */
+  dailyCap: number
+  /** ISO timestamp of the last tick (success or skip). */
+  lastObservationAt: string | null
+  /** True when the most recent observation triggered a spoken nudge. */
+  lastSpoke: boolean
+  /** Soul's last decision content (whether spoken or not — for "she
+   *  decided to stay silent because…" transparency). */
+  lastReason: string | null
+}
+
 /** Renderer-facing shape of a watch task — id + name + per-task
  *  enabled + the full spec + last-fire telemetry. */
 export interface WatchTask {
@@ -1143,6 +1184,8 @@ export interface ClientConfig {
   memory: MemoryConfig
   /** v1.5.0+ proactive watch tasks master switch. */
   proactiveVoice: ProactiveVoiceConfig
+  /** v1.7+ screen-watch loop config. */
+  screenWatch: ScreenWatchConfig
   /** Folder used for backup sync (e.g. a Dropbox/Drive folder). Empty = unset. */
   syncFolder: string
   /** True once the user has seen (or skipped) the first-boot tour. */

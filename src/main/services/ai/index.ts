@@ -199,12 +199,16 @@ async function runCompletionAttempt(
   }
 }
 
-/** Runs one non-streaming, tool-enabled agent step. */
+/** Runs one non-streaming, tool-enabled agent step.
+ *  Pass `{ tools: [] }` to suppress the built-in + MCP tool schema (used
+ *  by callers that want a clean one-shot completion, e.g. screen-watch's
+ *  JSON-observation prompt where any tool call would be wasted tokens). */
 export async function invokeCompletion(
   req: AgentRequest,
-  signal: AbortSignal
+  signal: AbortSignal,
+  options?: { tools?: import('./types').ProviderTool[] }
 ): Promise<AgentResult> {
-  return invokeCompletionAttempt(req, signal, new Set())
+  return invokeCompletionAttempt(req, signal, new Set(), options)
 }
 
 /**
@@ -215,7 +219,8 @@ export async function invokeCompletion(
 async function invokeCompletionAttempt(
   req: AgentRequest,
   signal: AbortSignal,
-  tried: ReadonlySet<ProviderId>
+  tried: ReadonlySet<ProviderId>,
+  options?: { tools?: import('./types').ProviderTool[] }
 ): Promise<AgentResult> {
   const provider = PROVIDERS[req.provider]
   const meta = PROVIDER_META[req.provider]
@@ -249,8 +254,10 @@ async function invokeCompletionAttempt(
       model: req.model,
       system: req.system,
       messages: req.messages,
-      // Built-in automation tools plus whatever MCP servers are connected.
-      tools: [...TOOL_SPECS, ...getMcpTools()],
+      // Built-in automation tools plus whatever MCP servers are connected,
+      // unless the caller explicitly overrode (e.g. screen-watch passing
+      // an empty array to suppress all tools for a clean JSON one-shot).
+      tools: options?.tools ?? [...TOOL_SPECS, ...getMcpTools()],
       signal
     })
     const flat = flattenTurns(req.system, req.messages)
@@ -275,7 +282,8 @@ async function invokeCompletionAttempt(
         return invokeCompletionAttempt(
           { ...req, provider: fallbackId, model: fallbackModel },
           signal,
-          nextTried
+          nextTried,
+          options
         )
       }
     }

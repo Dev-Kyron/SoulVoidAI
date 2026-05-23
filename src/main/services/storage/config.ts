@@ -19,6 +19,7 @@ import type {
   ProactiveVoiceConfig,
   ProviderId,
   ProviderRuntime,
+  ScreenWatchConfig,
   SeenModels,
   VoiceConfig
 } from '@shared/types'
@@ -41,6 +42,9 @@ export interface AppConfigFile {
   memory: MemoryConfig
   /** v1.5.0+ proactive watch tasks master switch. */
   proactiveVoice: ProactiveVoiceConfig
+  /** v1.7+ screen-watch loop config — Soul periodically looks at the
+   *  screen and may speak proactively if she sees something useful. */
+  screenWatch: ScreenWatchConfig
   /** When each model id was first observed from a `listModels` call, per provider. */
   seenModels: SeenModels
   syncFolder: string
@@ -138,6 +142,24 @@ const DEFAULT_CONFIG: AppConfigFile = {
     // proactive subsystem without unticking every task individually.
     enabled: true
   },
+  screenWatch: {
+    // Ships OFF — screen-watch sends screenshots to the active AI
+    // provider every interval, which has real cost + privacy
+    // implications. Explicit opt-in in Settings (and the screenCapture
+    // permission must also be granted) before any tick fires.
+    enabled: false,
+    // 15 minutes balances "responsive enough to notice you're stuck"
+    // against "doesn't blow your token budget". Tunable in Settings.
+    intervalMinutes: 15,
+    // Active hours default 09:00-23:00 — same as the Long-idle watch
+    // task default. Soul shouldn't be looking at 3am unless asked.
+    activeFrom: '09:00',
+    activeTo: '23:00',
+    // 48 calls/day at 15min = roughly every 15 min for 12 hrs. Cap
+    // exists so a misconfigured tight interval can't drain hundreds
+    // of dollars overnight on a cloud provider.
+    dailyCap: 48
+  },
   seenModels: {},
   syncFolder: '',
   onboarded: false,
@@ -222,6 +244,7 @@ function normalize(c: AppConfigFile): AppConfigFile {
     chat,
     memory: { ...DEFAULT_CONFIG.memory, ...c.memory },
     proactiveVoice: { ...DEFAULT_CONFIG.proactiveVoice, ...c.proactiveVoice },
+    screenWatch: { ...DEFAULT_CONFIG.screenWatch, ...c.screenWatch },
     seenModels: c.seenModels ?? DEFAULT_CONFIG.seenModels,
     panel: { ...DEFAULT_CONFIG.panel, ...c.panel },
     permissions: { ...DEFAULT_CONFIG.permissions, ...c.permissions }
@@ -328,6 +351,7 @@ export function getClientConfig(): ClientConfig {
     chat: c.chat,
     memory: c.memory,
     proactiveVoice: c.proactiveVoice,
+    screenWatch: c.screenWatch,
     seenModels: c.seenModels,
     syncFolder: c.syncFolder,
     onboarded: c.onboarded,

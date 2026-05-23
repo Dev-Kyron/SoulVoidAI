@@ -12,6 +12,7 @@ import type {
   MemoryConfig,
   ModeId,
   ProactiveVoiceConfig,
+  ScreenWatchConfig,
   ProviderId,
   ProviderRuntime,
   VoiceConfig
@@ -45,6 +46,7 @@ interface ConfigState {
   setRagEnabled: (enabled: boolean) => Promise<void>
   setMemory: (patch: Partial<MemoryConfig>) => Promise<void>
   setProactiveVoice: (patch: Partial<ProactiveVoiceConfig>) => Promise<void>
+  setScreenWatch: (patch: Partial<ScreenWatchConfig>) => Promise<void>
   setEmbeddingProvider: (provider: EmbeddingProvider) => Promise<void>
   setOnboarded: (value: boolean) => Promise<void>
   setSystemPrompt: (prompt: string) => Promise<void>
@@ -121,6 +123,9 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
 
   setProactiveVoice: async (patch) => {
     set({ config: await vs.config.setProactiveVoice(patch) })
+  },
+  setScreenWatch: async (patch) => {
+    set({ config: await vs.config.setScreenWatch(patch) })
   },
 
   setEmbeddingProvider: async (provider) => {

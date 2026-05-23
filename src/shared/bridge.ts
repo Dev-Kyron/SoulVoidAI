@@ -63,6 +63,8 @@ import type {
   EmotionalContextSnapshot,
   MemoryConfig,
   ProactiveVoiceConfig,
+  ScreenWatchConfig,
+  ScreenWatchStatus,
   SessionSentiment,
   WatchSpec,
   WatchTask,
@@ -112,6 +114,9 @@ export interface VoidSoulBridge {
     /** v1.5.0 — patch the proactive-voice master config. Mostly the
      *  master toggle today; will expand if per-task config moves here. */
     setProactiveVoice(patch: Partial<ProactiveVoiceConfig>): Promise<ClientConfig>
+    /** v1.7 — patch the screen-watch config. Main re-arms the timer
+     *  after applying the patch so cadence changes take effect now. */
+    setScreenWatch(patch: Partial<ScreenWatchConfig>): Promise<ClientConfig>
     setEmbeddingProvider(provider: EmbeddingProvider): Promise<ClientConfig>
     setOnboarded(value: boolean): Promise<ClientConfig>
     setApiKey(provider: ProviderId, key: string): Promise<ClientConfig>
@@ -194,6 +199,18 @@ export interface VoidSoulBridge {
      *  the spec; main just persists it via the same code path the
      *  boot-time seeder uses for built-ins. */
     add(input: { name: string; spec: WatchSpec; enabled?: boolean }): Promise<WatchTask>
+  }
+  /** v1.7 screen-watch loop — periodic vision observation that may
+   *  proactively speak when the model decides there's something
+   *  useful to say. Gated by the screenCapture permission + a hard
+   *  daily call cap (see config.screenWatch). */
+  screenWatch: {
+    status(): Promise<ScreenWatchStatus>
+    /** Re-arm the loop after a config change (interval / enabled). */
+    restart(): Promise<{ ok: boolean }>
+    /** One-off "Test now" — runs a tick immediately, returns the
+     *  resulting status so the Settings UI can show what Soul saw. */
+    observeNow(): Promise<ScreenWatchStatus>
   }
   history: {
     /** Lightweight thread list (no message bodies). */

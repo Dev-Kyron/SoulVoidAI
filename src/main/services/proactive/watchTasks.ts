@@ -164,14 +164,15 @@ export function getIdleMinutes(): number {
 /* ---------------------- speak action (DND + throttle) ----------------- */
 
 /**
- * The one true proactive-speech path. Every watch task funnels through
- * this so DND / mute / throttle checks live in exactly one place.
+ * Apply the master + voice-mute + DND gates and, if everything is
+ * green, broadcast the spoken segment to the renderer audio queue.
+ * Returns true when speech was actually queued.
  *
- * `taskId` is used to debounce per-task: even if the same condition
- * trips repeatedly, the same task can't fire again until its throttle
- * window elapses.
+ * Split out of `speakProactive` in v1.7 so non-watch-task sources
+ * (screen-watch in particular) can pipe through the same gates
+ * without faking a DB row to call recordWatchFire against.
  */
-function speakProactive(
+function gatedBroadcast(
   taskId: string,
   taskName: string,
   action: ProactiveAction
@@ -196,9 +197,39 @@ function speakProactive(
     allowInterrupt: action.allowInterrupt ?? false,
     dynamicRecap: action.dynamicRecap ?? false
   })
-  recordWatchFire(taskId, content || '(dynamic recap)')
   log('info', 'system', `[proactive] "${taskName}" fired.`)
   return true
+}
+
+/**
+ * The one true proactive-speech path for WATCH TASKS. Funnels through
+ * `gatedBroadcast` for the master/mute/DND gates, then stamps
+ * last_run/last_result on the watch task row.
+ *
+ * `taskId` is used to debounce per-task: even if the same condition
+ * trips repeatedly, the same task can't fire again until its throttle
+ * window elapses.
+ */
+function speakProactive(
+  taskId: string,
+  taskName: string,
+  action: ProactiveAction
+): boolean {
+  const fired = gatedBroadcast(taskId, taskName, action)
+  if (!fired) return false
+  const content = action.type === 'speak' ? action.content?.trim() : undefined
+  recordWatchFire(taskId, content || '(dynamic recap)')
+  return true
+}
+
+/**
+ * v1.7 — public ad-hoc speech path for non-watch-task callers
+ * (notably the screen-watch loop). Identical gating to watch tasks,
+ * but no DB write because there's no row to update. The caller is
+ * responsible for any per-source throttle / dedup logic.
+ */
+export function speakProactiveAdHoc(taskName: string, action: ProactiveAction): boolean {
+  return gatedBroadcast(`ad-hoc:${taskName}`, taskName, action)
 }
 
 /** Throttle check — has this task fired within its window? Exported

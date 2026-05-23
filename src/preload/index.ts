@@ -32,6 +32,7 @@ const bridge: VoidSoulBridge = {
     setRagEnabled: (enabled) => invoke('config:set-rag-enabled', enabled),
     setMemory: (patch) => invoke('config:set-memory', patch),
     setProactiveVoice: (patch) => invoke('config:set-proactive-voice', patch),
+    setScreenWatch: (patch) => invoke('config:set-screen-watch', patch),
     setEmbeddingProvider: (provider) =>
       invoke('config:set-embedding-provider', provider),
     setOnboarded: (value) => invoke('config:set-onboarded', value),
@@ -89,6 +90,11 @@ const bridge: VoidSoulBridge = {
     remove: (id) => invoke('proactive:remove', id),
     bumpInteraction: () => invoke('proactive:bump-interaction'),
     add: (input) => invoke('proactive:add', input)
+  },
+  screenWatch: {
+    status: () => invoke('screen-watch:status'),
+    restart: () => invoke('screen-watch:restart'),
+    observeNow: () => invoke('screen-watch:observe-now')
   },
   history: {
     summaries: () => invoke('history:summaries'),

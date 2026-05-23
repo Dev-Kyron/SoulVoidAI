@@ -26,7 +26,8 @@
  */
 import { Document, HeadingLevel, Packer, Paragraph, TextRun } from 'docx'
 import * as XLSX from 'xlsx'
-import { BrowserWindow } from 'electron'
+import { BrowserWindow, dialog } from 'electron'
+import { writeFile } from 'node:fs/promises'
 import { getThreadMessages, summaryFor } from '../storage/history'
 import type { ChatMessage } from '@shared/types'
 
@@ -328,18 +329,104 @@ function renderXlsx(bundle: ThreadBundle): Buffer {
 
 /* ----------------------------- entry point ------------------------- */
 
-/**
- * Render a thread to the requested format. Returns the bytes + a
- * suggested filename + the MIME type so the caller can wire up a save
- * dialog or HTTP response without per-format branching.
- */
-export async function exportThread(
-  threadId: string,
-  format: ThreadExportFormat
-): Promise<ThreadExportResult> {
-  const bundle = loadThreadBundle(threadId)
-  const base = safeBaseName(bundle.title, threadId)
+/* ----------------------- single-content export ---------------------- */
 
+/**
+ * Render a single chunk of arbitrary content (a script, a summary, a
+ * generated essay) to the requested format. Used by the AI-callable
+ * `save_as_document` tool — the model passes whatever it just wrote +
+ * a format + a filename, and the action layer pipes the bytes through
+ * a save dialog. Reuses the per-format renderers above by wrapping the
+ * content in a single-message ThreadBundle so we don't duplicate the
+ * docx / xlsx / pdf rendering logic.
+ *
+ * For XLSX, the content is interpreted as CSV-shaped text (one row
+ * per line, columns separated by tab or comma) so the model can
+ * produce a real table instead of a single text cell. Falls back to
+ * a one-cell sheet if the content has no separators.
+ */
+export async function renderContent(
+  content: string,
+  format: ThreadExportFormat,
+  filename: string,
+  title?: string
+): Promise<ThreadExportResult> {
+  const base = safeBaseName(filename, randomBaseFallback())
+  const displayTitle = title?.trim() || filename
+
+  // XLSX gets its own renderer because CSV-shaped input becomes a real
+  // grid, not a single text cell wrapped in a transcript shell.
+  if (format === 'xlsx') {
+    const rows = parseTabularContent(content)
+    const sheet = XLSX.utils.aoa_to_sheet(rows)
+    sheet['!cols'] = inferColumnWidths(rows)
+    const sheetName = displayTitle.replace(/[\\/?*[\]]/g, ' ').trim().slice(0, 31) || 'Sheet1'
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, sheet, sheetName)
+    return {
+      bytes: XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer,
+      suggestedFilename: `${base}.xlsx`,
+      mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    }
+  }
+
+  // For the document formats, wrap the content in a one-message bundle
+  // labelled with the title so the existing renderers produce a clean
+  // single-section document instead of a transcript layout.
+  const bundle: ThreadBundle = {
+    title: displayTitle,
+    threadId: '',
+    exportedAt: new Date().toISOString(),
+    messages: [
+      {
+        id: 'doc',
+        role: 'assistant',
+        content,
+        createdAt: new Date().toISOString()
+      }
+    ]
+  }
+  return exportBundleAs(bundle, format, base)
+}
+
+/** Generates a short random suffix for filename fallback when the user-
+ *  supplied name strips to nothing after sanitising. */
+function randomBaseFallback(): string {
+  return `document-${Math.random().toString(36).slice(2, 8)}`
+}
+
+/** Tab- or comma-separated lines → 2D array. One-column fallback when
+ *  no separators are found anywhere. Lines with mixed separators stay
+ *  consistent within their own line — we don't try to be too clever. */
+function parseTabularContent(content: string): string[][] {
+  const lines = content.split(/\r?\n/).filter((l) => l.length > 0)
+  if (lines.length === 0) return [[content]]
+  const hasTabs = lines.some((l) => l.includes('\t'))
+  const sep = hasTabs ? '\t' : ','
+  // If neither separator appears, fall back to a single-column dump so
+  // the user still gets the text somewhere instead of a blank sheet.
+  const anySep = lines.some((l) => l.includes(sep))
+  if (!anySep) return lines.map((l) => [l])
+  return lines.map((l) => l.split(sep).map((c) => c.trim()))
+}
+
+/** Pick column widths from actual content — capped so a single long
+ *  cell doesn't make Excel scroll horizontally forever. */
+function inferColumnWidths(rows: string[][]): Array<{ wch: number }> {
+  if (rows.length === 0) return []
+  const cols = Math.max(...rows.map((r) => r.length))
+  return Array.from({ length: cols }, (_, i) => {
+    const max = Math.max(...rows.map((r) => (r[i]?.length ?? 0)))
+    return { wch: Math.min(Math.max(max + 2, 10), 60) }
+  })
+}
+
+/** Shared exit path for the document formats (everything except xlsx). */
+async function exportBundleAs(
+  bundle: ThreadBundle,
+  format: Exclude<ThreadExportFormat, 'xlsx'>,
+  base: string
+): Promise<ThreadExportResult> {
   switch (format) {
     case 'markdown':
       return {
@@ -365,23 +452,96 @@ export async function exportThread(
         suggestedFilename: `${base}.docx`,
         mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
       }
-    case 'xlsx':
-      return {
-        bytes: renderXlsx(bundle),
-        suggestedFilename: `${base}.xlsx`,
-        mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-      }
     case 'pdf':
       return {
         bytes: await renderPdf(bundle),
         suggestedFilename: `${base}.pdf`,
         mimeType: 'application/pdf'
       }
-    default: {
-      // Exhaustiveness check — adding a new format to the union without
-      // a branch here flags as a type error at compile time.
-      const exhaustive: never = format
-      throw new Error(`Unknown export format: ${String(exhaustive)}`)
+  }
+}
+
+/**
+ * Render a thread to the requested format. Returns the bytes + a
+ * suggested filename + the MIME type so the caller can wire up a save
+ * dialog or HTTP response without per-format branching.
+ *
+ * XLSX takes its own path because the transcript-shaped renderer is
+ * different from the document-shaped one (rows-per-message, not a
+ * single styled body). Every other format delegates to exportBundleAs
+ * which is shared with renderContent — adding a new format is a one-
+ * place change there.
+ */
+export async function exportThread(
+  threadId: string,
+  format: ThreadExportFormat
+): Promise<ThreadExportResult> {
+  const bundle = loadThreadBundle(threadId)
+  const base = safeBaseName(bundle.title, threadId)
+  if (format === 'xlsx') {
+    return {
+      bytes: renderXlsx(bundle),
+      suggestedFilename: `${base}.xlsx`,
+      mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
     }
   }
+  return exportBundleAs(bundle, format, base)
+}
+
+/* ---------------------- shared save-dialog + write ------------------- */
+
+const FORMAT_FILTER_NAME: Record<ThreadExportFormat, string> = {
+  markdown: 'Markdown',
+  txt: 'Plain text',
+  html: 'HTML',
+  docx: 'Word document',
+  xlsx: 'Excel workbook',
+  pdf: 'PDF document'
+}
+
+export interface SaveResult {
+  ok: boolean
+  message: string
+  path?: string
+}
+
+/**
+ * Show the OS save dialog anchored to the given window (or the focused
+ * one when omitted), then write the rendered bytes to the chosen path.
+ * Returns a user-facing message — callers toast it unchanged. Used by
+ * both the per-thread export IPC and the AI-callable save-document
+ * action, which would otherwise duplicate the same 30-line dialog
+ * + writeFile + error-handling block twice.
+ */
+export async function promptSaveAndWrite(
+  rendered: ThreadExportResult,
+  format: ThreadExportFormat,
+  parent?: BrowserWindow | null
+): Promise<SaveResult> {
+  const ext = rendered.suggestedFilename.split('.').pop() ?? format
+  const opts = {
+    defaultPath: rendered.suggestedFilename,
+    filters: [{ name: FORMAT_FILTER_NAME[format] ?? 'Document', extensions: [ext] }]
+  }
+  // Anchor to the supplied parent window so the dialog opens on the
+  // right monitor. Fall back to the focused window, then any visible
+  // one — the agent may have been triggered from a tray action with
+  // nothing focused.
+  const anchor =
+    parent ??
+    BrowserWindow.getFocusedWindow() ??
+    BrowserWindow.getAllWindows().find((w) => w.isVisible() && !w.isDestroyed())
+  const result = anchor
+    ? await dialog.showSaveDialog(anchor, opts)
+    : await dialog.showSaveDialog(opts)
+  if (result.canceled || !result.filePath) {
+    return { ok: false, message: 'Export cancelled.' }
+  }
+  try {
+    await writeFile(result.filePath, rendered.bytes)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    return { ok: false, message: `Couldn't write file: ${msg}` }
+  }
+  return { ok: true, message: `Saved to ${result.filePath}`, path: result.filePath }
 }

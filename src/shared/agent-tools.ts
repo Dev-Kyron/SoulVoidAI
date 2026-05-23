@@ -235,6 +235,38 @@ export const TOOL_SPECS: ToolSpec[] = [
       },
       required: ['code']
     }
+  },
+  {
+    name: 'save_as_document',
+    actionType: 'save-document',
+    description:
+      'Save the given content to a downloadable document file. Use this when the user asks to "save that as a Word doc / PDF / Excel sheet / markdown file" — turn whatever you just wrote (a script, a summary, a transcript fragment, a list) into a real file on their machine. Shows the system save dialog so the user picks the destination; you only supply the content + format + suggested filename.',
+    parameters: {
+      type: 'object',
+      properties: {
+        content: {
+          type: 'string',
+          description:
+            'The full text/markdown content to save. For DOCX/PDF/HTML/MD/TXT this is the body; for XLSX, pass CSV-like rows (one row per line, columns separated by tabs or commas) and it will be tabulated.'
+        },
+        format: {
+          type: 'string',
+          description:
+            'One of: "docx" (Word), "pdf", "xlsx" (Excel), "markdown", "txt", "html". Default "markdown" if the user is vague.'
+        },
+        filename: {
+          type: 'string',
+          description:
+            'Suggested filename WITHOUT extension. The format-correct extension is appended automatically. Keep it short and human-friendly (e.g. "weekly-plan", not "weekly-plan-2026-05-23.docx").'
+        },
+        title: {
+          type: 'string',
+          description:
+            'Optional document title shown as the heading at the top of DOCX/PDF/HTML. Defaults to the filename.'
+        }
+      },
+      required: ['content', 'format', 'filename']
+    }
   }
 ]
 

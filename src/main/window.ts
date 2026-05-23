@@ -4,7 +4,7 @@
  * command panel. The window is resized programmatically; the renderer owns the
  * enter/exit animation sequencing.
  */
-import { BrowserWindow, screen, shell } from 'electron'
+import { app, BrowserWindow, screen, shell } from 'electron'
 import { join } from 'node:path'
 import { setMainWindow, registerWindow } from './events'
 import { isQuitting } from './lifecycle'
@@ -17,6 +17,31 @@ import {
 const COLLAPSED = { width: 76, height: 76 }
 const SCREEN_MARGIN = 28
 const PANEL_MAX_WIDTH = 760
+
+/**
+ * Loads the OS-preferred locale into the Chromium spellchecker so the red
+ * squiggle works in chat composers. `app.getPreferredSystemLanguages()`
+ * returns BCP-47 codes (e.g. `en-AU`, `de-DE`) which the spellchecker
+ * accepts directly; we fall back to `en-US` when the system list is empty
+ * or contains nothing Chromium has a dictionary for. Called once per
+ * BrowserWindow because spellchecker languages live on the WebContents
+ * session, and each window can in principle use a different one.
+ *
+ * Setting more than one language enables multilingual spellcheck — same
+ * behaviour as Chrome's chrome://settings/languages page. We cap at the
+ * top two system locales so a globe-trotter with five preferred langs
+ * doesn't get a noisy mix of false positives in every direction.
+ */
+function applySpellCheckerLanguages(win: BrowserWindow): void {
+  try {
+    const preferred = app.getPreferredSystemLanguages?.() ?? []
+    const langs = preferred.slice(0, 2)
+    win.webContents.session.setSpellCheckerLanguages(langs.length > 0 ? langs : ['en-US'])
+  } catch {
+    // Best-effort — a startup race or unsupported locale shouldn't break
+    // window creation. The composer still works, just without squiggles.
+  }
+}
 
 /**
  * Per-style panel sizing. `minWidth`/`minHeight` is the smallest the user may
@@ -83,7 +108,13 @@ export function createMainWindow(): BrowserWindow {
       sandbox: true,
       contextIsolation: true,
       nodeIntegration: false,
-      spellcheck: false,
+      // Built-in Chromium spellchecker — gives every chat composer the
+      // red squiggle + native context-menu suggestions. Was explicitly
+      // off until v1.2.7 because we hadn't wired the dictionary loader
+      // and beta testers wouldn't have seen any benefit. Now setSpellChecker
+      // Languages() is called below right after the window's session is
+      // available, so flipping this to true actually does something.
+      spellcheck: true,
       // Default Chromium throttles timers / requestAnimationFrame in
       // hidden BrowserWindows down to ~1Hz. That's catastrophic for the
       // agent loop — when the user closes the panel and walks away,
@@ -106,6 +137,7 @@ export function createMainWindow(): BrowserWindow {
 
   win.setAlwaysOnTop(true, 'screen-saver')
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+  applySpellCheckerLanguages(win)
 
   win.once('ready-to-show', () => win?.show())
 
@@ -315,7 +347,13 @@ export function openSettingsWindow(): BrowserWindow {
       sandbox: true,
       contextIsolation: true,
       nodeIntegration: false,
-      spellcheck: false,
+      // Built-in Chromium spellchecker — gives every chat composer the
+      // red squiggle + native context-menu suggestions. Was explicitly
+      // off until v1.2.7 because we hadn't wired the dictionary loader
+      // and beta testers wouldn't have seen any benefit. Now setSpellChecker
+      // Languages() is called below right after the window's session is
+      // available, so flipping this to true actually does something.
+      spellcheck: true,
       // Match the main window's policy — the preview button in Voice
       // settings is direct-gesture so it works without this, but any
       // future async audio path (e.g. a "speak this" link on a doc page)
@@ -324,6 +362,7 @@ export function openSettingsWindow(): BrowserWindow {
     }
   })
 
+  applySpellCheckerLanguages(settingsWin)
   settingsWin.once('ready-to-show', () => settingsWin?.show())
   registerWindow(settingsWin)
 

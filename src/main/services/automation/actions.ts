@@ -19,6 +19,7 @@ import { rememberProject } from '../storage/memory'
 import { getApiKey, getSecret } from '../storage/keys'
 import { resolveBaseUrl } from '../storage/config'
 import { dataPath } from '../storage/store'
+import { renderContent, promptSaveAndWrite, type ThreadExportFormat } from '../export/thread'
 import { recordUsage } from '../usage'
 import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -156,6 +157,18 @@ export const ACTION_DESCRIPTORS: ActionDescriptor[] = [
     label: 'Run Python',
     description: 'Execute Python in an isolated temp dir using the system interpreter.',
     requires: 'terminal',
+    reversible: false
+  },
+  {
+    type: 'save-document',
+    label: 'Save Document',
+    description:
+      'Save AI-generated content as a downloadable document (DOCX, PDF, XLSX, MD, TXT, HTML).',
+    // No permission gate — the user explicitly picks the destination via
+    // the OS save dialog, which is the consent grant. Requiring filesystem
+    // permission would block users who turned it off but still want to
+    // save the document they just asked the assistant to write.
+    requires: null,
     reversible: false
   }
 ]
@@ -1020,6 +1033,52 @@ async function dispatch(req: ActionRequest, signal?: AbortSignal): Promise<Actio
         } catch {
           /* ignore */
         }
+      }
+    }
+
+    case 'save-document': {
+      const content = String(p.content ?? '').trim()
+      if (!content) {
+        return { ok: false, type: req.type, error: 'No content supplied to save.' }
+      }
+      const allowedFormats: ThreadExportFormat[] = [
+        'docx',
+        'pdf',
+        'xlsx',
+        'markdown',
+        'txt',
+        'html'
+      ]
+      const rawFormat = String(p.format ?? 'markdown').toLowerCase()
+      const format = allowedFormats.includes(rawFormat as ThreadExportFormat)
+        ? (rawFormat as ThreadExportFormat)
+        : 'markdown'
+      const filename = String(p.filename ?? 'document').trim() || 'document'
+      const title = typeof p.title === 'string' ? p.title : undefined
+
+      let rendered
+      try {
+        rendered = await renderContent(content, format, filename, title)
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        return { ok: false, type: req.type, error: `Render failed: ${msg}` }
+      }
+      // promptSaveAndWrite anchors to the focused window itself when no
+      // parent is passed, and handles the dialog + writeFile + error
+      // returns. Same helper the per-thread export IPC uses, so the two
+      // paths can't drift out of sync.
+      const saved = await promptSaveAndWrite(rendered, format)
+      if (!saved.ok) {
+        if (saved.message === 'Export cancelled.') {
+          return { ok: true, type: req.type, output: 'User cancelled the save dialog.' }
+        }
+        return { ok: false, type: req.type, error: saved.message }
+      }
+      return {
+        ok: true,
+        type: req.type,
+        output: saved.message,
+        data: { path: saved.path, format, bytes: rendered.bytes.length }
       }
     }
 

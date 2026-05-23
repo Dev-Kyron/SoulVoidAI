@@ -195,6 +195,7 @@ export type ActionType =
   | 'web-fetch'
   | 'generate-image'
   | 'run-python'
+  | 'save-document'
 
 export interface ActionRequest {
   type: ActionType

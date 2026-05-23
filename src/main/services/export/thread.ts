@@ -279,7 +279,7 @@ async function renderDocx(bundle: ThreadBundle): Promise<Buffer> {
   }
 
   const doc = new Document({
-    creator: 'VoidSoul Assistant',
+    creator: 'VoidSoul AI Companion',
     title: bundle.title,
     sections: [{ children }]
   })

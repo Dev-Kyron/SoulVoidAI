@@ -1,5 +1,5 @@
 appId: dev.kyron.voidsoul
-productName: VoidSoul Assistant
+productName: VoidSoul AI Companion
 copyright: Copyright (c) 2026 Void Soul Studio
 
 directories:
@@ -38,7 +38,7 @@ win:
   # PNG works for runtime BrowserWindow icons but Windows shortcuts fall
   # back to a generic Electron icon without a real .ico.
   icon: build/icon.ico
-  artifactName: VoidSoul-Assistant-Setup.${ext}
+  artifactName: VoidSoul-AI-Companion-Setup.${ext}
 
 nsis:
   # One-click install — no wizard, no per-user/per-machine choice page
@@ -53,13 +53,13 @@ mac:
   target: dmg
   category: public.app-category.productivity
   icon: build/icon.png
-  artifactName: VoidSoul-Assistant.${ext}
+  artifactName: VoidSoul-AI-Companion.${ext}
 
 linux:
   target: AppImage
   category: Utility
   icon: build/icon.png
-  artifactName: VoidSoul-Assistant.${ext}
+  artifactName: VoidSoul-AI-Companion.${ext}
 
 # Auto-update channel. electron-updater reads the same `publish` block at
 # runtime to know which `latest.yml` / `latest-mac.yml` / `latest-linux.yml`

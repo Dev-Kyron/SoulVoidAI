@@ -462,7 +462,7 @@ async function writeTextFile(file: string, content: string): Promise<ActionResul
 /** Common UA + accept-header pair shared by every web-fetch hop. */
 const WEB_FETCH_HEADERS = {
   'User-Agent':
-    'Mozilla/5.0 (VoidSoul Assistant) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
+    'Mozilla/5.0 (VoidSoul AI Companion) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
   Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
 } as const
 

@@ -173,7 +173,7 @@ export function threadToOpml(thread: ExportableThread): string {
     '  <head>',
     `    <title>${escapeXml(thread.title || 'Conversation')}</title>`,
     `    <dateCreated>${escapeXml(created)}</dateCreated>`,
-    `    <ownerName>VoidSoul Assistant</ownerName>`,
+    `    <ownerName>VoidSoul AI Companion</ownerName>`,
     '  </head>',
     '  <body>'
   ]

@@ -32,7 +32,17 @@ describe('matchWakePhrase', () => {
     expect(matchWakePhrase('hey souls of the world')).toBeNull()
   })
 
-  it('falls back to the neutral "assistant" alias', () => {
+  it('matches the v1.6+ neutral "companion" wake phrase', () => {
+    // Primary post-rebrand fallback — labelled "Hey Companion" so the HUD
+    // toast reflects the rebrand.
+    expect(matchWakePhrase('hey companion')?.label).toBe('Hey Companion')
+    expect(matchWakePhrase('okay companion')?.label).toBe('Hey Companion')
+  })
+
+  it('keeps the legacy "assistant" alias for muscle-memory continuity', () => {
+    // Pre-v1.6 beta users trained on "Hey Assistant" — kept working so the
+    // rebrand doesn't silently break anyone's habit. Label still reads as
+    // "Hey Assistant" so the user sees they're hitting the legacy alias.
     expect(matchWakePhrase('hey assistant')?.label).toBe('Hey Assistant')
     expect(matchWakePhrase('hey voidsoul')?.label).toBe('Hey Assistant')
   })

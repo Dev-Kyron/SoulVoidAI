@@ -52,11 +52,29 @@ function applySpellCheckerLanguages(win: BrowserWindow): void {
  */
 const PANEL_STYLE = {
   simple: { minWidth: 340, minHeight: 420, width: 440, height: 560 },
-  advanced: { minWidth: 380, minHeight: 560, width: 472, height: 820 }
+  // v1.6.4 — advanced.minHeight = 800. HudCore was compressed in the
+  // same pass (HUD_H 260→240, AVATAR_SIZE 195→180) so the spirit avatar
+  // + chip cluster + gauges + composer all fit at this minimum with
+  // ~25px of breathing room for variable bottom-region content (e.g.
+  // NexusResponse appearing when there's an inline chat reply).
+  //
+  // ⚠ Main-process changes (this file) require restarting `npm run dev`
+  // to take effect — Electron-vite hot-reloads the renderer only.
+  advanced: { minWidth: 380, minHeight: 800, width: 472, height: 820 }
 } as const
 
 let win: BrowserWindow | null = null
 let expanded = false
+
+// v1.6.4 — backstop for an Electron quirk: `setMinimumSize` is documented
+// to enforce a window's minimum during user drag-resize, but on Windows
+// it's unreliable for frameless + transparent windows (the OS-level
+// resize handles bypass the constraint). The first `setBounds` after
+// setMinimumSize honours the floor, but subsequent user drags can shrink
+// the panel arbitrarily small. We keep the current minimums in module
+// scope and clamp inside `will-resize` (see createMainWindow below).
+let currentMinWidth = 0
+let currentMinHeight = 0
 
 /**
  * The dedicated Settings window. A second, fully-framed BrowserWindow that
@@ -159,6 +177,19 @@ export function createMainWindow(): BrowserWindow {
     win = null
   })
 
+  // Enforce the minimum panel size on user drag-resize. Electron's
+  // native setMinimumSize is unreliable on Windows for frameless +
+  // transparent windows, so we backstop it by intercepting `will-resize`
+  // and rejecting any attempt to shrink below the current floor. Without
+  // this the user can drag the panel down to a sliver showing only the
+  // title bar, even though setMinimumSize was set to 800.
+  win.on('will-resize', (event, newBounds) => {
+    if (currentMinWidth <= 0 || currentMinHeight <= 0) return
+    if (newBounds.width < currentMinWidth || newBounds.height < currentMinHeight) {
+      event.preventDefault()
+    }
+  })
+
   // Remember a user-resized panel so it reopens at the chosen size.
   win.on('resized', () => {
     if (expanded && win) {
@@ -210,6 +241,10 @@ export function setExpanded(value: boolean): boolean {
     win.setMinimumSize(minWidth, minHeight)
     win.setMaximumSize(maxWidth, maxHeight)
     win.setResizable(true)
+    // Mirror into module scope so the `will-resize` listener can clamp
+    // user drag attempts that bypass Electron's native min enforcement.
+    currentMinWidth = minWidth
+    currentMinHeight = minHeight
     size = {
       width: clamp(stored.width || sizing.width, minWidth, maxWidth),
       height: clamp(stored.height || sizing.height, minHeight, maxHeight)
@@ -218,6 +253,8 @@ export function setExpanded(value: boolean): boolean {
     win.setResizable(false)
     win.setMinimumSize(COLLAPSED.width, COLLAPSED.height)
     win.setMaximumSize(0, 0)
+    currentMinWidth = COLLAPSED.width
+    currentMinHeight = COLLAPSED.height
     size = COLLAPSED
   }
 
@@ -248,6 +285,11 @@ export function applyPanelStyle(): void {
 
   win.setMinimumSize(minWidth, minHeight)
   win.setMaximumSize(maxWidth, maxHeight)
+  // Keep the will-resize clamp in sync when the user switches Nexus
+  // style — without this, switching from advanced→simple leaves the
+  // backstop pinned at the advanced minimum.
+  currentMinWidth = minWidth
+  currentMinHeight = minHeight
 
   const current = win.getBounds()
   const width = clamp(current.width, minWidth, maxWidth)

@@ -20,8 +20,14 @@ interface WakePattern {
 const WAKE_PATTERNS: WakePattern[] = [
   { rx: /\b(?:hey|ok|hi|hello|okay)\s+void\b/i, persona: 'void', label: 'Hey Void' },
   { rx: /\b(?:hey|ok|hi|hello|okay)\s+soul\b/i, persona: 'soul', label: 'Hey Soul' },
-  // A few neutral fallbacks so users not yet attached to the persona names
-  // can still trigger the loop. Default to the user's active persona.
+  // v1.6+ primary neutral fallback — the rebrand made "companion" the
+  // canonical word for the app, so users hearing "Hey Companion" lands
+  // first. Defaults to the user's active persona.
+  { rx: /\b(?:hey|ok|okay)\s+companion\b/i, persona: 'void', label: 'Hey Companion' },
+  // Pre-v1.6 alias kept for muscle-memory continuity — beta users trained
+  // on "Hey Assistant" don't suddenly find their wake phrase broken. The
+  // label still reads as "Hey Assistant" so the toast that surfaces in
+  // the HUD reflects what the user actually said.
   { rx: /\b(?:hey|ok|okay)\s+(?:assistant|voidsoul)\b/i, persona: 'void', label: 'Hey Assistant' }
 ]
 

@@ -23,7 +23,7 @@ import {
 } from 'lucide-react'
 import { HudCore } from './HudCore'
 import { Gauge } from './Gauge'
-import { Orb } from '../widget/Orb'
+import { SpiritAvatar } from '../widget/SpiritAvatar'
 import { MicButton } from '../common/MicButton'
 import { useConfigStore } from '../../store/useConfigStore'
 import { useUiStore } from '../../store/useUiStore'
@@ -91,18 +91,9 @@ function OrbIdentity(): JSX.Element {
     <div className="shrink-0 pb-2 text-center">
       <h2 className="font-display text-[20px] font-semibold leading-tight text-white">VoidSoul</h2>
       <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-[0.22em] text-[var(--accent)]">
-        Your AI assistant
+        Your AI Companion
       </p>
     </div>
-  )
-}
-
-/** Subtle hint below the orb so first-time users know it's interactive. */
-function OrbHint(): JSX.Element {
-  return (
-    <p className="shrink-0 pt-2 text-center text-[9px] uppercase tracking-[0.18em] text-slate-500">
-      tap the orb to talk
-    </p>
   )
 }
 
@@ -502,13 +493,23 @@ function AdvancedNexus(): JSX.Element | null {
         />
       </div>
 
-      {/* Centre — just the orb identity, voice HUD and hint. Everything
-       *  flow-y-scrolls here if it overflows, but in practice the orb plus
-       *  one line of hint always fits the panel height. */}
-      <div className="scrollbar-void flex min-h-0 flex-1 flex-col overflow-y-auto py-3">
-        <OrbIdentity />
-        <HudCore />
-        <OrbHint />
+      {/* Centre — identity caption + spirit avatar HUD, both pushed to the
+       *  BOTTOM of the available space so the avatar sits glued directly
+       *  above the gauges (matches the user's "looking over them"
+       *  intent). `mt-auto` on the inner stack consumes any leftover
+       *  vertical room above the title rather than below the avatar.
+       *
+       *  `overflow-hidden` (not auto) — v1.6.3 the panel's min-height was
+       *  bumped to fit the avatar comfortably, so a scrollbar should
+       *  NEVER appear. Forcing `hidden` removes the "phantom scrollbar
+       *  that keeps coming up and moving slowly" beta users reported
+       *  when bobbing chips at the container edge briefly touched the
+       *  overflow threshold. */}
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden py-3">
+        <div className="mt-auto">
+          <OrbIdentity />
+          <HudCore />
+        </div>
       </div>
 
       {/* Pinned readback + gauges — beta feedback was that the rolling
@@ -576,22 +577,25 @@ function AppTile({ action, custom }: { action: QuickAction; custom: boolean }): 
 }
 
 /**
- * The Simple layout's central orb wrapped as a voice-toggle button.
- * Mirrors HudCore's OrbVoiceButton — same store, same semantics — so
- * tapping the orb in either layout converges on the same MicButton
+ * The Simple layout's central avatar wrapped as a voice-toggle button.
+ * Mirrors HudCore's SpiritVoiceButton — same store, same semantics — so
+ * tapping the avatar in either layout converges on the same MicButton
  * pipeline. Single tap toggles record/stop.
  */
 function SimpleOrbButton({
   orbState,
+  persona,
   animated,
   dnd
 }: {
   orbState: ReturnType<typeof useVisibleOrbState>
+  persona: VoicePersona
   animated: boolean
   dnd: boolean
 }): JSX.Element {
   const status = useVoiceInputStore((s) => s.status)
   const toggle = useVoiceInputStore((s) => s.toggle)
+  const streaming = useChatStore((s) => s.streaming)
   const recording = status === 'recording'
   const transcribing = status === 'transcribing'
   const title = transcribing
@@ -607,9 +611,16 @@ function SimpleOrbButton({
       title={title}
       aria-label={title}
       aria-pressed={recording}
-      className="rounded-full outline-none transition-transform hover:scale-105 active:scale-95 disabled:cursor-wait"
+      className="outline-none transition-transform hover:scale-[1.03] active:scale-[0.97] disabled:cursor-wait"
     >
-      <Orb size={88} state={orbState} animated={animated} dnd={dnd} />
+      <SpiritAvatar
+        size={170}
+        persona={persona}
+        state={orbState}
+        speaking={streaming}
+        animated={animated}
+        dnd={dnd}
+      />
     </button>
   )
 }
@@ -639,10 +650,13 @@ function SimpleNexus(): JSX.Element | null {
       {/* The orb — tap to start / stop voice input. The Open Conversation
           button below remains the path to the full chat view. */}
       <div className="flex shrink-0 justify-center py-3">
-        <SimpleOrbButton orbState={orbState} animated={animated} dnd={dnd} />
+        <SimpleOrbButton
+          orbState={orbState}
+          persona={config.voice.persona}
+          animated={animated}
+          dnd={dnd}
+        />
       </div>
-
-      <OrbHint />
 
       {/* App grid plus the latest inline reply. */}
       <div className="scrollbar-void min-h-0 flex-1 overflow-y-auto">

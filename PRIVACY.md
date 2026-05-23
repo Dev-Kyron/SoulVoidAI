@@ -1,14 +1,14 @@
-# VoidSoul Assistant — Privacy Policy
+# VoidSoul AI Companion — Privacy Policy
 
 _Last updated: 24 May 2026_
 
-VoidSoul Assistant is a desktop application that runs locally on your computer. It is designed so that as little of your data as possible ever leaves your machine. This policy explains what that means in concrete terms.
+VoidSoul AI Companion is a desktop application that runs locally on your computer. It is designed so that as little of your data as possible ever leaves your machine. This policy explains what that means in concrete terms.
 
 If you have any questions, contact us at the address at the bottom of this page.
 
 ## 1. Plain-English summary
 
-- VoidSoul Assistant **does not have a server**. We do not run cloud infrastructure that your data passes through.
+- VoidSoul AI Companion **does not have a server**. We do not run cloud infrastructure that your data passes through.
 - We do not collect telemetry, usage analytics, crash reports, or any other "phone home" data by default.
 - API keys for AI providers (OpenAI, Anthropic, Google, etc.) are encrypted using your operating system's keychain and never leave your computer.
 - Your chat history, indexed files, embeddings, memory, and settings live in a local folder on your machine.
@@ -17,7 +17,7 @@ If you have any questions, contact us at the address at the bottom of this page.
 
 ## 2. Who we are
 
-VoidSoul Assistant is developed by Void Soul Studio ("we", "us", "our"). The application is distributed as a desktop installer for Windows, macOS, and Linux. Source code is available at <https://github.com/Dev-Kyron/SoulVoidAI>.
+VoidSoul AI Companion is developed by Void Soul Studio ("we", "us", "our"). The application is distributed as a desktop installer for Windows, macOS, and Linux. Source code is available at <https://github.com/Dev-Kyron/SoulVoidAI>.
 
 ## 3. What we collect — nothing, by default
 
@@ -69,7 +69,7 @@ We do not proxy, intercept, log, or otherwise touch this traffic. **The provider
 
 The following features are off by default or only activate on a deliberate user action. Each is the only path by which the app sends data anywhere other than the chosen AI provider.
 
-- **Update check.** On startup (and when you click "Check for updates" in Settings → About), the application asks <https://github.com> for the latest release metadata of the VoidSoul Assistant repository. No user data is sent — only your IP address as part of the HTTP request, which GitHub processes under its own privacy policy.
+- **Update check.** On startup (and when you click "Check for updates" in Settings → About), the application asks <https://github.com> for the latest release metadata of the VoidSoul AI Companion repository. No user data is sent — only your IP address as part of the HTTP request, which GitHub processes under its own privacy policy.
 - **Share to GitHub gist.** When you use the Share dialog to upload a conversation as a gist, the conversation contents are uploaded to GitHub using a personal access token you supply. We do not see this content.
 - **Sync folder.** When you enable a sync folder, the application writes a backup file (`voidsoul-sync.json`) to a folder you choose. If that folder happens to be a Dropbox/iCloud/OneDrive folder, those services will sync the file according to their own terms. The app itself does not connect to any cloud sync service.
 - **MCP servers.** When you connect to an MCP server, the application launches the server's process locally and exchanges messages with it. What that server does with the data is governed by the server's own behaviour and any third-party services it integrates with.
@@ -78,7 +78,7 @@ The following features are off by default or only activate on a deliberate user 
 
 ## 8. Children's privacy
 
-VoidSoul Assistant is not designed for use by children under 13. If you believe a child has provided personal information through the app to a third-party AI provider you have connected, please review that provider's data-deletion procedures.
+VoidSoul AI Companion is not designed for use by children under 13. If you believe a child has provided personal information through the app to a third-party AI provider you have connected, please review that provider's data-deletion procedures.
 
 ## 9. Your rights
 
@@ -91,7 +91,7 @@ You can delete all of your local VoidSoul data at any time by:
 
 ## 10. Security
 
-We use the operating system's native credential store for API keys and rely on the integrity of your machine's encryption-at-rest. We do not control the security of third-party AI providers — review theirs separately. If you discover a security issue in VoidSoul Assistant, please report it to the address below privately rather than via a public issue tracker.
+We use the operating system's native credential store for API keys and rely on the integrity of your machine's encryption-at-rest. We do not control the security of third-party AI providers — review theirs separately. If you discover a security issue in VoidSoul AI Companion, please report it to the address below privately rather than via a public issue tracker.
 
 ## 11. Changes to this policy
 

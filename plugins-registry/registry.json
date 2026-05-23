@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "description": "Public registry of community plugins for VoidSoul Assistant. Fetched live by the in-app marketplace at Settings → Plugins → Browse.",
+  "description": "Public registry of community plugins for VoidSoul AI Companion. Fetched live by the in-app marketplace at Settings → Plugins → Browse.",
   "plugins": [
     {
       "id": "dev-bookmarks",

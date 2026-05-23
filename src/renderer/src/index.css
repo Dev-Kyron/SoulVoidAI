@@ -357,3 +357,38 @@ body {
   max-width: 100%;
   height: auto;
 }
+
+/* Spirit Avatar — per-dot shimmer (v1.6.0).
+   Used by components/widget/SpiritAvatar.tsx. Each dot in the silhouette
+   pulses opacity on its own delay+duration so the figure looks alive
+   without any per-dot JS animation cost. Single GPU-accelerated property
+   (opacity) keeps 300+ dots smooth even on the simple layout. */
+@keyframes spirit-shimmer {
+  0%,
+  100% {
+    opacity: 0.3;
+  }
+  50% {
+    opacity: 0.92;
+  }
+}
+
+/* Spirit Avatar — eye glow pulse (v1.6.1).
+   Applied to the outer haze ring of each eye so listening / processing /
+   speaking states feel alive — the figure's gaze brightens and dims in
+   rhythm with attention. Idle eyes stay static (no animation prop set
+   from the component) so a quiet avatar reads as restful, not breathing
+   through its eyes. */
+@keyframes spirit-eye-pulse {
+  0%,
+  100% {
+    opacity: 0.45;
+    transform: scale(1);
+    transform-origin: center;
+    transform-box: fill-box;
+  }
+  50% {
+    opacity: 0.95;
+    transform: scale(1.18);
+  }
+}

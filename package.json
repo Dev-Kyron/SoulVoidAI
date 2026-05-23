@@ -1,7 +1,7 @@
 {
-  "name": "voidsoul-assistant",
-  "version": "1.5.0",
-  "description": "A futuristic AI operating layer for creators and developers — local-first, plug-and-play, runs on Ollama out of the box.",
+  "name": "voidsoul-ai-companion",
+  "version": "1.5.1",
+  "description": "A local-first AI companion for creators and developers — voice-first, multi-provider, runs on Ollama out of the box.",
   "author": {
     "name": "Void Soul Studio",
     "url": "https://voidsoulstudio.com"

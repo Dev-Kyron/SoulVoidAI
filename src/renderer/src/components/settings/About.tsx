@@ -53,7 +53,7 @@ export function About(): JSX.Element {
           </div>
           <div className="min-w-0 flex-1">
             <p className="font-display text-[13px] font-semibold text-white">
-              VoidSoul Assistant
+              VoidSoul AI Companion
             </p>
             <p className="text-[10px] text-slate-400">
               v{info?.version ?? '—'} · Electron {info?.electron ?? '—'} · {info?.platform ?? '—'}

@@ -202,7 +202,7 @@ export function IntegrationSettings(): JSX.Element {
           <SecretField
             id="picovoice"
             label="Picovoice access key"
-            hint='Wake word works keyless via the local Whisper model (matches "Hey Void", "Hey Soul", "Hey Assistant" — same model used for voice input). Picovoice Porcupine is the upgrade path — lower CPU, faster detection, but needs a free account at console.picovoice.ai.'
+            hint='Wake word works keyless via the local Whisper model (matches "Hey Void", "Hey Soul", "Hey Companion" — same model used for voice input; pre-v1.6 "Hey Assistant" also still triggers). Picovoice Porcupine is the upgrade path — lower CPU, faster detection, but needs a free account at console.picovoice.ai.'
             signupUrl="https://console.picovoice.ai"
             freeBackend={{ name: 'Whisper', detail: 'free · no signup · matches any phrase' }}
             upgradedBackend={{ name: 'Porcupine', detail: 'lower CPU · faster detection' }}

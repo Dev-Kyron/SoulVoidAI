@@ -200,7 +200,7 @@ function Sidebar({
         </span>
         <div>
           <p className="text-[12px] font-semibold text-white">Settings</p>
-          <p className="text-[10px] text-slate-500">VoidSoul Assistant</p>
+          <p className="text-[10px] text-slate-500">VoidSoul AI Companion</p>
         </div>
       </div>
       <div className="px-3 pb-2">

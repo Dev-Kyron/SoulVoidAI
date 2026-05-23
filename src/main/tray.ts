@@ -173,7 +173,7 @@ function buildMenu(): Menu {
   const activeMode = MODES.find((m) => m.id === config.activeMode)?.name ?? config.activeMode
 
   return Menu.buildFromTemplate([
-    { label: 'VoidSoul Assistant', enabled: false },
+    { label: 'VoidSoul AI Companion', enabled: false },
     { label: `Mode: ${activeMode}`, enabled: false },
     { type: 'separator' },
     // Live agent runs — surfaces between the header and the show/hide so a
@@ -247,7 +247,7 @@ function buildMenu(): Menu {
 export function createTray(): Tray {
   const image = nativeImage.createFromPath(iconPath())
   tray = new Tray(image.isEmpty() ? nativeImage.createEmpty() : image)
-  tray.setToolTip('VoidSoul Assistant')
+  tray.setToolTip('VoidSoul AI Companion')
   tray.setContextMenu(buildMenu())
 
   // Single click toggles the widget. If an agent run is in flight and
@@ -299,7 +299,7 @@ function agentStateSignature(runs: AgentCheckpoint[]): string {
 }
 
 function tooltipFor(runs: AgentCheckpoint[]): string {
-  if (runs.length === 0) return 'VoidSoul Assistant'
+  if (runs.length === 0) return 'VoidSoul AI Companion'
   if (runs.length === 1) return `VoidSoul · agent step ${runs[0].step}`
   return `VoidSoul · ${runs.length} agent runs (latest step ${runs[0].step})`
 }

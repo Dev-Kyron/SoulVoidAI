@@ -1,10 +1,10 @@
 <div align="center">
 
-# 🟣 VoidSoul Assistant
+# 🟣 VoidSoul AI Companion
 
 ### *The Jarvis loop, finally local.*
 
-A floating, always-on AI desktop assistant that talks, listens, sees your screen, drives your mouse, opens your apps, edits your files, and remembers every conversation.
+A floating, always-on AI desktop companion that talks, listens, sees your screen, drives your mouse, opens your apps, edits your files, and remembers every conversation.
 Bring whichever AI you already love — **12 providers, one interface** — and give it a body.
 
 [**Download**](https://github.com/Dev-Kyron/SoulVoidAI/releases) · [Privacy](PRIVACY.md) · [Terms](TERMS.md) · [Report an issue](https://github.com/Dev-Kyron/SoulVoidAI/issues/new)
@@ -242,9 +242,9 @@ OpenAI · Anthropic · Gemini · **Ollama** · **LM Studio** · **llama.cpp** ·
 
 Grab the latest installer from the [**Releases page**](https://github.com/Dev-Kyron/SoulVoidAI/releases):
 
-- **Windows** — `VoidSoul Assistant Setup *.exe` (NSIS installer)
-- **macOS** — `VoidSoul Assistant-*.dmg`
-- **Linux** — `VoidSoul Assistant-*.AppImage`
+- **Windows** — `VoidSoul AI Companion Setup *.exe` (NSIS installer)
+- **macOS** — `VoidSoul AI Companion-*.dmg`
+- **Linux** — `VoidSoul AI Companion-*.AppImage`
 
 Updates arrive **automatically** — VoidSoul checks GitHub Releases on boot and notifies you when a new version is ready. Settings → About → *Check for updates* triggers a manual check.
 
@@ -518,7 +518,7 @@ Use the official apps for their sandboxed exploration. Use VoidSoul when you wan
 - **Privacy:** see [**Privacy Policy**](PRIVACY.md). Short version: nothing leaves your computer unless you trigger an action that explicitly sends it.
 - **Bug reports & feedback:** [open an issue](https://github.com/Dev-Kyron/SoulVoidAI/issues/new).
 
-VoidSoul Assistant is © Void Soul Studio. Distribution of the compiled application is governed by the Terms of Service linked above. Re-selling, re-distributing, or hosting the application as a service requires written permission.
+VoidSoul AI Companion is © Void Soul Studio. Distribution of the compiled application is governed by the Terms of Service linked above. Re-selling, re-distributing, or hosting the application as a service requires written permission.
 
 ---
 

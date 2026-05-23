@@ -1,5 +1,5 @@
 /**
- * VoidSoul Assistant — main process entry point.
+ * VoidSoul AI Companion — main process entry point.
  *
  * Boots a single-instance tray application: creates the floating widget
  * window, the system tray, registers the IPC surface and applies persisted
@@ -84,7 +84,7 @@ if (!app.requestSingleInstanceLock()) {
       broadcast('quick-ai:open', undefined)
     })
 
-    log('info', 'system', 'VoidSoul Assistant started.')
+    log('info', 'system', 'VoidSoul AI Companion started.')
 
     // Connect to any configured MCP servers in the background — slow servers
     // must not delay UI readiness, so we fire and forget.

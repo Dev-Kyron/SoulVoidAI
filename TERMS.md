@@ -1,8 +1,8 @@
-# VoidSoul Assistant — Terms of Service
+# VoidSoul AI Companion — Terms of Service
 
 _Last updated: 21 May 2026_
 
-These terms govern your use of the **VoidSoul Assistant** desktop application ("the Software"). By installing or using the Software you agree to them. If you do not agree, do not install or use the Software.
+These terms govern your use of the **VoidSoul AI Companion** desktop application ("the Software"). By installing or using the Software you agree to them. If you do not agree, do not install or use the Software.
 
 If anything here is unclear, contact us before relying on the Software for anything you can't afford to lose.
 
@@ -128,4 +128,4 @@ _Replace this section with your actual governing law and jurisdiction (e.g. "the
 
 ---
 
-These terms apply to the binary distribution of VoidSoul Assistant. The source code in the public repository is licensed under a separate proprietary licence — see the `LICENSE` file.
+These terms apply to the binary distribution of VoidSoul AI Companion. The source code in the public repository is licensed under a separate proprietary licence — see the `LICENSE` file.

@@ -28,7 +28,7 @@
 import { app } from 'electron'
 import { spawn } from 'node:child_process'
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
-import { copyFile, readFile, unlink } from 'node:fs/promises'
+import { copyFile, readFile, unlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -279,6 +279,50 @@ const PERSONA_NOISE_OFFSET: Record<VoicePersona, number> = {
   void: -0.1
 }
 
+/**
+ * Reads the `fmt ` sub-chunk of a WAV file and returns a short
+ * human-readable summary — used by the VOIDSOUL_VOICE_DEBUG diagnostic
+ * to surface format-code / channel-count / sample-rate / bit-depth in
+ * the Logs tab without needing a hex editor. The two format codes we
+ * care about:
+ *   0x0001 PCM           — plain little-endian PCM, Chromium decodes fine
+ *   0x0003 IEEE_FLOAT    — 32-bit float, Chromium decodes fine
+ *   0xFFFE EXTENSIBLE    — historical "buzz of death" trigger; channel
+ *                          mask + subformat GUID needed for correct decode
+ *
+ * Returns a string like "PCM 22050 Hz · 1 ch · 16-bit" or whatever the
+ * header advertises. Best-effort — malformed headers fall back to a
+ * truthful "unknown" rather than throwing.
+ */
+function parseWavFormatChunk(wav: Buffer): string {
+  // WAV layout: 12-byte RIFF header + chunks. The first chunk should be
+  // 'fmt ' but we scan defensively in case piper writes a LIST chunk
+  // first (some configurations do).
+  let pos = 12
+  while (pos + 8 <= wav.length) {
+    const id = wav.subarray(pos, pos + 4).toString('ascii')
+    const size = wav.readUInt32LE(pos + 4)
+    if (id === 'fmt ') {
+      if (pos + 8 + size > wav.length) return 'fmt chunk truncated'
+      const formatCode = wav.readUInt16LE(pos + 8)
+      const channels = wav.readUInt16LE(pos + 10)
+      const sampleRate = wav.readUInt32LE(pos + 12)
+      const bitsPerSample = wav.readUInt16LE(pos + 22)
+      const formatName =
+        formatCode === 0x0001
+          ? 'PCM'
+          : formatCode === 0x0003
+            ? 'IEEE_FLOAT'
+            : formatCode === 0xfffe
+              ? 'EXTENSIBLE'
+              : `0x${formatCode.toString(16).padStart(4, '0')}`
+      return `${formatName} ${sampleRate} Hz · ${channels} ch · ${bitsPerSample}-bit`
+    }
+    pos += 8 + size
+  }
+  return 'no fmt chunk found'
+}
+
 export interface SynthesiseOptions {
   text: string
   persona: VoicePersona
@@ -455,6 +499,35 @@ export function synthesise(opts: SynthesiseOptions): Promise<Buffer> {
           // miss when synthesis returns bytes the renderer can't play.
           if (stderr.trim()) {
             log('info', 'system', `Piper stderr (success): ${stderr.trim().slice(0, 400)}`)
+          }
+          // Diagnostic dump: copy the synthesised WAV to a stable path so
+          // the user can open it in Windows Media Player / VLC and verify
+          // bytes-vs-playback independently. The renderer's [voice] energy
+          // log proves the bytes contain real audio at decode time; if WMP
+          // ALSO plays them cleanly, the bug is Chromium/Realtek-side
+          // (WASAPI exclusive lock, stale endpoint, etc.). If WMP buzzes
+          // too, the WAV format itself is the problem (channel mask /
+          // extensible-format quirk).
+          // Dev mode only — packaged builds skip the dump so production
+          // users don't get a wav file refreshed every synth call.
+          // (Env-var gating was tried first but `set VAR=1` in PowerShell
+          // doesn't actually export to the process env, so the gate would
+          // be unreachable on Windows dev machines.)
+          if (!app.isPackaged) {
+            const dumpPath = join(tmpdir(), 'voidsoul-last-spoken.wav')
+            try {
+              await writeFile(dumpPath, wav)
+              // Decode the WAV's `fmt ` chunk so the format quirks are
+              // visible in the log without needing a hex editor.
+              const fmt = parseWavFormatChunk(wav)
+              log(
+                'info',
+                'system',
+                `Voice debug: WAV saved to ${dumpPath} — open in WMP/VLC to check (${fmt})`
+              )
+            } catch {
+              /* non-fatal — diagnostic only */
+            }
           }
           resolve(wav)
         } catch (err) {

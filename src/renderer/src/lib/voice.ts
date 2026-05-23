@@ -1,24 +1,41 @@
 /**
- * Voice output, powered by Piper TTS (https://github.com/rhasspy/piper).
+ * Voice output, powered by Piper TTS (https://github.com/rhasspy/piper)
+ * and Chromium's Web Audio API.
  *
- * v1.1.x ran on the browser Web Speech API, which on Windows meant SAPI
- * voices (David, Mark, Zira) plus whatever extra SAPI packs the user had
- * installed — collectively pretty robotic. v1.2.0 swaps to Piper neural
- * voices: each persona (Void, Soul) has a single .onnx voice file under
- * `<userData>/voices/<persona>/`, and the main process spawns the bundled
- * piper binary per sentence to render WAV audio we play in the renderer.
+ * Pipeline (v1.3.x):
  *
- * Streaming TTS architecture (unchanged in shape): the model streams
- * tokens; we chunk on sentence boundaries via `extractCompleteSentences`,
- * call `enqueueSpeak` per sentence the moment it closes, and an internal
- * audio queue plays them in FIFO order. The user hears the assistant
- * start talking before typing finishes — same UX as v1.1.x, just with
- * voices that don't sound like a 2002 GPS unit.
+ *   provider stream
+ *      │  tokens
+ *      ▼
+ *   StreamingVoiceExtractor (parses <voice tone="..."> markup)
+ *      │  segments
+ *      ▼
+ *   queueOne → vs.voice.synthesise (IPC → main → piper.exe → WAV bytes)
+ *      │  Uint8Array
+ *      ▼
+ *   AudioQueue.enqueue → playNext (decodeAudioData → AudioBufferSourceNode)
+ *      │  PCM
+ *      ▼
+ *   GainNode → ctx.destination → speakers
  *
- * Per-sentence cost: ~300 ms cold start (piper loads the .onnx into
- * memory the first time) + ~70 ms per second of audio. For a 4-sentence
- * reply, the user hears sentence 1 within 600 ms of token-arrival, then
- * each subsequent sentence is gapless.
+ * Per-segment cost: piper cold-start ~300 ms (model load), then ~70 ms
+ * per second of audio. Subsequent segments warm-reuse the model cache so
+ * sentence #2 hits the user within the perceptual gap of #1.
+ *
+ * The voice layer is independently authored — the model wraps spoken
+ * portions in <voice> tags (v1.3.0 split chat/voice pipeline); we only
+ * synthesise those segments, not the whole reply. Code blocks, file
+ * paths, long lists stay silent by living outside the tags.
+ *
+ * Tone presets (5 of them) shape Piper's length_scale / noise_scale /
+ * noise_w per segment; persona offset shifts noise_scale for character
+ * baseline (Soul +0.05 expressive, Void -0.10 steady).
+ *
+ * Diagnostics: every synth and playback writes to the Logs tab (filter
+ * SYSTEM) — context state, sample energy, currentTime advancement, and
+ * a watchdog that flags when onended never fires. The five voice-bug
+ * versions between v1.2.3 and v1.3.4 happened because most of these
+ * signals weren't being captured.
  */
 import { vs } from './bridge'
 import type { VoiceConfig, VoicePersona } from '@shared/types'
@@ -99,10 +116,6 @@ interface QueueItem {
  * (~30 ms on Windows the first time a sample rate is negotiated).
  */
 let audioCtx: AudioContext | null = null
-/** Tracks whether the current AudioContext has ever made it to 'running'.
- *  Used to surface a single warning if resume() never succeeds — quieter
- *  than logging every failed playback. */
-let audioCtxEverRunning = false
 
 /**
  * Lazy AudioContext accessor with awaitable resume — the v1.3.0 version
@@ -135,9 +148,19 @@ async function getAudioContext(): Promise<AudioContext> {
     try {
       await audioCtx.resume()
       const stateAfter: AudioContextState = audioCtx.state
-      if (!audioCtxEverRunning && stateAfter === 'running') {
-        audioCtxEverRunning = true
+      // Log every successful suspended→running transition, not just the
+      // first one — a context CAN re-suspend mid-session (Chromium does
+      // this on audio device change, OS sleep/wake, hardware mute toggle)
+      // and silently come back. Without this trail a "voice went silent
+      // and then came back" pattern is undebuggable.
+      if (stateAfter === 'running') {
         void vs.logs.write('info', 'system', '[voice] AudioContext resumed')
+      } else {
+        void vs.logs.write(
+          'warn',
+          'system',
+          `[voice] AudioContext.resume() did not transition to running — state is ${stateAfter}`
+        )
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
@@ -201,13 +224,23 @@ class AudioQueue {
 
     let buffer: AudioBuffer
     try {
-      // decodeAudioData wants an ArrayBuffer it owns — slice() makes a
-      // copy detached from the Uint8Array's underlying buffer so we don't
-      // hand the decoder a view that could be modified mid-decode.
-      const arrayBuffer = item.bytes.buffer.slice(
-        item.bytes.byteOffset,
-        item.bytes.byteOffset + item.bytes.byteLength
-      ) as ArrayBuffer
+      // decodeAudioData wants a fresh, tightly-fitted ArrayBuffer that it
+      // can detach. The v1.2.3 implementation called
+      // `item.bytes.buffer.slice(byteOffset, byteOffset+byteLength)` which
+      // looks correct but bites hard in Electron: IPC-deserialised
+      // Uint8Arrays sometimes have non-zero `byteOffset` and are views
+      // into a larger pooled ArrayBuffer shared across many IPC results.
+      // `.buffer.slice(absA, absB)` then either:
+      //   (a) clamps when absB > buffer.byteLength → wrong byte count;
+      //   (b) returns bytes from a different IPC payload sharing the
+      //       pool → decodeAudioData parses garbage as a valid WAV header
+      //       and yields a buffer with correct sampleRate + length but
+      //       silence-filled samples. logs show "playing 2.00s @ 48000
+      //       Hz" but no sound. Three independent audits + the user's
+      //       repro converged here.
+      // Fix: `new Uint8Array(item.bytes)` makes a copy whose `.buffer`
+      // is a fresh, exact-fit ArrayBuffer with byteOffset === 0.
+      const arrayBuffer = new Uint8Array(item.bytes).buffer
       buffer = await ctx.decodeAudioData(arrayBuffer)
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
@@ -231,19 +264,13 @@ class AudioQueue {
     const source = ctx.createBufferSource()
     source.buffer = buffer
     const gain = ctx.createGain()
-    // Make-up gain on top of the user's slider. Piper voices peak around
-    // -20 dBFS (much quieter than typical OS TTS or YouTube playback) so
-    // a literal 0.15 slider value renders sub-audible on most desktop
-    // speakers. 1.7× lifts the perceived loudness into the range users
-    // expect WITHOUT clipping (headroom math: -20 dBFS + ~4.6 dB = still
-    // -15 dBFS, well under 0 dBFS clip). Hard-cap at 1.5 final-gain so
-    // a 100% slider doesn't push the signal into distortion territory.
-    const PIPER_MAKEUP_GAIN = 1.7
-    const PIPER_GAIN_CEILING = 1.5
-    gain.gain.value = Math.min(
-      PIPER_GAIN_CEILING,
-      clampVolume(item.volume) * PIPER_MAKEUP_GAIN
-    )
+    const { energy, peak } = audioStats(buffer)
+    const userVol = clampVolume(item.volume)
+    // Simple slider-driven gain — no makeup, no compressor, no limiter.
+    // Piper's native amplitude is already comfortable for normal listening
+    // hardware; the v1.3.5-dev compressor chain was overcompensating for
+    // a headphone-cable contact problem on the beta tester's setup.
+    gain.gain.value = userVol
     source.connect(gain).connect(ctx.destination)
 
     source.onended = (): void => {
@@ -259,15 +286,50 @@ class AudioQueue {
     this.current = source
     this.currentGain = gain
     setCurrentSpoken(item.display)
-    // Surface playback in the Logs tab too — when voice goes silent the
-    // user can't tell from the console alone whether the source ever
-    // even started. The state field catches the suspended-context case
-    // explicitly (state should be 'running' for actual audio output).
+
+    // ---- diagnostic: currentTime + onended watchdog ----
+    // Energy + peak are already measured above for gain normalisation;
+    // these two extra signals catch the harder failure modes:
+    //   · ctxTime not advancing across the playback window means the
+    //     destination stream is dead (Electron/WASAPI quirk).
+    //   · onended never firing means the source scheduled into a stale
+    //     timeline and was abandoned (suspended-context-during-start).
+    const ctxTimeAtStart = ctx.currentTime
+    let endedFired = false
+    const watchdogMs = Math.ceil(buffer.duration * 1000) + 500
+    const watchdog = window.setTimeout(() => {
+      if (endedFired) return
+      void vs.logs.write(
+        'warn',
+        'system',
+        `[voice] onended never fired after ${watchdogMs}ms — source likely scheduled into a dead audio timeline (ctxTime went ${ctxTimeAtStart.toFixed(3)}s → ${ctx.currentTime.toFixed(3)}s)`
+      )
+    }, watchdogMs)
+    const originalOnEnded = source.onended
+    source.onended = (ev): void => {
+      endedFired = true
+      window.clearTimeout(watchdog)
+      // Preserve the original advance-the-queue handler.
+      if (typeof originalOnEnded === 'function') {
+        originalOnEnded.call(source, ev)
+      }
+    }
+
     void vs.logs.write(
       'info',
       'system',
-      `[voice] playing ${buffer.duration.toFixed(2)}s @ ${buffer.sampleRate} Hz (vol ${gain.gain.value.toFixed(2)}, ctx ${ctx.state})`
+      `[voice] playing ${buffer.duration.toFixed(2)}s @ ${buffer.sampleRate} Hz · ` +
+        `ctx ${ctx.state} · ` +
+        `peak ${peak.toFixed(3)} · energy ${energy.toFixed(4)} · ` +
+        `gain ${gain.gain.value.toFixed(2)} · ch ${buffer.numberOfChannels} · len ${buffer.length}`
     )
+    if (energy < 0.001) {
+      void vs.logs.write(
+        'error',
+        'system',
+        `[voice] AudioBuffer is silent (energy ${energy.toFixed(6)}) — bytes likely decoded from a wrong WAV region. Check IPC byte transfer.`
+      )
+    }
     if (ctx.state !== 'running') {
       void vs.logs.write(
         'warn',
@@ -318,6 +380,59 @@ function clampVolume(volume: number): number {
   if (!Number.isFinite(volume)) return 1
   return Math.min(1, Math.max(0, volume))
 }
+
+/**
+ * Cheap statistical probe over the first channel of an AudioBuffer.
+ * Returns both AVERAGE absolute sample (audibility check — Piper voices
+ * average 0.05–0.2 for normal speech; silence registers near 0) and PEAK
+ * absolute sample (used for per-clip normalisation gain — see playNext).
+ *
+ * Samples every ~Nth frame for an O(~1024) scan regardless of buffer
+ * length; the peak read is conservative but plenty accurate for gain
+ * sizing.
+ */
+function audioStats(buffer: AudioBuffer): { energy: number; peak: number } {
+  if (buffer.length === 0 || buffer.numberOfChannels === 0) {
+    return { energy: 0, peak: 0 }
+  }
+  const data = buffer.getChannelData(0)
+  // ~1024 strided samples regardless of buffer size — keeps the probe
+  // cheap even for 13-sec streaming-tts payloads.
+  const stride = Math.max(1, Math.floor(data.length / 1024))
+  let sum = 0
+  let peak = 0
+  let count = 0
+  for (let i = 0; i < data.length; i += stride) {
+    const v = Math.abs(data[i])
+    sum += v
+    if (v > peak) peak = v
+    count++
+  }
+  return {
+    energy: count > 0 ? sum / count : 0,
+    peak
+  }
+}
+
+/**
+ * v1.3.5 reverted the dynamics-compressor + limiter + makeup-gain chain
+ * that was being tuned through v1.3.4-v1.3.5-dev. Root cause of every
+ * "voice is quiet" report turned out to be a partially-seated headphone
+ * cable on the beta tester's machine — Piper's native output (peak ~0.95
+ * for medium voices) is already plenty loud at correct listening levels.
+ *
+ * The audio chain is back to the v1.2.3 shape: `source → gain →
+ * destination`, where `gain` is just `clampVolume(item.volume)` (the
+ * user's slider). Simpler, no processing artifacts, no hidden makeup,
+ * the slider behaves exactly as labelled (100% = native Piper amplitude).
+ *
+ * Per-clip diagnostics (energy / peak / playback duration) are kept —
+ * they cost nothing and proved invaluable for the v1.3.0-v1.3.4
+ * debugging cycle. If a future genuinely-quiet-voice case shows up
+ * (some Piper community voices ARE recorded at low amplitude), wire a
+ * peak-based normalisation factor into the gain calculation — `peak`
+ * is already measured in playNext().
+ */
 
 /**
  * Queue one sentence through the piper IPC → audio queue pipeline.

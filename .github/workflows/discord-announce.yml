@@ -38,8 +38,12 @@ jobs:
           RELEASE_BODY: ${{ github.event.release.body }}
         run: |
           if [ -z "$WEBHOOK_URL" ]; then
-            echo "::error::DISCORD_WEBHOOK_URL secret is not set; skipping announcement."
-            exit 1
+            # Soft-skip when the secret hasn't been wired up — this is a
+            # one-time setup step and a missing webhook shouldn't turn
+            # every release into a red-X. Log as a warning so the
+            # notice surfaces in the run page, then exit clean.
+            echo "::warning::DISCORD_WEBHOOK_URL secret is not set; skipping announcement (set the secret in repo Settings → Secrets to enable)."
+            exit 0
           fi
 
           # Trim release body to 3500 chars to stay well under Discord's

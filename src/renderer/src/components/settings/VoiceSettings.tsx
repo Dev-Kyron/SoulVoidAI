@@ -257,19 +257,22 @@ function VoiceDirectionRow({ voice }: { voice: VoiceConfig }): JSX.Element {
       </div>
       <p className="mb-2 text-[10px] leading-relaxed text-slate-500">
         Replies have a chat layer (what you read) and a voice layer (what gets
-        spoken aloud). The model picks one of five tones per spoken segment
-        based on context. Tap any tone to audition it with the active persona.
+        spoken aloud). {personaName} picks the tone for each spoken segment —
+        it's their call, not a setting. Tap any tone below to audition it
+        with the active persona.
       </p>
-      {/* Current-window indicator. Tells the user what tone the model
-       *  will default to right now and why. Updates on next render. */}
+      {/* Current-window indicator. Informational only — the persona
+       *  knows what time it is and reads the moment themselves; this
+       *  is just here so the user can see the context the persona has. */}
       <div className="mb-2 rounded-md border border-[var(--accent-ring)] bg-[var(--accent-soft)] px-2 py-1.5">
         <p className="text-[10px] font-semibold text-white">
-          {personaName} · current window
+          {personaName} knows: {windowLabel.toLowerCase()}
         </p>
-        <p className="mt-0.5 text-[10px] text-slate-300">{windowLabel}</p>
         <p className="mt-0.5 text-[10px] text-slate-400">
-          Default tone right now:{' '}
+          Natural fit for this window:{' '}
           <span className="font-mono text-[var(--accent)]">{defaultTone}</span>
+          {' '}— but {personaName} may pick a different tone based on the
+          moment.
         </p>
       </div>
       <div className="space-y-1">

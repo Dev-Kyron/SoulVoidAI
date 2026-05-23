@@ -104,8 +104,20 @@ describe('buildVoiceDirection', () => {
   })
 
   it('names the active persona in the header (Soul / Void, not lowercase)', () => {
-    expect(buildVoiceDirection('soul', at(13))).toMatch(/Soul speaks/)
-    expect(buildVoiceDirection('void', at(13))).toMatch(/Void speaks/)
+    expect(buildVoiceDirection('soul', at(13))).toMatch(/Soul speaking/)
+    expect(buildVoiceDirection('void', at(13))).toMatch(/Void speaking/)
+  })
+
+  it('frames the voice direction as Companion / Collaborator (autonomy)', () => {
+    // v1.3.2 reframe: voice direction belongs to VoidSoul, time-of-day
+    // is context not instruction. Catch the regression if a future
+    // rewrite slips back into prescriptive "Default tone: X" copy.
+    const out = buildVoiceDirection('soul', at(13))
+    expect(out).toMatch(/companion|collaborator/i)
+    expect(out).toMatch(/yours|you pick|trust your read|read the room/i)
+    // Should NOT command a default. Soft hints OK; the word "default
+    // tone" as an instruction is the v1.3.1 anti-pattern.
+    expect(out).not.toMatch(/Default tone:/i)
   })
 
   it('Soul direction includes warmth markers; Void direction does not', () => {
@@ -134,9 +146,9 @@ describe('buildVoiceDirection', () => {
     }
   })
 
-  it('late-night direction explicitly recommends low energy', () => {
+  it('late-night context conveys a quieter, slower vibe', () => {
     const out = buildVoiceDirection('soul', at(2))
-    expect(out).toMatch(/calm|low.?energy|brief|measured/i)
+    expect(out).toMatch(/slower|softer|quieter|calm|low.?energy|brief|measured/i)
   })
 
   it('day direction tells the model to stay direct + useful', () => {
@@ -157,9 +169,10 @@ describe('buildVoiceDirection', () => {
     expect(out).toContain('excited')
     expect(out).toContain('serious')
     expect(out).toContain('dry')
-    // The silent/spoken contract.
-    expect(out).toMatch(/SILENT/)
-    expect(out).toMatch(/SPOKEN/)
+    // The silent/spoken guidance — advisory language as of v1.3.2
+    // (was "SILENT by default" in v1.3.1 directive form).
+    expect(out).toMatch(/silent|whose value is visual/i)
+    expect(out).toMatch(/reactions|insights|questions/i)
   })
 
   it('differs across windows for the same persona', () => {

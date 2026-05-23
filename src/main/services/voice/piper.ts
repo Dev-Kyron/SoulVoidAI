@@ -368,13 +368,29 @@ export function synthesise(opts: SynthesiseOptions): Promise<Buffer> {
     // streaming TTS) don't collide.
     const outPath = join(tmpdir(), `piper-${randomUUID()}.wav`)
 
+    // CLI flag naming: Piper 2023.11.14-2 canonical form is HYPHENS,
+    // not underscores. v1.3.0-v1.3.1 used underscores which Piper
+    // silently rejected for --noise_scale + --noise_w (added in v1.3.0)
+    // and the binary then exited non-zero with "unrecognized option",
+    // killing playback. --length-scale happened to be tolerated as
+    // --length_scale by the argparse but the others weren't. Stick to
+    // hyphens for all three to match the documented CLI exactly.
     const args = [
       '--model', voice.modelPath,
       '--output_file', outPath,
-      '--length_scale', lengthScale.toFixed(3),
-      '--noise_scale', noiseScale.toFixed(3),
-      '--noise_w', preset.noise_w.toFixed(3)
+      '--length-scale', lengthScale.toFixed(3),
+      '--noise-scale', noiseScale.toFixed(3),
+      '--noise-w', preset.noise_w.toFixed(3)
     ]
+    // Diagnostic: full piper command so failures past this point are
+    // reproducible by hand from a terminal. Skipped at log level 'info'
+    // by default (most users don't care) but visible when filtering for
+    // 'system' in the Logs tab.
+    log(
+      'info',
+      'system',
+      `Piper synth (${opts.persona}${opts.tone ? `/${opts.tone}` : ''}): length=${lengthScale.toFixed(3)} noise=${noiseScale.toFixed(3)} w=${preset.noise_w.toFixed(3)}`
+    )
 
     const proc = spawn(binary, args, {
       // Run from the binary directory so piper finds its espeak-ng-data

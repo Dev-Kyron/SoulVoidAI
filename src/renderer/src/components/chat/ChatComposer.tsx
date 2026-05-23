@@ -408,6 +408,11 @@ export function ChatComposer(): JSX.Element {
               submit()
             }
           }}
+          // Electron's Chromium ships a built-in spellchecker — explicit
+          // attribute because <textarea> defaults vary across distros and
+          // beta testers flagged the missing red-underline on misspellings.
+          spellCheck
+          autoCorrect="on"
           className="scrollbar-void max-h-[110px] flex-1 resize-none rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-[13px] text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-[var(--accent-ring)]"
         />
 

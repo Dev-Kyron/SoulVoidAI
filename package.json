@@ -1,6 +1,6 @@
 {
   "name": "voidsoul-assistant",
-  "version": "1.2.5",
+  "version": "1.2.6",
   "description": "A futuristic AI operating layer for creators and developers — local-first, plug-and-play, runs on Ollama out of the box.",
   "author": {
     "name": "Void Soul Studio",
@@ -49,6 +49,7 @@
     "@types/qrcode": "^1.5.6",
     "@xenova/transformers": "^2.17.2",
     "better-sqlite3": "^11.10.0",
+    "docx": "^9.6.1",
     "electron-updater": "^6.8.3",
     "highlight.js": "^11.11.1",
     "katex": "^0.16.47",
@@ -62,7 +63,8 @@
     "remark-gfm": "^4.0.0",
     "remark-math": "^6.0.0",
     "systeminformation": "^5.31.6",
-    "tesseract.js": "^5.1.1"
+    "tesseract.js": "^5.1.1",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",

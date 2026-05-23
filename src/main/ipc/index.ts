@@ -34,6 +34,8 @@ import {
 import { runCompletion, invokeCompletion, listModels } from '../services/ai'
 import { transcribeAudio } from '../services/ai/transcribe'
 import { exportToFile, importFromFile, syncPush, syncPull } from '../services/storage/sync'
+import { exportThread, type ThreadExportFormat } from '../services/export/thread'
+import { writeFile } from 'node:fs/promises'
 import {
   createCheckpoint as createAgentCheckpoint,
   updateCheckpoint as updateAgentCheckpoint,
@@ -897,6 +899,58 @@ export function registerIpc(): void {
 
   ipcMain.handle('sync:push', () => syncPush())
   ipcMain.handle('sync:pull', () => syncPull())
+
+  /**
+   * Per-thread export to a document format the user can drop into Word /
+   * Excel / a PDF reader. The renderer picks the format and thread; we
+   * render + show the save dialog + write the file. Returns a one-line
+   * status the renderer can toast.
+   *
+   * Format-specific filename extension and MIME come from exportThread
+   * itself, so adding a new format is a one-file change in
+   * services/export/thread.ts — no IPC plumbing churn.
+   */
+  ipcMain.handle(
+    'thread:export',
+    async (
+      _e,
+      args: { threadId: string; format: ThreadExportFormat }
+    ): Promise<{ ok: boolean; message: string; path?: string }> => {
+      const win = getWindow()
+      if (!win) return { ok: false, message: 'Window unavailable.' }
+      let rendered
+      try {
+        rendered = await exportThread(args.threadId, args.format)
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        return { ok: false, message: `Export failed: ${msg}` }
+      }
+      const filterName =
+        {
+          markdown: 'Markdown',
+          txt: 'Plain text',
+          html: 'HTML',
+          docx: 'Word document',
+          xlsx: 'Excel workbook',
+          pdf: 'PDF document'
+        }[args.format] ?? 'Document'
+      const ext = rendered.suggestedFilename.split('.').pop() ?? args.format
+      const result = await dialog.showSaveDialog(win, {
+        defaultPath: rendered.suggestedFilename,
+        filters: [{ name: filterName, extensions: [ext] }]
+      })
+      if (result.canceled || !result.filePath) {
+        return { ok: false, message: 'Export cancelled.' }
+      }
+      try {
+        await writeFile(result.filePath, rendered.bytes)
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        return { ok: false, message: `Couldn't write file: ${msg}` }
+      }
+      return { ok: true, message: `Saved to ${result.filePath}`, path: result.filePath }
+    }
+  )
 
   /* ------------------------------ wake word ---------------------------- */
 

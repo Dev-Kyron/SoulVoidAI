@@ -4,7 +4,7 @@
  * fresh thread and switches to it. Designed to overlay the chat area on the
  * narrow VoidSoul panel rather than dock as a persistent sidebar.
  */
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
 import {
   Plus,
@@ -14,13 +14,31 @@ import {
   Trash2,
   Check,
   AlertTriangle,
-  Star
+  Star,
+  Download
 } from 'lucide-react'
 import { useChatStore } from '../../store/useChatStore'
 import { useUiStore } from '../../store/useUiStore'
+import { vs } from '../../lib/bridge'
 import { cn, relativeTime } from '../../lib/utils'
 import { EmptyState } from '../common/ui'
 import type { ThreadSummary } from '@shared/types'
+
+/**
+ * Format catalogue for the per-thread export menu. Keeps the labels +
+ * helper copy in one place so the dropdown stays consistent and adding
+ * a new format is a one-row change.
+ */
+type ExportFormat = 'docx' | 'pdf' | 'xlsx' | 'markdown' | 'txt' | 'html'
+
+const EXPORT_FORMATS: Array<{ id: ExportFormat; label: string; hint: string }> = [
+  { id: 'docx', label: 'Word (.docx)', hint: 'Best for sharing or editing' },
+  { id: 'pdf', label: 'PDF', hint: 'Best for printing or archiving' },
+  { id: 'xlsx', label: 'Excel (.xlsx)', hint: 'One row per message' },
+  { id: 'markdown', label: 'Markdown (.md)', hint: 'Plays nice with Obsidian / Notion' },
+  { id: 'txt', label: 'Plain text', hint: 'Universal fallback' },
+  { id: 'html', label: 'HTML', hint: 'Styled transcript' }
+]
 
 function ThreadRow({
   thread,
@@ -40,6 +58,42 @@ function ThreadRow({
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(thread.title)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
+  const [exportMenuOpen, setExportMenuOpen] = useState(false)
+  const [exporting, setExporting] = useState(false)
+  const exportMenuRef = useRef<HTMLDivElement | null>(null)
+  const pushToast = useUiStore((s) => s.pushToast)
+
+  // Click-outside closes the export menu so it behaves like a normal
+  // dropdown — without this it sticks open until the user navigates
+  // somewhere else.
+  useEffect(() => {
+    if (!exportMenuOpen) return
+    const onDocClick = (e: MouseEvent): void => {
+      if (exportMenuRef.current && !exportMenuRef.current.contains(e.target as Node)) {
+        setExportMenuOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', onDocClick)
+    return () => document.removeEventListener('mousedown', onDocClick)
+  }, [exportMenuOpen])
+
+  const handleExport = async (format: ExportFormat): Promise<void> => {
+    setExportMenuOpen(false)
+    if (exporting) return
+    setExporting(true)
+    try {
+      const result = await vs.threadExport.save({ threadId: thread.id, format })
+      if (result.ok) {
+        pushToast('success', result.message)
+      } else if (result.message !== 'Export cancelled.') {
+        // Don't toast on plain cancel — that's a normal user choice, not
+        // a failure they need notified about.
+        pushToast('error', result.message)
+      }
+    } finally {
+      setExporting(false)
+    }
+  }
 
   const commit = (): void => {
     setEditing(false)
@@ -195,6 +249,49 @@ function ThreadRow({
             <Pencil size={11} />
           </button>
         )}
+        <div ref={exportMenuRef} className="relative">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              setExportMenuOpen((v) => !v)
+            }}
+            disabled={exporting}
+            title="Export conversation"
+            aria-label="Export thread"
+            aria-haspopup="menu"
+            aria-expanded={exportMenuOpen}
+            className="text-slate-500 transition hover:text-[var(--accent)] disabled:opacity-40"
+          >
+            <Download size={11} />
+          </button>
+          {exportMenuOpen && (
+            // Positioned to the LEFT of the action column so it doesn't
+            // clip outside the drawer's right edge — drawer is narrow and
+            // a right-anchored menu would scroll horizontally.
+            <div
+              role="menu"
+              className="absolute right-full top-0 z-30 mr-1 w-48 rounded-lg border border-white/10 bg-[#0e0e14] py-1 shadow-xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <p className="px-2.5 pb-1 pt-0.5 text-[9px] font-semibold uppercase tracking-wider text-slate-500">
+                Export as
+              </p>
+              {EXPORT_FORMATS.map((fmt) => (
+                <button
+                  key={fmt.id}
+                  type="button"
+                  role="menuitem"
+                  onClick={() => void handleExport(fmt.id)}
+                  className="block w-full px-2.5 py-1 text-left text-[11px] text-slate-200 transition hover:bg-white/5"
+                >
+                  <span className="font-semibold">{fmt.label}</span>
+                  <span className="ml-1.5 text-[9px] text-slate-500">{fmt.hint}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
         <button
           type="button"
           onClick={(e) => {

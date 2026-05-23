@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { FloatingWidget } from './components/widget/FloatingWidget'
 import { Orb } from './components/widget/Orb'
 import { QuickAIOverlay } from './components/panel/QuickAIOverlay'
@@ -87,6 +87,44 @@ export default function App(): JSX.Element {
           'success',
           `✨ ${count} new ${provider} model${count === 1 ? '' : 's'}: ${preview}`
         )
+      }),
+    []
+  )
+
+  // Update notifier — surface electron-updater state changes as toasts
+  // instead of leaving them to passive discovery in the About panel. Beta
+  // feedback flagged that auto-updates were technically working but
+  // invisible: users only noticed after manually opening Settings → About.
+  //
+  // Dedupe via a ref tracking the last notified version. Without it the
+  // updater's repeated 'available' broadcasts (status snapshot fires on
+  // every config reload + every progress tick) would re-toast every few
+  // seconds. We notify exactly twice per release: once when the download
+  // starts and once when it's ready to install.
+  const lastNotifiedUpdate = useRef<{ available?: string; downloaded?: string }>({})
+  useEffect(
+    () =>
+      vs.events.onUpdaterStatus((status) => {
+        if (status.kind === 'available') {
+          if (lastNotifiedUpdate.current.available === status.version) return
+          lastNotifiedUpdate.current.available = status.version
+          useUiStore.getState().pushToast(
+            'info',
+            `✨ Update v${status.version} available — downloading in the background.`
+          )
+        } else if (status.kind === 'downloaded') {
+          if (lastNotifiedUpdate.current.downloaded === status.version) return
+          lastNotifiedUpdate.current.downloaded = status.version
+          // Stickier toast for the "ready to install" state — this is the
+          // call-to-action. The pushToast helper doesn't currently support
+          // an action button, but mentioning the path in the copy gives
+          // the user a concrete next step. Settings → About has the
+          // restart button wired already (UpdaterRow.tsx).
+          useUiStore.getState().pushToast(
+            'success',
+            `🚀 Update v${status.version} ready. Open Settings → About to restart and install.`
+          )
+        }
       }),
     []
   )

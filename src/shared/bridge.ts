@@ -349,6 +349,15 @@ export interface VoidSoulBridge {
     push(): Promise<SyncResult>
     pull(): Promise<SyncResult>
   }
+  /** Per-thread document export — distinct from the whole-app `sync` bundle.
+   *  Renderer picks a thread + format; main process renders + shows save
+   *  dialog + writes the file. Result message is user-facing. */
+  threadExport: {
+    save(args: {
+      threadId: string
+      format: 'markdown' | 'txt' | 'html' | 'docx' | 'xlsx' | 'pdf'
+    }): Promise<{ ok: boolean; message: string; path?: string }>
+  }
   window: {
     setExpanded(expanded: boolean): Promise<boolean>
     moveBy(dx: number, dy: number): Promise<void>

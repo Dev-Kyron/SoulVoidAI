@@ -352,6 +352,8 @@ function NexusComposer(): JSX.Element {
             submit()
           }
         }}
+        spellCheck
+        autoCorrect="on"
         className="flex-1 rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-[12px] text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-[var(--accent-ring)]"
       />
       <button
@@ -494,17 +496,29 @@ function AdvancedNexus(): JSX.Element | null {
         />
       </div>
 
-      {/* Centre — the orb HUD, its inline reply and the telemetry grid. */}
+      {/* Centre — just the orb identity, voice HUD and hint. Everything
+       *  flow-y-scrolls here if it overflows, but in practice the orb plus
+       *  one line of hint always fits the panel height. */}
       <div className="scrollbar-void flex min-h-0 flex-1 flex-col overflow-y-auto py-3">
         <OrbIdentity />
         <HudCore />
         <OrbHint />
+      </div>
+
+      {/* Pinned readback + gauges — beta feedback was that the rolling
+       *  reply preview was getting buried inside the scrollable centre
+       *  whenever the orb expanded. Pulling NexusResponse out here keeps
+       *  it always visible immediately above the telemetry block, which
+       *  is the natural reading order: assistant speaks → gauges show
+       *  resource cost → composer. The two stay glued together as a unit
+       *  so they read as one "vitals" panel. */}
+      <div className="shrink-0 space-y-2 pt-1">
         <NexusResponse />
         <AdvancedTelemetry />
       </div>
 
       {/* Bottom — quick composer, voice controls, and the full-chat entry. */}
-      <div className="shrink-0 space-y-2">
+      <div className="shrink-0 space-y-2 pt-2">
         <NexusComposer />
         <VoiceBar />
         <OpenConversation />

@@ -252,6 +252,8 @@ export function QuickAIOverlay(): JSX.Element {
                 }}
                 placeholder="Ask anything — Enter to send"
                 rows={1}
+                spellCheck
+                autoCorrect="on"
                 className="scrollbar-void max-h-24 flex-1 resize-none bg-transparent text-[13px] text-slate-100 outline-none placeholder:text-slate-500"
                 aria-label="Quick AI prompt"
               />

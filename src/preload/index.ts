@@ -189,6 +189,9 @@ const bridge: VoidSoulBridge = {
     push: () => invoke('sync:push'),
     pull: () => invoke('sync:pull')
   },
+  threadExport: {
+    save: (args) => invoke('thread:export', args)
+  },
   window: {
     setExpanded: (expanded) => invoke('window:set-expanded', expanded),
     moveBy: (dx, dy) => invoke('window:move-by', dx, dy),

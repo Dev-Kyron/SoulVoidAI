@@ -63,9 +63,15 @@ async function boot(): Promise<void> {
   const picovoiceKey = await vs.secrets.get('picovoice')
   if (generation !== bootGen) return
 
+  // v1.7.1 — pipe Whisper transcriptions to the widget store's
+  // wakeHeard ticker so the Wake Word settings panel can show what
+  // the model is actually hearing. Porcupine doesn't transcribe
+  // (keyword-only) so it doesn't get this callback.
   const engine = picovoiceKey
     ? createPorcupineWakeEngine(picovoiceKey, onWakeDetected)
-    : createWhisperWakeEngine(onWakeDetected)
+    : createWhisperWakeEngine(onWakeDetected, (text, matched) => {
+        useWidgetStore.getState().pushWakeHeard(text, matched)
+      })
 
   // Whisper-engine cold path: the first transcribe call has to download
   // ~75 MB of model weights, taking 5-15s on a typical connection. Without

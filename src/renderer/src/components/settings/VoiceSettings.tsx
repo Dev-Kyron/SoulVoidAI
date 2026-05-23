@@ -886,6 +886,78 @@ function WakeWordBody({ voice }: { voice: VoiceConfig }): JSX.Element {
           Open folder
         </button>
       </div>
+
+      {/* v1.7.1 — "What Whisper heard" diagnostic ticker. Only useful for
+       *  the Whisper path (Porcupine doesn't transcribe). Catches the
+       *  silent-failure case where the wake phrase is being mis-heard
+       *  ("Hey Boyd" instead of "Hey Void"). */}
+      {!hasKey && voice.wakeWord.enabled && <WakeHeardTicker />}
     </>
+  )
+}
+
+/**
+ * Shows the last few transcriptions the Whisper wake-word engine has
+ * produced, regardless of whether they matched a wake phrase. Renders
+ * nothing if Whisper hasn't heard anything yet (or if the wake-word
+ * engine is using Porcupine, which doesn't produce text).
+ */
+function WakeHeardTicker(): JSX.Element {
+  const heard = useWidgetStore((s) => s.wakeHeard)
+  const clear = useWidgetStore((s) => s.clearWakeHeard)
+
+  return (
+    <div className="mt-2 rounded-md border border-white/5 bg-black/20 px-2 py-1.5">
+      <div className="mb-1 flex items-center justify-between">
+        <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+          What Whisper heard
+        </p>
+        {heard.length > 0 && (
+          <button
+            type="button"
+            onClick={() => clear()}
+            className="text-[9px] text-slate-500 transition hover:text-slate-300"
+          >
+            clear
+          </button>
+        )}
+      </div>
+      {heard.length === 0 ? (
+        <p className="text-[10px] italic text-slate-500">
+          No transcriptions yet. Say something near your mic; entries appear here.
+        </p>
+      ) : (
+        <ul className="space-y-0.5">
+          {heard.map((h) => (
+            <li
+              key={h.at}
+              className={cn(
+                'flex items-baseline gap-1.5 truncate font-mono text-[10px]',
+                h.matched ? 'text-emerald-300' : 'text-slate-400'
+              )}
+            >
+              <span className="shrink-0 text-[8px] text-slate-600">
+                {new Date(h.at).toLocaleTimeString([], {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                  second: '2-digit'
+                })}
+              </span>
+              <span className="truncate">{h.text}</span>
+              {h.matched && (
+                <span className="ml-auto shrink-0 rounded bg-emerald-500/15 px-1 text-[8px] uppercase tracking-wide">
+                  match
+                </span>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="mt-1 text-[9px] text-slate-500">
+        Green = matched a wake phrase. Greyed = heard but didn't match. If Whisper
+        is consistently mis-transcribing your wake phrase, try speaking it more
+        clearly or closer to the mic.
+      </p>
+    </div>
   )
 }

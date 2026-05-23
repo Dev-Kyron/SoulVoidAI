@@ -34,7 +34,7 @@ import { stopSpeaking } from '../voice'
 import { matchWakePhrase } from './match'
 import { useConfigStore } from '../../store/useConfigStore'
 import { isQuietNow } from '@shared/types'
-import type { WakeDetectCallback, WakeEngine } from './types'
+import type { WakeDetectCallback, WakeEngine, WakeHeardCallback } from './types'
 
 /** Whisper's native sample rate; AudioContext resamples the mic to match. */
 const SAMPLE_RATE = 16_000
@@ -66,7 +66,10 @@ const BARGE_IN_SUSTAIN_MS = 250
 // matching logic can be tested without dragging in the audio/store deps
 // this engine pulls.
 
-export function createWhisperWakeEngine(onDetect: WakeDetectCallback): WakeEngine {
+export function createWhisperWakeEngine(
+  onDetect: WakeDetectCallback,
+  onHeard?: WakeHeardCallback
+): WakeEngine {
   let stream: MediaStream | null = null
   let audioCtx: AudioContext | null = null
   let source: MediaStreamAudioSourceNode | null = null
@@ -127,6 +130,10 @@ export function createWhisperWakeEngine(onDetect: WakeDetectCallback): WakeEngin
       if (stopped || !ring) return
       if (result.error || !result.text) return
       const match = matchWakePhrase(result.text)
+      // v1.7.1 — surface EVERY transcription to the diagnostic ticker
+      // (whether matched or not). Lets users see "Hey Boyd" mishearings
+      // in Settings → Voice → Wake word instead of silent failure.
+      onHeard?.(result.text, Boolean(match))
       if (match) {
         // Cooldown FIRST so a slow downstream handler can't let the next
         // scan slip through and re-fire on the lingering tail of the

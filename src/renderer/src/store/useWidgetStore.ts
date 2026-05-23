@@ -31,12 +31,24 @@ interface WidgetStore {
    * app is recording me without permission".
    */
   wakeArmed: boolean
+  /**
+   * v1.7.1 diagnostic — the most recent few transcriptions the Whisper
+   * wake-word engine has produced, regardless of whether they matched a
+   * wake phrase. Surfaced in Settings → Voice → Wake word as a "Heard:"
+   * ticker so users can see when Whisper is mis-transcribing the wake
+   * phrase ("Hey Boyd" instead of "Hey Void", etc) instead of staring
+   * at silent failure. Capped at 5 entries; Porcupine doesn't populate
+   * this (keyword-based, no text).
+   */
+  wakeHeard: Array<{ at: number; text: string; matched: boolean }>
   activeTab: PanelTab
 
   setTab: (tab: PanelTab) => void
   setOrbState: (state: WidgetState) => void
   setWakeListening: (listening: boolean) => void
   setWakeArmed: (armed: boolean) => void
+  pushWakeHeard: (text: string, matched: boolean) => void
+  clearWakeHeard: () => void
   expand: () => Promise<void>
   collapse: () => void
   toggle: () => Promise<void>
@@ -51,6 +63,7 @@ export const useWidgetStore = create<WidgetStore>((set, get) => ({
   orbState: 'idle',
   wakeListening: false,
   wakeArmed: false,
+  wakeHeard: [],
   activeTab: 'nexus',
 
   setTab: (tab) => set({ activeTab: tab }),
@@ -74,6 +87,18 @@ export const useWidgetStore = create<WidgetStore>((set, get) => ({
     if (get().wakeArmed === armed) return
     set({ wakeArmed: armed })
   },
+
+  pushWakeHeard: (text, matched) => {
+    const trimmed = text.trim()
+    if (!trimmed) return
+    // Keep last 5; oldest drops off. Strict bound — the ticker UI only
+    // shows ~3 anyway, and unbounded growth on a chatty mic would leak
+    // memory over a long armed session.
+    const next = [{ at: Date.now(), text: trimmed, matched }, ...get().wakeHeard].slice(0, 5)
+    set({ wakeHeard: next })
+  },
+
+  clearWakeHeard: () => set({ wakeHeard: [] }),
 
   expand: async () => {
     if (get().expanded || get().busy) return

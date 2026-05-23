@@ -20,3 +20,17 @@ export interface WakeEngine {
  * the human-readable phrase used in toasts/logs.
  */
 export type WakeDetectCallback = (persona: VoicePersona, label: string) => void
+
+/**
+ * v1.7.1 diagnostic surface — fired by transcription-based engines
+ * (Whisper) for EVERY non-empty transcription, regardless of whether
+ * it matched a wake phrase. Lets the Wake Word settings panel show a
+ * "Heard:" ticker so users can see what the model is actually hearing
+ * — "Hey Boyd" instead of "Hey Void", "Avoid" instead of "Hey Void",
+ * etc. Without this, a failing wake word looks identical to "user
+ * isn't talking" and is impossible to debug.
+ *
+ * Keyword-based engines (Porcupine) don't produce text, so this
+ * callback is optional and never fired by Porcupine.
+ */
+export type WakeHeardCallback = (text: string, matched: boolean) => void

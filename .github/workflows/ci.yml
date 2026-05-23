@@ -83,6 +83,13 @@ jobs:
         # regression class.
         run: npm test
 
+      # Same as release.yml — Piper binary is gitignored, has to be fetched
+      # per-CI-run for the packaged-installer step below to ship voice.
+      # Skipped on PRs (no installer packaged there) to keep PR CI cheap.
+      - name: Download Piper binary
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: npm run piper
+
       - name: Build
         # `npm run build` itself re-runs typecheck before electron-vite build.
         # Slightly redundant given the explicit Typecheck step above, but

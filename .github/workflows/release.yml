@@ -57,6 +57,17 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      # Piper TTS binary is gitignored (~22 MB blob we don't want in the
+      # repo) so the per-platform binary has to be fetched fresh per CI
+      # run. The script picks the right archive for the current runner's
+      # OS + arch and extracts into resources/piper/<platform>/piper/,
+      # which electron-builder picks up via asarUnpack: resources/**.
+      # Without this step, the installer ships voice-disabled — the
+      # Voice settings panel shows "Piper binary not bundled" and no
+      # streaming TTS works.
+      - name: Download Piper binary
+        run: npm run piper
+
       - name: Build
         run: npm run build
 

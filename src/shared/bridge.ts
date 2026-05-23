@@ -59,6 +59,10 @@ import type {
   SetupImportResult,
   SetupReport,
   SyncResult,
+  ChatTurn,
+  EmotionalContextSnapshot,
+  MemoryConfig,
+  SessionSentiment,
   SystemStats,
   VoicePersona,
   VoiceSetupStatus,
@@ -99,6 +103,9 @@ export interface VoidSoulBridge {
     setAutoMemory(enabled: boolean): Promise<ClientConfig>
     setPrivateChat(enabled: boolean): Promise<ClientConfig>
     setRagEnabled(enabled: boolean): Promise<ClientConfig>
+    /** v1.4.0 — patch any subset of the MemoryConfig (emotionalContext
+     *  toggle, sentimentModel pin, etc). Merges with existing values. */
+    setMemory(patch: Partial<MemoryConfig>): Promise<ClientConfig>
     setEmbeddingProvider(provider: EmbeddingProvider): Promise<ClientConfig>
     setOnboarded(value: boolean): Promise<ClientConfig>
     setApiKey(provider: ProviderId, key: string): Promise<ClientConfig>
@@ -149,6 +156,22 @@ export interface VoidSoulBridge {
     setFactModes(id: string, modes: ModeId[]): Promise<UserFact[]>
     removeFact(id: string): Promise<UserFact[]>
     clearFacts(): Promise<UserFact[]>
+    /**
+     * v1.4.0 emotional-context hooks.
+     *
+     * onUserMessage: fire-and-forget after a user message lands; the
+     * scheduler counts exchanges and classifies in the background.
+     * emotionalContext: snapshot for Settings panel + system prompt.
+     * sentimentPromptBlock: pre-rendered block the renderer injects.
+     * recentSentiments: history for the Settings rollup view.
+     * forgetRecentSentiment: privacy escape hatch — drops the last N
+     * days of classifier output (default 7).
+     */
+    onUserMessage(threadId: string, recentMessages: ChatTurn[]): Promise<{ ok: boolean }>
+    emotionalContext(): Promise<EmotionalContextSnapshot>
+    sentimentPromptBlock(): Promise<string>
+    recentSentiments(limit?: number): Promise<SessionSentiment[]>
+    forgetRecentSentiment(days?: number): Promise<{ deleted: number }>
   }
   history: {
     /** Lightweight thread list (no message bodies). */

@@ -14,6 +14,7 @@ import type {
   AppearanceConfig,
   ChatBehaviourConfig,
   ClientConfig,
+  MemoryConfig,
   ModeId,
   ProviderId,
   ProviderRuntime,
@@ -35,6 +36,8 @@ export interface AppConfigFile {
   voice: VoiceConfig
   /** Conversation-behaviour switches (agent mode, auto-memory, private, rag). */
   chat: ChatBehaviourConfig
+  /** v1.4.0+ emotional context + sentiment classifier config. */
+  memory: MemoryConfig
   /** When each model id was first observed from a `listModels` call, per provider. */
   seenModels: SeenModels
   syncFolder: string
@@ -104,6 +107,15 @@ const DEFAULT_CONFIG: AppConfigFile = {
     private: false,
     rag: false,
     embeddingProvider: 'auto'
+  },
+  memory: {
+    // Emotional context on by default — Soul's wishlist item #1, beta
+    // testers want it. Silently skips when no fast model is reachable,
+    // so this is opt-in by capability rather than opt-in by config.
+    emotionalContext: true,
+    // Auto-pick the cheapest model from the active provider unless the
+    // user pins one explicitly in Settings.
+    sentimentModel: null
   },
   seenModels: {},
   syncFolder: '',
@@ -187,6 +199,7 @@ function normalize(c: AppConfigFile): AppConfigFile {
       wakeWord: { ...DEFAULT_CONFIG.voice.wakeWord, ...c.voice?.wakeWord }
     },
     chat,
+    memory: { ...DEFAULT_CONFIG.memory, ...c.memory },
     seenModels: c.seenModels ?? DEFAULT_CONFIG.seenModels,
     panel: { ...DEFAULT_CONFIG.panel, ...c.panel },
     permissions: { ...DEFAULT_CONFIG.permissions, ...c.permissions }
@@ -291,6 +304,7 @@ export function getClientConfig(): ClientConfig {
     appearance: c.appearance,
     voice: c.voice,
     chat: c.chat,
+    memory: c.memory,
     seenModels: c.seenModels,
     syncFolder: c.syncFolder,
     onboarded: c.onboarded,

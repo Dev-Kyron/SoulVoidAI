@@ -208,6 +208,36 @@ const MIGRATIONS: Array<{ version: number; sql: string }> = [
       CREATE INDEX IF NOT EXISTS agent_checkpoints_updated
         ON agent_checkpoints(updated_at DESC);
     `
+  },
+  {
+    // v1.4.0 Phase 3 — emotional context memory. session_sentiment is
+    // append-only: every periodic classification run by the sentiment
+    // scheduler writes one row. "Last 7 days" rollups + the current
+    // session pull from here. session_end is nullable — the row is
+    // written at compute time with session_end open, and stamped only
+    // when a new session begins (so the most-recent open-ended row is
+    // always "the current session").
+    //
+    // sentiment enum kept narrow (5 buckets) so the classifier output
+    // stays well-defined + the system prompt copy can speak in terms
+    // the model recognises. intensity 1-5 makes the model think in a
+    // small Likert-scale rather than a free float (LLMs are bad at
+    // free-scale numbers, decent at 1-5).
+    version: 8,
+    sql: `
+      CREATE TABLE IF NOT EXISTS session_sentiment (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_start TEXT NOT NULL,
+        session_end   TEXT,
+        sentiment     TEXT NOT NULL
+                      CHECK (sentiment IN ('stressed','productive','stuck','excited','neutral')),
+        intensity     INTEGER NOT NULL CHECK (intensity BETWEEN 1 AND 5),
+        summary       TEXT,
+        computed_at   TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS session_sentiment_computed_at
+        ON session_sentiment(computed_at DESC);
+    `
   }
 ]
 

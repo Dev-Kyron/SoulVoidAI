@@ -9,6 +9,7 @@ import type {
   AppearanceConfig,
   ClientConfig,
   EmbeddingProvider,
+  MemoryConfig,
   ModeId,
   ProviderId,
   ProviderRuntime,
@@ -41,6 +42,7 @@ interface ConfigState {
   setAutoMemory: (enabled: boolean) => Promise<void>
   setPrivateChat: (enabled: boolean) => Promise<void>
   setRagEnabled: (enabled: boolean) => Promise<void>
+  setMemory: (patch: Partial<MemoryConfig>) => Promise<void>
   setEmbeddingProvider: (provider: EmbeddingProvider) => Promise<void>
   setOnboarded: (value: boolean) => Promise<void>
   setSystemPrompt: (prompt: string) => Promise<void>
@@ -109,6 +111,10 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
 
   setRagEnabled: async (enabled) => {
     set({ config: await vs.config.setRagEnabled(enabled) })
+  },
+
+  setMemory: async (patch) => {
+    set({ config: await vs.config.setMemory(patch) })
   },
 
   setEmbeddingProvider: async (provider) => {

@@ -12,7 +12,8 @@ import { useProjectsStore } from './store/useProjectsStore'
 import {
   useChatStore,
   flushAllPendingSavesAsync,
-  subscribeChatChunks
+  subscribeChatChunks,
+  refreshSentimentBlock
 } from './store/useChatStore'
 import { CHAT_STRINGS } from './lib/chatStrings'
 import { useWidgetStore } from './store/useWidgetStore'
@@ -41,6 +42,10 @@ export default function App(): JSX.Element {
     void loadPlugins()
     void loadChat()
     void loadProjects()
+    // v1.4.0 — pull the latest sentiment block once on boot so the very
+    // first message's system prompt has it (instead of waiting for the
+    // 2nd send to populate the cache via the post-classifier refresh).
+    void refreshSentimentBlock()
   }, [load, loadMemory, loadPlugins, loadChat, loadProjects])
 
   // Wake-word engine — listens continuously when the user has it enabled and

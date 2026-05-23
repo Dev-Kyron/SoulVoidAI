@@ -14,7 +14,8 @@ import {
   Brain,
   Pencil,
   Check,
-  MessageSquarePlus
+  MessageSquarePlus,
+  Heart
 } from 'lucide-react'
 import { useMemoryStore } from '../../store/useMemoryStore'
 import { useChatStore } from '../../store/useChatStore'
@@ -28,7 +29,11 @@ import { cn, relativeTime } from '../../lib/utils'
 import { SectionLabel, Toggle } from '../common/ui'
 import { CollapsibleSection } from './CollapsibleSection'
 import { MODES } from '@shared/modes'
-import type { CustomActionKind, ModeId } from '@shared/types'
+import type {
+  CustomActionKind,
+  EmotionalContextSnapshot,
+  ModeId
+} from '@shared/types'
 
 const FIELD =
   'w-full rounded-lg border border-white/10 bg-black/30 px-2.5 py-1.5 text-[11px] text-slate-100 outline-none transition focus:border-[var(--accent-ring)] placeholder:text-slate-600'
@@ -759,6 +764,143 @@ const MEMORY_TABS: Array<{ id: MemoryTab; label: string; hint: string }> = [
   { id: 'workspace', label: 'Workspace', hint: 'Favourite apps and recent project folders' }
 ]
 
+/**
+ * v1.4.0 emotional context — surfaces the sentiment classifier state
+ * + master toggle + privacy "forget" button.
+ *
+ * The classifier itself runs in the main process; this panel is purely
+ * UI on top of three IPC calls (snapshot, config setter, forget). The
+ * subsystem is opt-in by capability — it silently skips when no usable
+ * provider is reachable, so flipping the toggle off explicitly means
+ * "I want no sentiment data, even if you could collect it."
+ */
+function EmotionalContext(): JSX.Element {
+  const config = useConfigStore((s) => s.config)
+  const setMemory = useConfigStore((s) => s.setMemory)
+  const pushToast = useUiStore((s) => s.pushToast)
+  const [snapshot, setSnapshot] = useState<EmotionalContextSnapshot | null>(null)
+  const [forgetting, setForgetting] = useState(false)
+
+  const refresh = async (): Promise<void> => {
+    try {
+      const snap = await vs.memory.emotionalContext()
+      setSnapshot(snap)
+    } catch {
+      setSnapshot(null)
+    }
+  }
+
+  useEffect(() => {
+    void refresh()
+    // 60-second refresh while the panel is open — the classifier may
+    // fire in the background and we want the user to see the new state
+    // without leaving the Settings tab.
+    const id = window.setInterval(() => void refresh(), 60_000)
+    return () => window.clearInterval(id)
+  }, [])
+
+  if (!config) return <></>
+
+  const enabled = config.memory.emotionalContext
+  const current = snapshot?.current
+
+  const handleToggle = async (next: boolean): Promise<void> => {
+    await setMemory({ emotionalContext: next })
+  }
+
+  const handleForget = async (): Promise<void> => {
+    if (forgetting) return
+    setForgetting(true)
+    try {
+      const result = await vs.memory.forgetRecentSentiment(7)
+      pushToast(
+        'success',
+        result.deleted === 0
+          ? 'No sentiment history to forget — already clean.'
+          : `Forgot ${result.deleted} sentiment row${result.deleted === 1 ? '' : 's'} from the last 7 days.`
+      )
+      await refresh()
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      pushToast('error', `Forget failed: ${msg}`)
+    } finally {
+      setForgetting(false)
+    }
+  }
+
+  return (
+    <div>
+      <SectionLabel>
+        <span className="inline-flex items-center gap-1.5">
+          <Heart size={11} />
+          Emotional context
+        </span>
+      </SectionLabel>
+      <p className="mt-1 text-[10px] leading-relaxed text-slate-500">
+        VoidSoul periodically reads recent exchanges through a small fast
+        model to track session mood (stressed / productive / stuck /
+        excited / neutral). The result is added as soft context to the
+        system prompt so she can adapt tone — never quoted back to you
+        verbatim. Stored locally in the same SQLite as everything else;
+        nothing leaves your machine except the classifier call itself,
+        which goes through your active AI provider.
+      </p>
+
+      <div className="mt-2 flex items-center justify-between rounded-lg border border-white/5 bg-black/20 px-2.5 py-2">
+        <div>
+          <p className="text-[11px] font-semibold text-slate-200">Enable sentiment</p>
+          <p className="text-[10px] text-slate-500">
+            Off = no extra model calls, no sentiment context in the prompt.
+          </p>
+        </div>
+        <Toggle checked={enabled} onChange={(v) => void handleToggle(v)} />
+      </div>
+
+      {enabled && (
+        <>
+          <div className="mt-2 rounded-lg border border-[var(--accent-ring)] bg-[var(--accent-soft)] px-2.5 py-2">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+              Current session
+            </p>
+            {current ? (
+              <>
+                <p className="mt-0.5 text-[12px] font-semibold text-white">
+                  {current.sentiment}{' '}
+                  <span className="text-[10px] font-normal text-slate-400">
+                    (intensity {current.intensity}/5)
+                  </span>
+                </p>
+                {current.summary && (
+                  <p className="mt-0.5 text-[10px] italic text-slate-300">
+                    "{current.summary}"
+                  </p>
+                )}
+                <p className="mt-1 text-[9px] text-slate-500">
+                  Computed {relativeTime(current.computedAt)}
+                </p>
+              </>
+            ) : (
+              <p className="mt-0.5 text-[10px] text-slate-400">
+                No sentiment classified yet — send a few messages and check back.
+              </p>
+            )}
+          </div>
+
+          <button
+            type="button"
+            onClick={() => void handleForget()}
+            disabled={forgetting}
+            className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg border border-rose-500/20 bg-rose-500/5 px-2 py-1.5 text-[11px] text-rose-300 transition hover:bg-rose-500/10 disabled:opacity-50"
+          >
+            <Trash2 size={11} />
+            {forgetting ? 'Forgetting…' : 'Forget last 7 days of emotional context'}
+          </button>
+        </>
+      )}
+    </div>
+  )
+}
+
 export function MemorySettings(): JSX.Element {
   const load = useMemoryStore((s) => s.load)
   const [tab, setTab] = useState<MemoryTab>('memory')
@@ -793,6 +935,7 @@ export function MemorySettings(): JSX.Element {
         {tab === 'memory' && (
           <>
             <AssistantFacts />
+            <EmotionalContext />
             <LongTermRecall />
           </>
         )}

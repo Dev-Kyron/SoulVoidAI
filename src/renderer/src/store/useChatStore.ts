@@ -136,6 +136,25 @@ function activeThreadSummary(): ThreadSummary | undefined {
 }
 
 /** Builds the system prompt from base config, active mode, screen + agent context. */
+/**
+ * Cached emotional-context block for the v1.4.0 system-prompt injection.
+ * The block lives in main-process SQLite + needs IPC to fetch; the
+ * system-prompt builder is sync so we can't await on every build. We
+ * refresh asynchronously when (a) a thread is opened, (b) after a
+ * classifier run lands (via the IPC roundtrip below in onUserMessage),
+ * and (c) on send. Empty string when the subsystem is off or no
+ * sentiment has been recorded yet — in either case the block is
+ * omitted from the prompt entirely.
+ */
+let cachedSentimentBlock = ''
+export async function refreshSentimentBlock(): Promise<void> {
+  try {
+    cachedSentimentBlock = await vs.memory.sentimentPromptBlock()
+  } catch {
+    cachedSentimentBlock = ''
+  }
+}
+
 function buildSystemPrompt(historySummary?: string): string {
   const config = useConfigStore.getState().config
   if (!config) return ''
@@ -172,6 +191,14 @@ function buildSystemPrompt(historySummary?: string): string {
     prompt +=
       '\n\nWhat you know about the user (long-term memory):\n' +
       relevantFacts.map((f) => `- ${f.text}`).join('\n')
+  }
+
+  // v1.4.0 emotional context — sentiment of the current session +
+  // most recent win/friction. Cached value refreshed via IPC on send
+  // and after each classifier run. Block is empty when the subsystem
+  // is off or nothing's been classified yet, in which case we skip it.
+  if (config.memory.emotionalContext && cachedSentimentBlock) {
+    prompt += '\n\n' + cachedSentimentBlock
   }
 
   // Story so far — recap of the older portion of a long conversation that no
@@ -743,6 +770,35 @@ export const useChatStore = create<ChatState>((set, get) => ({
       pendingTool: null
     })
     useWidgetStore.getState().setOrbState('processing')
+
+    // v1.4.0 emotional-context hook. Fire-and-forget — the sentiment
+    // scheduler counts user messages per-thread and classifies in the
+    // background every N exchanges. The renderer doesn't wait on it;
+    // the classifier writes its result directly to SQLite for the next
+    // system-prompt build to pick up. Skipped when config.memory.emotional
+    // Context is off OR config.chat.private is on (privacy mode).
+    const currentThreadId = get().activeThreadId
+    if (config.memory.emotionalContext && !config.chat.private && currentThreadId) {
+      // Send the last 12 turns of conversation context — recent enough
+      // to track shifting moods, small enough to keep the classifier
+      // prompt cheap. Skip assistant messages still streaming and the
+      // empty placeholder we just added.
+      const recentTurns: ChatTurn[] = [...messages, userMessage]
+        .slice(-12)
+        .filter((m) => m.role !== 'system')
+        .map((m) => ({ role: m.role, content: m.content }))
+      void vs.memory
+        .onUserMessage(currentThreadId, recentTurns)
+        .then(() => {
+          // Classifier may have written a new sentiment row; refresh
+          // the cached block so the NEXT system-prompt build picks it
+          // up. The current send already used the previous block.
+          return refreshSentimentBlock()
+        })
+        .catch(() => {
+          /* silent — never block chat on a classifier hiccup */
+        })
+    }
 
     const patch = (changes: Partial<ChatMessage>): void =>
       set((state) => ({

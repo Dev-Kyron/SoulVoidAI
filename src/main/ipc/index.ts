@@ -86,6 +86,14 @@ import {
   setFactModes
 } from '../services/storage/memory'
 import {
+  onUserMessage as sentimentOnUserMessage,
+  getEmotionalContext,
+  buildSentimentPromptBlock,
+  getRecentSentimentHistory
+} from '../services/memory/sentimentScheduler'
+import { forgetRecentSentiment } from '../services/memory/sentimentStore'
+import { resetSentimentCache } from '../services/memory/sentiment'
+import {
   getHistory,
   getHistorySummaries,
   getThreadMessages,
@@ -200,6 +208,7 @@ import type {
   AppearanceConfig,
   ChatMessage,
   ChatRequest,
+  ChatTurn,
   HistorySummary,
   McpServerInput,
   ChatStreamChunk,
@@ -337,6 +346,13 @@ export function registerIpc(): void {
     setChatFlag('rag', enabled)
     return emitConfig(e.sender.id)
   })
+  ipcMain.handle(
+    'config:set-memory',
+    (e, patch: Partial<import('@shared/types').MemoryConfig>) => {
+      updateConfig({ memory: { ...getConfig().memory, ...patch } })
+      return emitConfig(e.sender.id)
+    }
+  )
 
   ipcMain.handle(
     'config:set-embedding-provider',
@@ -617,6 +633,34 @@ export function registerIpc(): void {
   )
   ipcMain.handle('memory:remove-fact', (_e, id: string) => removeFact(id))
   ipcMain.handle('memory:clear-facts', () => clearFacts())
+
+  // v1.4.0 emotional-context subsystem.
+  // - on-user-message: chat-store fires this after each user send so the
+  //   scheduler can decide whether to classify the recent window.
+  //   Fire-and-forget — the renderer doesn't wait on the model.
+  // - emotional-context: snapshot for the system-prompt builder + the
+  //   Settings panel.
+  // - sentiment-prompt-block: pre-rendered system-prompt fragment so
+  //   the renderer doesn't need to re-implement the formatting.
+  // - forget-recent-sentiment: privacy escape hatch wired to the
+  //   Settings "Forget" button.
+  ipcMain.handle(
+    'memory:on-user-message',
+    (_e, threadId: string, recentMessages: ChatTurn[]) => {
+      // Fire-and-forget; we don't await the classifier here.
+      void sentimentOnUserMessage(threadId, recentMessages)
+      return { ok: true }
+    }
+  )
+  ipcMain.handle('memory:emotional-context', () => getEmotionalContext())
+  ipcMain.handle('memory:sentiment-prompt-block', () => buildSentimentPromptBlock())
+  ipcMain.handle('memory:recent-sentiments', (_e, limit?: number) =>
+    getRecentSentimentHistory(limit)
+  )
+  ipcMain.handle('memory:forget-recent-sentiment', (_e, days?: number) => {
+    resetSentimentCache()
+    return forgetRecentSentiment(days)
+  })
 
   /* ----------------------------- history ------------------------------- */
 

@@ -1,6 +1,6 @@
 # VoidSoul Assistant — Privacy Policy
 
-_Last updated: 21 May 2026_
+_Last updated: 24 May 2026_
 
 VoidSoul Assistant is a desktop application that runs locally on your computer. It is designed so that as little of your data as possible ever leaves your machine. This policy explains what that means in concrete terms.
 
@@ -33,6 +33,7 @@ The following data is created and stored locally on your machine, in the operati
 
 - **Chat history** — every conversation you have with the assistant, stored in a local SQLite database.
 - **Memory** — long-term facts the app has extracted about you (when auto-memory is enabled in Settings).
+- **Emotional context** (v1.4.0+, optional, default on) — when enabled, the app periodically reads your recent exchanges through a small fast model to track session sentiment (stressed / productive / stuck / excited / neutral) and stores the labels locally in the same SQLite database. The classifier call itself goes through your active AI provider (Anthropic / OpenAI / Gemini / a local model — your choice); the labels never leave your machine. You can disable this in Settings → Memory → Emotional context, and the same panel has a "Forget last 7 days" button that wipes the local sentiment rollups.
 - **Embeddings** — numerical representations of your chat history and any folders you index, used for retrieval-augmented generation (RAG). Stored locally.
 - **Indexed files** — when you enable file-RAG and point the app at a folder, its contents are chunked and embedded locally. The original files are not copied or moved.
 - **Settings and preferences** — your provider configuration, modes, system prompts, custom actions, notebooks, projects, scheduled tasks, MCP server configs.

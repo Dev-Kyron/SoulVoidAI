@@ -30,6 +30,7 @@ const bridge: VoidSoulBridge = {
     setAutoMemory: (enabled) => invoke('config:set-auto-memory', enabled),
     setPrivateChat: (enabled) => invoke('config:set-private-chat', enabled),
     setRagEnabled: (enabled) => invoke('config:set-rag-enabled', enabled),
+    setMemory: (patch) => invoke('config:set-memory', patch),
     setEmbeddingProvider: (provider) =>
       invoke('config:set-embedding-provider', provider),
     setOnboarded: (value) => invoke('config:set-onboarded', value),
@@ -72,7 +73,14 @@ const bridge: VoidSoulBridge = {
     updateFact: (id, text) => invoke('memory:update-fact', id, text),
     setFactModes: (id, modes) => invoke('memory:set-fact-modes', id, modes),
     removeFact: (id) => invoke('memory:remove-fact', id),
-    clearFacts: () => invoke('memory:clear-facts')
+    clearFacts: () => invoke('memory:clear-facts'),
+    // v1.4.0 emotional context — see services/memory/sentiment*.
+    onUserMessage: (threadId, recentMessages) =>
+      invoke('memory:on-user-message', threadId, recentMessages),
+    emotionalContext: () => invoke('memory:emotional-context'),
+    sentimentPromptBlock: () => invoke('memory:sentiment-prompt-block'),
+    recentSentiments: (limit) => invoke('memory:recent-sentiments', limit),
+    forgetRecentSentiment: (days) => invoke('memory:forget-recent-sentiment', days)
   },
   history: {
     summaries: () => invoke('history:summaries'),

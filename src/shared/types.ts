@@ -347,6 +347,48 @@ export interface UserFact {
   createdAt: string
   updatedAt: string
   modes?: ModeId[]
+  /**
+   * v1.4.0 Phase 3 — emotional context tag set on auto-saved facts so the
+   * sentiment subsystem can surface "last win" / "last friction" to the
+   * system prompt. Null / unset = neutral, the existing behaviour for
+   * every fact created before v1.4.0.
+   */
+  emotionalTag?: 'win' | 'friction' | null
+}
+
+/* ----------------------- Emotional context (v1.4.0) -------------------- */
+
+/** Bucketed sentiment labels emitted by the classifier. Narrow set so the
+ *  model's outputs are well-defined + system prompt copy can talk in
+ *  terms it recognises. */
+export type SessionSentimentLabel =
+  | 'stressed'
+  | 'productive'
+  | 'stuck'
+  | 'excited'
+  | 'neutral'
+
+export interface SessionSentiment {
+  id: number
+  sessionStart: string
+  /** Null when this is the currently-active session; stamped on next
+   *  session boundary. */
+  sessionEnd: string | null
+  sentiment: SessionSentimentLabel
+  /** 1-5 Likert scale — LLMs handle small discrete scales better than
+   *  free floats. */
+  intensity: number
+  /** Optional one-line note the classifier emits to ground the label
+   *  ("crunching on the auth refactor"). Shown in Settings. */
+  summary: string | null
+  computedAt: string
+}
+
+/** Snapshot the system-prompt builder + Settings panel consume. */
+export interface EmotionalContextSnapshot {
+  current: SessionSentiment | null
+  lastWin: { text: string; createdAt: string } | null
+  lastFriction: { text: string; createdAt: string } | null
 }
 
 /**
@@ -983,6 +1025,24 @@ export function isQuietNow(dnd: DndConfig, now: Date = new Date()): boolean {
  */
 export type SeenModels = Partial<Record<ProviderId, Record<string, string>>>
 
+/**
+ * v1.4.0 emotional-memory config. Lives on ClientConfig under `memory`.
+ * Sentiment subsystem is opt-in (default ON, beta testers seem to want
+ * it) and silently skips when no fast model is reachable.
+ */
+export interface MemoryConfig {
+  /** Whether the sentiment classifier runs at all. Off = no extra model
+   *  calls, no <sentiment> block in the system prompt, no rows written. */
+  emotionalContext: boolean
+  /**
+   * Which model to use for the classifier. Null = auto-pick based on the
+   * active provider (Haiku for Anthropic, gpt-4o-mini for OpenAI,
+   * gemini-2.0-flash for Gemini, defaultModel for local). User can pin
+   * a specific model when they care about cost or quality trade-offs.
+   */
+  sentimentModel: string | null
+}
+
 /** The configuration shape delivered to the renderer (never contains keys). */
 export interface ClientConfig {
   activeProvider: ProviderId
@@ -995,6 +1055,8 @@ export interface ClientConfig {
   seenModels: SeenModels
   /** Conversation-behaviour toggles, grouped for clarity as they grow. */
   chat: ChatBehaviourConfig
+  /** v1.4.0+ emotional context + sentiment classifier. */
+  memory: MemoryConfig
   /** Folder used for backup sync (e.g. a Dropbox/Drive folder). Empty = unset. */
   syncFolder: string
   /** True once the user has seen (or skipped) the first-boot tour. */

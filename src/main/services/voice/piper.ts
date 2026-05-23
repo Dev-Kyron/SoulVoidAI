@@ -254,11 +254,34 @@ export const TONE_PRESETS: Record<ToneTag, {
   noise_scale: number
   noise_w: number
 }> = {
+  // --- v1.3.0 originals ---
   casual: { length_scale: 1.0, noise_scale: 0.667, noise_w: 0.8 },
   focused: { length_scale: 0.92, noise_scale: 0.5, noise_w: 0.7 },
   excited: { length_scale: 0.85, noise_scale: 0.8, noise_w: 0.95 },
   serious: { length_scale: 1.15, noise_scale: 0.4, noise_w: 0.65 },
-  dry: { length_scale: 1.05, noise_scale: 0.45, noise_w: 0.7 }
+  dry: { length_scale: 1.05, noise_scale: 0.45, noise_w: 0.7 },
+  // --- v1.3.6 additions ---
+  // Encouraging: just-shy-of-normal speed, slightly more expressive than
+  // casual. Reads as "supportive but composed" rather than cheerleader-y.
+  encouraging: { length_scale: 0.97, noise_scale: 0.72, noise_w: 0.85 },
+  // Playful: a touch quicker than casual + the highest noise_w of the
+  // set for that bounce in phrase rhythm. Stops short of 'excited'
+  // territory — playful is about cheek, not energy.
+  playful: { length_scale: 0.9, noise_scale: 0.78, noise_w: 0.92 },
+  // Warm: slightly slower than normal, lower noise = steadier delivery.
+  // The "intimate / reassuring" reading comes from the steadiness more
+  // than the slowness; resist the urge to make this much slower or it
+  // tips into 'serious'.
+  warm: { length_scale: 1.1, noise_scale: 0.6, noise_w: 0.78 },
+  // Curious: slight slowdown + moderate variation. Reads as "leaning in"
+  // — useful when the model is asking a question back or exploring an
+  // idea with the user rather than delivering a conclusion.
+  curious: { length_scale: 1.05, noise_scale: 0.7, noise_w: 0.85 },
+  // Thinking: slowest preset in the set, low-to-mid noise. The "let me
+  // sit with that" sound. Distinct from serious by being more inward —
+  // serious is weighted-toward-the-listener, thinking is weighted-
+  // toward-the-process.
+  thinking: { length_scale: 1.2, noise_scale: 0.55, noise_w: 0.72 }
 }
 
 /**

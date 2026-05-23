@@ -40,15 +40,37 @@
  * Tone presets the model chooses from. Each one maps in the Piper layer
  * to a (length_scale, noise_scale, noise_w) triple. Unknown attribute
  * values normalise to `casual` so a typo never silences voice.
+ *
+ * v1.3.6 expanded the catalogue from 5 to 10 tones based on beta-tester
+ * feedback that the original 5 were tonally distinct but missed common
+ * collaborative moods — encouraging, playful, warm, curious, thinking.
+ * Larger catalogue = more character per segment, at the cost of more
+ * decisions the model has to make per reply (mitigated by the system-
+ * prompt copy that names each one with a one-line vibe summary).
  */
-export type ToneTag = 'casual' | 'focused' | 'excited' | 'serious' | 'dry'
+export type ToneTag =
+  | 'casual'
+  | 'focused'
+  | 'excited'
+  | 'serious'
+  | 'dry'
+  | 'encouraging'
+  | 'playful'
+  | 'warm'
+  | 'curious'
+  | 'thinking'
 
 export const TONE_TAGS: readonly ToneTag[] = [
   'casual',
   'focused',
   'excited',
   'serious',
-  'dry'
+  'dry',
+  'encouraging',
+  'playful',
+  'warm',
+  'curious',
+  'thinking'
 ] as const
 
 const TONE_SET = new Set<string>(TONE_TAGS)

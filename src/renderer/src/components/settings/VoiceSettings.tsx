@@ -208,8 +208,10 @@ export function VoiceSettings(): JSX.Element | null {
  * aren't user-configurable here; the model picks them per segment based
  * on context. This row is purely informational + audition.
  */
+import type { ToneTag } from '@shared/voiceMarkers'
+
 const TONE_SAMPLES: ReadonlyArray<{
-  tone: 'casual' | 'focused' | 'excited' | 'serious' | 'dry'
+  tone: ToneTag
   label: string
   hint: string
   sample: string
@@ -243,6 +245,36 @@ const TONE_SAMPLES: ReadonlyArray<{
     label: 'Dry',
     hint: 'understated, deadpan, one-liner energy',
     sample: "Well. That's one way to handle a null pointer."
+  },
+  {
+    tone: 'encouraging',
+    label: 'Encouraging',
+    hint: 'supportive lift, "you got this"',
+    sample: "You're closer than it feels — push through this one and the rest follows."
+  },
+  {
+    tone: 'playful',
+    label: 'Playful',
+    hint: 'light, mischievous, teasing',
+    sample: "Oh? Going off the rails, are we? Lead on."
+  },
+  {
+    tone: 'warm',
+    label: 'Warm',
+    hint: 'gentle, intimate, reassuring',
+    sample: "Take your time. I'm here when you want to pick it back up."
+  },
+  {
+    tone: 'curious',
+    label: 'Curious',
+    hint: 'leaning in, exploratory, asking',
+    sample: "Hmm, that's a weird-looking error. What's the call stack say?"
+  },
+  {
+    tone: 'thinking',
+    label: 'Thinking',
+    hint: 'pondering out loud, slower',
+    sample: "Let me sit with that for a moment. Yeah, I think the second approach has legs."
   }
 ]
 

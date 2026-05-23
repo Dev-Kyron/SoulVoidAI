@@ -99,15 +99,55 @@ interface QueueItem {
  * (~30 ms on Windows the first time a sample rate is negotiated).
  */
 let audioCtx: AudioContext | null = null
+/** Tracks whether the current AudioContext has ever made it to 'running'.
+ *  Used to surface a single warning if resume() never succeeds — quieter
+ *  than logging every failed playback. */
+let audioCtxEverRunning = false
 
-function getAudioContext(): AudioContext {
+/**
+ * Lazy AudioContext accessor with awaitable resume — the v1.3.0 version
+ * called resume() fire-and-forget, which is the canonical "audio context
+ * stays suspended through the first batch of synth calls" bug. Even with
+ * autoplayPolicy: 'no-user-gesture-required' set on the BrowserWindow,
+ * Chromium creates a fresh context in 'suspended' state and resume() is
+ * async. decodeAudioData resolves before resume does → source.start()
+ * schedules into a suspended timeline → user hears nothing.
+ *
+ * This version awaits the resume so callers can be sure ctx.state ===
+ * 'running' by the time they call source.start(). Logged to the Logs
+ * tab on every state transition so future "voice silent" reports leave
+ * a clean trail.
+ */
+async function getAudioContext(): Promise<AudioContext> {
   if (!audioCtx) {
     audioCtx = new AudioContext()
+    void vs.logs.write(
+      'info',
+      'system',
+      `[voice] AudioContext created — initial state: ${audioCtx.state}`
+    )
   }
-  if (audioCtx.state === 'suspended') {
-    // Best-effort resume — if Chromium hasn't seen a user gesture this
-    // session, this still rejects, but we'll log it in playNext().
-    void audioCtx.resume()
+  // Cache state in a local so TS doesn't narrow audioCtx.state to the
+  // 'suspended' literal — the resume() call below transitions it and
+  // subsequent state reads need the full AudioContextState union.
+  const initialState: AudioContextState = audioCtx.state
+  if (initialState === 'suspended') {
+    try {
+      await audioCtx.resume()
+      const stateAfter: AudioContextState = audioCtx.state
+      if (!audioCtxEverRunning && stateAfter === 'running') {
+        audioCtxEverRunning = true
+        void vs.logs.write('info', 'system', '[voice] AudioContext resumed')
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      const stateAfter: AudioContextState = audioCtx.state
+      void vs.logs.write(
+        'error',
+        'system',
+        `[voice] AudioContext.resume() rejected — state is ${stateAfter}: ${msg}`
+      )
+    }
   }
   return audioCtx
 }
@@ -157,7 +197,7 @@ class AudioQueue {
       return
     }
     const myGen = this.playbackGeneration
-    const ctx = getAudioContext()
+    const ctx = await getAudioContext()
 
     let buffer: AudioBuffer
     try {
@@ -207,9 +247,22 @@ class AudioQueue {
     this.current = source
     this.currentGain = gain
     setCurrentSpoken(item.display)
-    console.info(
-      `[voice] playing ${buffer.duration.toFixed(2)}s @ ${buffer.sampleRate} Hz (vol ${gain.gain.value.toFixed(2)})`
+    // Surface playback in the Logs tab too — when voice goes silent the
+    // user can't tell from the console alone whether the source ever
+    // even started. The state field catches the suspended-context case
+    // explicitly (state should be 'running' for actual audio output).
+    void vs.logs.write(
+      'info',
+      'system',
+      `[voice] playing ${buffer.duration.toFixed(2)}s @ ${buffer.sampleRate} Hz (vol ${gain.gain.value.toFixed(2)}, ctx ${ctx.state})`
     )
+    if (ctx.state !== 'running') {
+      void vs.logs.write(
+        'warn',
+        'system',
+        `[voice] AudioContext is ${ctx.state} — source will start but may not be audible until a user gesture resumes the context.`
+      )
+    }
     source.start()
   }
 

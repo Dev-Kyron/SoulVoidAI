@@ -29,6 +29,7 @@ import { useAccentTheme, useConfigBroadcastSync } from './lib/useConfigBridge'
 import { useTheme } from './lib/useTheme'
 import { useGlobalSearchHotkey } from './lib/useGlobalSearchHotkey'
 import { Overlays } from './components/panel/Overlays'
+import { SetupDiscoveryPanel } from './components/setup/SetupDiscoveryPanel'
 
 /* Lazy panels — each loads only when its group is first opened. */
 const ModeSettings = lazyNamed(() => import('./components/settings/ModeSettings'), 'ModeSettings')
@@ -361,6 +362,10 @@ export function SettingsRoot(): JSX.Element {
           that triggers a confirm (e.g. wake-word asking for mic) would set
           store state with nothing to render against. */}
       <Overlays />
+      {/* Setup-discovery panel — opened from About → "Re-run setup"; the
+          Settings window's useUiStore is independent of the main window's,
+          so opening it here doesn't fight with first-launch on main. */}
+      <SetupDiscoveryPanel />
     </div>
   )
 }

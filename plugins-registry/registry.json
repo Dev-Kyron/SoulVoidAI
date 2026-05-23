@@ -1,0 +1,156 @@
+{
+  "version": 1,
+  "description": "Public registry of community plugins for VoidSoul Assistant. Fetched live by the in-app marketplace at Settings → Plugins → Browse.",
+  "plugins": [
+    {
+      "id": "dev-bookmarks",
+      "name": "Dev Bookmarks",
+      "version": "1.0.0",
+      "author": "VoidSoul Studio",
+      "description": "Quick links to the documentation sites devs hit constantly — MDN, Stack Overflow, GitHub, npm, Caniuse, regex101.",
+      "tags": ["productivity", "developer"],
+      "quickActions": [
+        {
+          "id": "mdn",
+          "label": "MDN",
+          "icon": "Globe",
+          "description": "Open MDN web docs.",
+          "requires": "browser",
+          "action": { "type": "open-url", "params": { "url": "https://developer.mozilla.org" } }
+        },
+        {
+          "id": "stackoverflow",
+          "label": "Stack Overflow",
+          "icon": "Globe",
+          "description": "Open Stack Overflow.",
+          "requires": "browser",
+          "action": { "type": "open-url", "params": { "url": "https://stackoverflow.com" } }
+        },
+        {
+          "id": "github",
+          "label": "GitHub",
+          "icon": "Github",
+          "description": "Open GitHub.",
+          "requires": "browser",
+          "action": { "type": "open-url", "params": { "url": "https://github.com" } }
+        },
+        {
+          "id": "npm",
+          "label": "npm",
+          "icon": "Package",
+          "description": "Open npm registry.",
+          "requires": "browser",
+          "action": { "type": "open-url", "params": { "url": "https://www.npmjs.com" } }
+        },
+        {
+          "id": "caniuse",
+          "label": "Can I Use",
+          "icon": "Globe",
+          "description": "Open caniuse.com.",
+          "requires": "browser",
+          "action": { "type": "open-url", "params": { "url": "https://caniuse.com" } }
+        },
+        {
+          "id": "regex101",
+          "label": "regex101",
+          "icon": "Code",
+          "description": "Open regex101 playground.",
+          "requires": "browser",
+          "action": { "type": "open-url", "params": { "url": "https://regex101.com" } }
+        }
+      ]
+    },
+    {
+      "id": "ai-research-shortcuts",
+      "name": "AI Research Shortcuts",
+      "version": "1.0.0",
+      "author": "VoidSoul Studio",
+      "description": "One-tap access to the major AI research surfaces — Anthropic, OpenAI, Hugging Face, arXiv, Papers with Code.",
+      "tags": ["ai", "research"],
+      "quickActions": [
+        {
+          "id": "anthropic",
+          "label": "Anthropic",
+          "icon": "Sparkles",
+          "description": "Open Anthropic.",
+          "requires": "browser",
+          "action": { "type": "open-url", "params": { "url": "https://www.anthropic.com" } }
+        },
+        {
+          "id": "openai",
+          "label": "OpenAI",
+          "icon": "Sparkles",
+          "description": "Open OpenAI.",
+          "requires": "browser",
+          "action": { "type": "open-url", "params": { "url": "https://openai.com" } }
+        },
+        {
+          "id": "huggingface",
+          "label": "Hugging Face",
+          "icon": "Brain",
+          "description": "Open Hugging Face.",
+          "requires": "browser",
+          "action": { "type": "open-url", "params": { "url": "https://huggingface.co" } }
+        },
+        {
+          "id": "arxiv",
+          "label": "arXiv (cs.AI)",
+          "icon": "FileText",
+          "description": "Open arXiv AI category listing.",
+          "requires": "browser",
+          "action": { "type": "open-url", "params": { "url": "https://arxiv.org/list/cs.AI/recent" } }
+        },
+        {
+          "id": "paperswithcode",
+          "label": "Papers w/ Code",
+          "icon": "Code",
+          "description": "Open Papers with Code.",
+          "requires": "browser",
+          "action": { "type": "open-url", "params": { "url": "https://paperswithcode.com" } }
+        }
+      ]
+    },
+    {
+      "id": "creator-toolkit",
+      "name": "Creator Toolkit",
+      "version": "1.0.0",
+      "author": "VoidSoul Studio",
+      "description": "Streamer / YouTuber starter pack — opens OBS, Discord, the YouTube Studio dashboard, and Streamlabs.",
+      "tags": ["creator", "streaming"],
+      "quickActions": [
+        {
+          "id": "obs",
+          "label": "OBS",
+          "icon": "Camera",
+          "description": "Launch OBS Studio.",
+          "requires": "app",
+          "action": { "type": "open-app", "params": { "name": "obs64" } }
+        },
+        {
+          "id": "discord",
+          "label": "Discord",
+          "icon": "MessageSquare",
+          "description": "Launch Discord.",
+          "requires": "app",
+          "action": { "type": "open-app", "params": { "name": "discord" } }
+        },
+        {
+          "id": "youtube-studio",
+          "label": "YT Studio",
+          "icon": "Video",
+          "description": "Open YouTube Studio.",
+          "requires": "browser",
+          "action": { "type": "open-url", "params": { "url": "https://studio.youtube.com" } }
+        },
+        {
+          "id": "streamlabs",
+          "label": "Streamlabs",
+          "icon": "Globe",
+          "description": "Open Streamlabs dashboard.",
+          "requires": "browser",
+          "action": { "type": "open-url", "params": { "url": "https://streamlabs.com" } }
+        }
+      ]
+    }
+  ]
+}

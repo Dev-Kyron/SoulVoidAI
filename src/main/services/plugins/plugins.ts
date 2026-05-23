@@ -9,6 +9,7 @@
  */
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { app } from 'electron'
 import { dataPath, JsonStore } from '../storage/store'
 import { log } from '../logger'
 import { ACTION_DESCRIPTORS } from '../automation/actions'
@@ -207,4 +208,162 @@ export function reloadPlugins(): PluginInfo[] {
 
 export function pluginsDirectory(): string {
   return pluginsDir()
+}
+
+/* --------------------- marketplace + install ---------------------------- */
+
+/**
+ * Public registry of community plugins. A JSON file in the main project
+ * repo so updates flow through normal git pushes — no separate registry
+ * repo to maintain. The shape: `{ "plugins": PluginManifest[] }`, with
+ * optional non-manifest metadata (`tags`, `category`) that the marketplace
+ * UI uses for filtering but the validator ignores.
+ *
+ * Pointing at `main` rather than a release tag means new entries appear in
+ * the marketplace immediately — useful for a beta. Swap to a tagged path
+ * (e.g. `/releases/registry-v1.json`) once the format is frozen.
+ */
+const REGISTRY_URL =
+  'https://raw.githubusercontent.com/Dev-Kyron/SoulVoidAI/main/plugins-registry/registry.json'
+
+/** Hard cap on how big the registry response can be — prevents a runaway
+ * download from a compromised raw.githubusercontent host. 200 KB is enough
+ * for hundreds of plugin entries. */
+const MAX_REGISTRY_BYTES = 200_000
+
+export interface RegistryEntry extends PluginManifest {
+  /** Optional tags for marketplace filtering. Not part of the manifest. */
+  tags?: string[]
+}
+
+interface RegistryFile {
+  version?: number
+  plugins?: RegistryEntry[]
+}
+
+/**
+ * Path to the registry copy bundled into the app's asar at build time —
+ * the same JSON we commit to the repo, served as an offline fallback for
+ * the marketplace when the GitHub raw CDN is unreachable (404 before
+ * v1.2.0 is published, or any network issue in the field).
+ *
+ * `app.getAppPath()` resolves to the project root in dev and to
+ * `<install>/resources/app.asar/` in production. Electron's fs shim reads
+ * inside asar archives transparently, so `readFileSync` works either way.
+ */
+function bundledRegistryPath(): string {
+  return join(app.getAppPath(), 'plugins-registry', 'registry.json')
+}
+
+/**
+ * Parse a registry JSON blob into validated entries. Pure — used by both
+ * the remote fetch and the bundled-fallback paths so they share the same
+ * validation + log line.
+ */
+function parseRegistryText(text: string, source: 'remote' | 'bundled'): RegistryEntry[] {
+  if (text.length > MAX_REGISTRY_BYTES) {
+    throw new Error('Registry response is unexpectedly large; refusing to parse.')
+  }
+  let parsed: RegistryFile
+  try {
+    parsed = JSON.parse(text) as RegistryFile
+  } catch {
+    throw new Error('Registry is not valid JSON.')
+  }
+  const entries: RegistryEntry[] = []
+  for (const raw of parsed.plugins ?? []) {
+    const { manifest } = validate(raw)
+    if (manifest) {
+      entries.push({
+        ...manifest,
+        tags: Array.isArray((raw as RegistryEntry).tags)
+          ? (raw as RegistryEntry).tags
+          : undefined
+      })
+    }
+  }
+  log(
+    'info',
+    'system',
+    `Plugin registry (${source}): ${entries.length} valid entr${entries.length === 1 ? 'y' : 'ies'}.`
+  )
+  return entries
+}
+
+/**
+ * Fetch the public plugin registry. Tries the live GitHub raw URL first;
+ * on any failure (404 before the file's been pushed, network blip, etc.)
+ * falls back to the bundled copy committed to the repo so the browse view
+ * always shows something. Throws only if BOTH paths fail.
+ *
+ * Validation runs in `parseRegistryText` so malformed entries are dropped
+ * silently in either path — one bad commit can't crash the browse view.
+ */
+export async function fetchRegistry(): Promise<RegistryEntry[]> {
+  // --- Attempt 1: live registry on GitHub --------------------------------
+  try {
+    const response = await fetch(REGISTRY_URL, {
+      headers: { Accept: 'application/json' }
+    })
+    if (response.ok) {
+      const contentLength = Number(response.headers.get('content-length') ?? '0')
+      if (contentLength && contentLength > MAX_REGISTRY_BYTES) {
+        throw new Error('Registry response is unexpectedly large; refusing to download.')
+      }
+      return parseRegistryText(await response.text(), 'remote')
+    }
+    // Specifically distinguish 404 — the file doesn't exist server-side —
+    // from generic network issues. The 404 path is the common case before
+    // a release ships the new registry; saying "check your internet" then
+    // is misleading.
+    log(
+      'warn',
+      'system',
+      `Plugin registry remote returned ${response.status}; falling back to bundled copy.`
+    )
+  } catch (err) {
+    log(
+      'warn',
+      'system',
+      `Plugin registry remote unreachable; falling back to bundled copy.`,
+      err instanceof Error ? err.message : String(err)
+    )
+  }
+
+  // --- Attempt 2: bundled copy from the asar -----------------------------
+  try {
+    return parseRegistryText(readFileSync(bundledRegistryPath(), 'utf-8'), 'bundled')
+  } catch (err) {
+    throw new Error(
+      'Plugin marketplace is offline and no bundled fallback is available. ' +
+        (err instanceof Error ? err.message : String(err))
+    )
+  }
+}
+
+/**
+ * Validate + write a plugin manifest to disk, then reload the registry so
+ * the installed plugin's actions become live without an app restart.
+ * Returns the refreshed full plugin list.
+ *
+ * Sanitises the filename — the manifest's `id` is the on-disk filename, so
+ * we strip any path separator or dot-prefix that could escape the plugins
+ * directory. An attacker-controlled `id: "../../etc/passwd"` shouldn't
+ * land outside `pluginsDir`.
+ */
+export function installPlugin(raw: unknown): PluginInfo[] {
+  const { manifest, error } = validate(raw)
+  if (!manifest) throw new Error(error ?? 'Plugin manifest is invalid.')
+
+  // Defence-in-depth: id is user-supplied (from a public registry), so
+  // never let it traverse outside the plugins dir. Strip slashes, leading
+  // dots, and any character outside the safe filename set.
+  const safeId = manifest.id.replace(/[^a-zA-Z0-9._-]/g, '-').replace(/^\.+/, '')
+  if (!safeId) throw new Error('Plugin id resolves to an empty filename.')
+
+  const file = join(pluginsDir(), `${safeId}.json`)
+  writeFileSync(file, JSON.stringify(manifest, null, 2), 'utf-8')
+  loadPlugins()
+  log('info', 'system', `Installed plugin "${manifest.id}" as ${safeId}.json.`)
+  return getPlugins()
 }

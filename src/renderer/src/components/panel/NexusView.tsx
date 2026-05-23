@@ -35,9 +35,10 @@ import { useCurrentSpoken } from '../../hooks/useCurrentSpoken'
 import { getMode } from '@shared/modes'
 import { resolveIcon } from '../../lib/icons'
 import { runAction } from '../../lib/actions'
-import { guessVoice, speak, stopSpeaking } from '../../lib/voice'
+import { speak, stopSpeaking } from '../../lib/voice'
 import { useDndActive } from '../../lib/useDndActive'
 import { useClipboardPaste } from '../../lib/useClipboardPaste'
+import { useVoiceInputStore } from '../../store/useVoiceInputStore'
 import { useT } from '../../lib/i18n'
 import { cn } from '../../lib/utils'
 import {
@@ -134,33 +135,21 @@ function VoiceBar(): JSX.Element | null {
   if (!config) return null
   const voice = config.voice
 
-  const resolvedUris = (): { voidVoiceURI: string; soulVoiceURI: string } => ({
-    voidVoiceURI: voice.voidVoiceURI || guessVoice('void'),
-    soulVoiceURI: voice.soulVoiceURI || guessVoice('soul')
-  })
-
-  const greet = (persona: VoicePersona, uris: { voidVoiceURI: string; soulVoiceURI: string }): void => {
+  const greet = (persona: VoicePersona): void => {
     if (isQuietNow(config.appearance.dnd)) return
-    speak(
-      persona === 'void' ? 'Void online.' : 'Soul online.',
-      persona === 'void' ? uris.voidVoiceURI : uris.soulVoiceURI,
-      voice.rate,
-      voice.volume
-    )
+    speak(persona === 'void' ? 'Void online.' : 'Soul online.', persona, voice.rate, voice.volume)
   }
 
   const toggle = async (): Promise<void> => {
-    const uris = resolvedUris()
     const enabled = !voice.enabled
-    await setVoice({ enabled, ...uris })
-    if (enabled) greet(voice.persona, uris)
+    await setVoice({ enabled })
+    if (enabled) greet(voice.persona)
     else stopSpeaking()
   }
 
   const pickPersona = async (persona: VoicePersona): Promise<void> => {
-    const uris = resolvedUris()
-    await setVoice({ persona, ...uris })
-    if (voice.enabled) greet(persona, uris)
+    await setVoice({ persona })
+    if (voice.enabled) greet(persona)
   }
 
   return (
@@ -566,10 +555,48 @@ function AppTile({ action, custom }: { action: QuickAction; custom: boolean }): 
   )
 }
 
+/**
+ * The Simple layout's central orb wrapped as a voice-toggle button.
+ * Mirrors HudCore's OrbVoiceButton — same store, same semantics — so
+ * tapping the orb in either layout converges on the same MicButton
+ * pipeline. Single tap toggles record/stop.
+ */
+function SimpleOrbButton({
+  orbState,
+  animated,
+  dnd
+}: {
+  orbState: ReturnType<typeof useVisibleOrbState>
+  animated: boolean
+  dnd: boolean
+}): JSX.Element {
+  const status = useVoiceInputStore((s) => s.status)
+  const toggle = useVoiceInputStore((s) => s.toggle)
+  const recording = status === 'recording'
+  const transcribing = status === 'transcribing'
+  const title = transcribing
+    ? 'Transcribing…'
+    : recording
+      ? 'Stop and transcribe'
+      : 'Tap to talk'
+  return (
+    <button
+      type="button"
+      onClick={() => void toggle()}
+      disabled={transcribing}
+      title={title}
+      aria-label={title}
+      aria-pressed={recording}
+      className="rounded-full outline-none transition-transform hover:scale-105 active:scale-95 disabled:cursor-wait"
+    >
+      <Orb size={88} state={orbState} animated={animated} dnd={dnd} />
+    </button>
+  )
+}
+
 function SimpleNexus(): JSX.Element | null {
   const config = useConfigStore((s) => s.config)
   const orbState = useVisibleOrbState()
-  const setTab = useWidgetStore((s) => s.setTab)
   const customActions = useMemoryStore((s) => s.data?.customActions ?? [])
   const now = useClock()
   const dnd = useDndActive()
@@ -589,16 +616,10 @@ function SimpleNexus(): JSX.Element | null {
         {now.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' })}
       </p>
 
-      {/* The orb — tap to open the conversation. */}
+      {/* The orb — tap to start / stop voice input. The Open Conversation
+          button below remains the path to the full chat view. */}
       <div className="flex shrink-0 justify-center py-3">
-        <button
-          type="button"
-          onClick={() => setTab('chat')}
-          title="Open conversation"
-          className="rounded-full outline-none transition-transform hover:scale-105 active:scale-95"
-        >
-          <Orb size={88} state={orbState} animated={animated} dnd={dnd} />
-        </button>
+        <SimpleOrbButton orbState={orbState} animated={animated} dnd={dnd} />
       </div>
 
       <OrbHint />

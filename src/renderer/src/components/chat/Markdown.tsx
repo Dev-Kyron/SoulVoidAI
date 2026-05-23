@@ -31,6 +31,7 @@ import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
 import { Check, Copy, Maximize2 } from 'lucide-react'
 import { useUiStore } from '../../store/useUiStore'
+import { AskUserCard } from './AskUserCard'
 import 'katex/dist/katex.min.css'
 
 /** Code blocks longer than this open the Canvas dialog when expanded. */
@@ -249,6 +250,13 @@ function CodeBlock({ children }: { children: ReactNode }): JSX.Element {
   // itself fails to render (the diagram component renders its own error).
   if (language === 'mermaid') {
     return <MermaidDiagram source={text} />
+  }
+
+  // askuser fences render as an interactive decision card — the AI uses
+  // this to ask the human to pick between approaches, hand off a
+  // collaborative-feeling fork. See AskUserCard for the JSON schema.
+  if (language === 'askuser') {
+    return <AskUserCard source={text} />
   }
 
   const copy = (): void => {

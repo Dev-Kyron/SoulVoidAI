@@ -7,9 +7,10 @@ import { useMemo } from 'react'
 import { motion } from 'framer-motion'
 import { Plus, X } from 'lucide-react'
 import { useConfigStore } from '../../store/useConfigStore'
-import { useWidgetStore, useVisibleOrbState } from '../../store/useWidgetStore'
+import { useVisibleOrbState } from '../../store/useWidgetStore'
 import { useMemoryStore } from '../../store/useMemoryStore'
 import { useUiStore } from '../../store/useUiStore'
+import { useVoiceInputStore } from '../../store/useVoiceInputStore'
 import { getMode } from '@shared/modes'
 import { resolveIcon } from '../../lib/icons'
 import { runAction } from '../../lib/actions'
@@ -89,7 +90,6 @@ function Ring({ inset, band, pattern, duration, reverse, animated }: RingProps):
 export function HudCore(): JSX.Element | null {
   const config = useConfigStore((s) => s.config)
   const orbState = useVisibleOrbState()
-  const setTab = useWidgetStore((s) => s.setTab)
   const customActions = useMemoryStore((s) => s.data?.customActions ?? [])
   const dnd = useDndActive()
   if (!config) return null
@@ -235,15 +235,55 @@ export function HudCore(): JSX.Element | null {
           )
         })()}
 
-      {/* Core orb — opens the conversation. */}
-      <button
-        type="button"
-        onClick={() => setTab('chat')}
-        title="Open conversation"
-        className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full outline-none transition-transform hover:scale-105 active:scale-95"
-      >
-        <Orb size={66} state={orbState} animated={animated} dnd={dnd} />
-      </button>
+      {/* Core orb — tap to start / stop voice input. Matches the
+          "tap the orb to talk" hint NexusView shows directly below the
+          HUD. The Open Conversation button at the bottom of the panel
+          remains the path for users who want the full chat view. */}
+      <OrbVoiceButton orbState={orbState} animated={animated} dnd={dnd} />
     </div>
+  )
+}
+
+/**
+ * The core orb wrapped as a voice-toggle button. Calls into the same
+ * `useVoiceInputStore.toggle` action the MicButton uses, so wake word,
+ * mic icon, and orb-tap all converge on a single voice pipeline.
+ *
+ * Visual feedback while recording is provided by `orbState` (driven by
+ * `useVisibleOrbState`, which already reads the voice store's status),
+ * so the orb pulses red while recording without needing extra wiring
+ * here.
+ */
+function OrbVoiceButton({
+  orbState,
+  animated,
+  dnd
+}: {
+  orbState: ReturnType<typeof useVisibleOrbState>
+  animated: boolean
+  dnd: boolean
+}): JSX.Element {
+  const status = useVoiceInputStore((s) => s.status)
+  const toggle = useVoiceInputStore((s) => s.toggle)
+  const recording = status === 'recording'
+  const transcribing = status === 'transcribing'
+  const title = transcribing
+    ? 'Transcribing…'
+    : recording
+      ? 'Stop and transcribe'
+      : 'Tap to talk'
+
+  return (
+    <button
+      type="button"
+      onClick={() => void toggle()}
+      disabled={transcribing}
+      title={title}
+      aria-label={title}
+      aria-pressed={recording}
+      className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full outline-none transition-transform hover:scale-105 active:scale-95 disabled:cursor-wait"
+    >
+      <Orb size={66} state={orbState} animated={animated} dnd={dnd} />
+    </button>
   )
 }

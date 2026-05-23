@@ -40,3 +40,13 @@ voidsoul-data/
 # repo root would just bloat the working tree.
 eng.traineddata
 *.traineddata
+
+# Piper TTS binary — downloaded per-platform by `npm run piper` into
+# resources/piper/<platform>/piper/. ~30 MB blob we never want in git.
+resources/piper/
+
+# Piper voice models — the user's local dev copies live under Voices/
+# (large .onnx files). Production reads from the OS user-data dir; the
+# repo-rooted folder is dev-only and never gets committed.
+Voices/
+voices/

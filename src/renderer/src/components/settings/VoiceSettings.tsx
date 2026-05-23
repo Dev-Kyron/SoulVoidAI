@@ -1,77 +1,77 @@
 /**
- * Voice settings: enable spoken replies and bind the two personas — Void and
- * Soul — to concrete system speech-synthesis voices, with a test button each.
+ * Voice settings — v1.2.0 (Piper edition).
+ *
+ * Two voice cards (Void / Soul) show the .onnx model picked up from each
+ * persona's folder under `<userData>/voices/<persona>/`, with a preview
+ * button that synthesises a one-sentence sample. The legacy SAPI voice
+ * picker is gone — Piper voices are bundled neural models, not OS voice
+ * dropdowns, so there's no "pick from a system list" surface to expose.
+ *
+ * A credit / promo strip at the bottom links out to rhasspy/piper —
+ * Michael Hansen's work is what makes this whole feature possible, and
+ * the user explicitly asked for the attribution to be visible.
  */
-import { useEffect, useReducer, useState } from 'react'
-import { Play, FolderOpen, Ear, Sparkles, ExternalLink } from 'lucide-react'
+import { useCallback, useEffect, useState } from 'react'
+import {
+  AlertTriangle,
+  ExternalLink,
+  FolderOpen,
+  Github,
+  Heart,
+  Loader2,
+  Play,
+  Sparkles,
+  Volume2
+} from 'lucide-react'
 import { useConfigStore } from '../../store/useConfigStore'
 import { useUiStore } from '../../store/useUiStore'
 import { useWidgetStore } from '../../store/useWidgetStore'
 import { Toggle } from '../common/ui'
 import { CollapsibleSection } from './CollapsibleSection'
-import { availableVoices, guessVoice, onVoicesChanged, speak } from '../../lib/voice'
+import { speak } from '../../lib/voice'
 import { vs } from '../../lib/bridge'
-import type { VoiceConfig, VoicePersona } from '@shared/types'
+import { cn } from '../../lib/utils'
+import { Ear } from 'lucide-react'
+import type { InstalledVoice, VoiceConfig, VoicePersona, VoiceSetupStatus } from '@shared/types'
 
-function VoicePicker({
-  persona,
-  voice,
-  onPick
-}: {
-  persona: VoicePersona
-  voice: VoiceConfig
-  onPick: (uri: string) => void
-}): JSX.Element {
-  const voices = availableVoices()
-  const current = (persona === 'void' ? voice.voidVoiceURI : voice.soulVoiceURI) || guessVoice(persona)
-
-  const test = (): void => {
-    speak(
-      persona === 'void' ? 'This is the Void voice.' : 'This is the Soul voice.',
-      current,
-      voice.rate,
-      voice.volume
-    )
-  }
-
-  return (
-    <div className="mb-2">
-      <label className="mb-1 block text-[10px] text-slate-400">
-        {persona === 'void' ? 'Void voice (male)' : 'Soul voice (female)'}
-      </label>
-      <div className="flex gap-1.5">
-        <select
-          value={current}
-          onChange={(e) => onPick(e.target.value)}
-          className="min-w-0 flex-1 rounded-lg border border-white/10 bg-black/30 px-2.5 py-2 text-[12px] text-slate-100 outline-none focus:border-[var(--accent-ring)]"
-        >
-          {voices.length === 0 && <option>Loading system voices…</option>}
-          {voices.map((v) => (
-            <option key={v.uri} value={v.uri} className="bg-void-700">
-              {v.name} · {v.lang}
-            </option>
-          ))}
-        </select>
-        <button
-          type="button"
-          onClick={test}
-          title="Test voice"
-          className="flex w-9 shrink-0 items-center justify-center rounded-lg border border-white/10 text-slate-300 transition hover:bg-white/5"
-        >
-          <Play size={13} />
-        </button>
-      </div>
-    </div>
-  )
-}
+const PIPER_REPO = 'https://github.com/rhasspy/piper'
+const PIPER_VOICES_REPO = 'https://github.com/rhasspy/piper/blob/master/VOICES.md'
 
 export function VoiceSettings(): JSX.Element | null {
   const config = useConfigStore((s) => s.config)
   const setVoice = useConfigStore((s) => s.setVoice)
-  const [, refresh] = useReducer((n: number) => n + 1, 0)
+  const pushToast = useUiStore((s) => s.pushToast)
+  const [status, setStatus] = useState<VoiceSetupStatus | null>(null)
 
-  // System voices populate asynchronously — re-render when they arrive.
-  useEffect(() => onVoicesChanged(refresh), [])
+  const refreshStatus = useCallback(() => {
+    void vs.voice.status().then(setStatus)
+  }, [])
+
+  // First mount: migrate any legacy Voices/ folder, then probe the
+  // canonical per-user voices folder for installed models. The migration
+  // is no-op on subsequent runs (idempotent — checks for existing voices
+  // per persona before copying).
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const result = await vs.voice.migrateLegacy()
+        if (cancelled) return
+        if (result.copied > 0) {
+          pushToast(
+            'success',
+            `Imported ${result.copied} voice file${result.copied === 1 ? '' : 's'} from Voices/.`
+          )
+        }
+      } catch {
+        /* migration is best-effort */
+      }
+      if (!cancelled) refreshStatus()
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [pushToast, refreshStatus])
 
   if (!config) return null
   const voice = config.voice
@@ -79,7 +79,7 @@ export function VoiceSettings(): JSX.Element | null {
   return (
     <CollapsibleSection
       title="Voice"
-      hint="Spoken replies in two voices — Void and Soul. Voice input transcribes locally via Whisper-tiny (downloads ~75 MB on first use); add an OpenAI or Gemini key for higher-quality cloud transcription."
+      hint="Spoken replies powered by Piper TTS — neural voices that run locally on your machine. No cloud, no API key, no rate limits."
     >
       <div className="flex items-center justify-between py-1.5">
         <div>
@@ -88,70 +88,99 @@ export function VoiceSettings(): JSX.Element | null {
         </div>
         <Toggle
           checked={voice.enabled}
-          onChange={(enabled) =>
-            void setVoice({
-              enabled,
-              voidVoiceURI: voice.voidVoiceURI || guessVoice('void'),
-              soulVoiceURI: voice.soulVoiceURI || guessVoice('soul')
-            })
-          }
+          onChange={(enabled) => void setVoice({ enabled })}
         />
       </div>
 
-      <VoicePicker
+      {!status?.binaryAvailable && (
+        <div className="my-2 rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-200">
+          <p className="flex items-start gap-1.5 font-semibold">
+            <AlertTriangle size={11} className="mt-0.5 shrink-0" />
+            Piper binary not bundled with this build.
+          </p>
+          <p className="mt-1 text-[10px] text-amber-300/80">
+            Run <code className="rounded bg-black/40 px-1">npm run piper</code> in the dev tree to
+            download it, then rebuild.
+          </p>
+        </div>
+      )}
+
+      <VoiceCard
         persona="void"
+        label="Void voice (male)"
+        installed={status?.void ?? null}
         voice={voice}
-        onPick={(uri) => void setVoice({ voidVoiceURI: uri })}
+        active={voice.persona === 'void'}
+        onUse={() => void setVoice({ persona: 'void' })}
       />
-      <VoicePicker
+      <VoiceCard
         persona="soul"
+        label="Soul voice (female)"
+        installed={status?.soul ?? null}
         voice={voice}
-        onPick={(uri) => void setVoice({ soulVoiceURI: uri })}
+        active={voice.persona === 'soul'}
+        onUse={() => void setVoice({ persona: 'soul' })}
       />
 
-      <NeuralVoiceTip />
-
-
-      <div className="py-1.5">
-        <div className="mb-1 flex items-center justify-between">
-          <label className="text-[10px] text-slate-400">Speech rate</label>
-          <span className="text-[10px] text-slate-500">{voice.rate.toFixed(1)}×</span>
-        </div>
-        <input
-          type="range"
-          min={0.6}
-          max={1.5}
-          step={0.1}
-          value={voice.rate}
-          onChange={(e) => void setVoice({ rate: Number(e.target.value) })}
-          className="w-full accent-[var(--accent)]"
-        />
+      <div className="mt-2 flex gap-2">
+        <button
+          type="button"
+          onClick={() => void vs.voice.openFolder()}
+          className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-white/10 bg-black/20 py-2 text-[11px] text-slate-300 transition hover:bg-white/5"
+        >
+          <FolderOpen size={11} />
+          Open voices folder
+        </button>
+        <button
+          type="button"
+          onClick={() => window.open(PIPER_VOICES_REPO, '_blank')}
+          className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-white/10 bg-black/20 py-2 text-[11px] text-slate-300 transition hover:bg-white/5"
+        >
+          Browse more voices
+          <ExternalLink size={10} />
+        </button>
       </div>
 
-      {/* Separate from the OS / app volume mixer — lets users dial Void/Soul
-          down without muting everything else from the app. 0 silences TTS but
-          the queue still runs; flip the "Spoken replies" toggle off to stop
-          scheduling utterances entirely. */}
-      <div className="py-1.5">
-        <div className="mb-1 flex items-center justify-between">
-          <label className="text-[10px] text-slate-400">Speech volume</label>
-          <span className="text-[10px] text-slate-500">{Math.round(voice.volume * 100)}%</span>
+      <div className="my-3 space-y-1.5">
+        <div className="py-1.5">
+          <div className="mb-1 flex items-center justify-between">
+            <label className="text-[10px] text-slate-400">Speech rate</label>
+            <span className="text-[10px] text-slate-500">{voice.rate.toFixed(1)}×</span>
+          </div>
+          <input
+            type="range"
+            min={0.6}
+            max={1.5}
+            step={0.1}
+            value={voice.rate}
+            onChange={(e) => void setVoice({ rate: Number(e.target.value) })}
+            className="w-full accent-[var(--accent)]"
+          />
         </div>
-        <input
-          type="range"
-          min={0}
-          max={1}
-          step={0.05}
-          value={voice.volume}
-          onChange={(e) => void setVoice({ volume: Number(e.target.value) })}
-          className="w-full accent-[var(--accent)]"
-        />
+
+        <div className="py-1.5">
+          <div className="mb-1 flex items-center justify-between">
+            <label className="text-[10px] text-slate-400">Speech volume</label>
+            <span className="text-[10px] text-slate-500">{Math.round(voice.volume * 100)}%</span>
+          </div>
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.05}
+            value={voice.volume}
+            onChange={(e) => void setVoice({ volume: Number(e.target.value) })}
+            className="w-full accent-[var(--accent)]"
+          />
+        </div>
       </div>
 
       <p className="text-[10px] leading-relaxed text-slate-500">
         Active persona: <span className="uppercase text-[var(--accent)]">{voice.persona}</span> —
-        switch between Void and Soul from the Nexus HUD. Voices come from your operating system.
+        switch between Void and Soul from the Nexus HUD.
       </p>
+
+      <PiperCredit />
 
       <WakeWordRow voice={voice} />
     </CollapsibleSection>
@@ -159,11 +188,154 @@ export function VoiceSettings(): JSX.Element | null {
 }
 
 /**
- * Per-session arm switch for the wake-word engine. Sits under the toggle —
- * the toggle controls the persisted preference, this controls whether the
- * mic is actually hot RIGHT NOW. Resets to disarmed on every app launch
- * so the user always opts in fresh; this is the signal that prevents the
- * "panel opens and the orb pulses as if recording me" reaction.
+ * Single voice card — shows the installed .onnx for one persona with
+ * file size + language + preview button. Click to switch active persona
+ * to this voice.
+ *
+ * Empty state ("no voice installed") nudges the user to drop a .onnx
+ * into the persona's folder — links to the Piper voices catalog so they
+ * know where to grab one.
+ */
+function VoiceCard({
+  persona,
+  label,
+  installed,
+  voice,
+  active,
+  onUse
+}: {
+  persona: VoicePersona
+  label: string
+  installed: InstalledVoice | null
+  voice: VoiceConfig
+  active: boolean
+  onUse: () => void
+}): JSX.Element {
+  const [previewing, setPreviewing] = useState(false)
+  const preview = (): void => {
+    if (!installed || previewing) return
+    setPreviewing(true)
+    speak(
+      persona === 'void' ? "I'm Void. Ready when you are." : "I'm Soul. How can I help?",
+      persona,
+      voice.rate,
+      voice.volume
+    )
+    // The speak call is fire-and-forget from this layer's POV; reset the
+    // spinner after a beat. Piper synthesis for a 5-word sentence finishes
+    // well inside 500ms on every machine we've tested.
+    window.setTimeout(() => setPreviewing(false), 800)
+  }
+  return (
+    <div
+      className={cn(
+        'mt-2 rounded-lg border px-3 py-2.5 transition',
+        installed
+          ? active
+            ? 'border-[var(--accent-ring)] bg-[var(--accent-soft)]'
+            : 'border-white/10 bg-black/20 hover:border-white/20'
+          : 'border-dashed border-white/15 bg-black/20'
+      )}
+    >
+      <div className="mb-1.5 flex items-center gap-1.5">
+        <Volume2 size={11} className={active ? 'text-[var(--accent)]' : 'text-slate-500'} />
+        <p className="flex-1 text-[10px] uppercase tracking-wider text-slate-500">{label}</p>
+        {active && (
+          <span className="rounded-full bg-[var(--accent)] px-1.5 py-0.5 text-[8px] uppercase tracking-wide text-white">
+            Active
+          </span>
+        )}
+      </div>
+      {installed ? (
+        <div className="flex items-start gap-2">
+          <button
+            type="button"
+            onClick={onUse}
+            className="min-w-0 flex-1 text-left"
+            disabled={active}
+          >
+            <p className="truncate text-[12px] font-semibold capitalize text-white">{installed.name}</p>
+            <p className="mt-0.5 truncate font-mono text-[9px] text-slate-500">
+              {installed.id}
+              {installed.language && ` · ${installed.language}`}
+              {installed.quality && ` · ${installed.quality}`}
+              {` · ${formatSize(installed.sizeBytes)}`}
+            </p>
+          </button>
+          <button
+            type="button"
+            onClick={preview}
+            disabled={previewing}
+            title="Preview voice"
+            aria-label={`Preview ${persona} voice`}
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-white/10 text-slate-300 transition hover:bg-white/5 disabled:opacity-40"
+          >
+            {previewing ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}
+          </button>
+        </div>
+      ) : (
+        <p className="text-[10px] text-slate-400">
+          No voice installed. Drop a Piper <code className="rounded bg-black/30 px-1">.onnx</code>{' '}
+          (and the matching <code className="rounded bg-black/30 px-1">.onnx.json</code>) into{' '}
+          <code className="rounded bg-black/30 px-1">voices/{persona}/</code>.
+        </p>
+      )}
+    </div>
+  )
+}
+
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(0)} MB`
+}
+
+/**
+ * Credit + promo strip for Piper. The user explicitly asked for the
+ * attribution to be visible — Piper is MIT-licensed but Michael Hansen
+ * (rhasspy) maintains it on his own time, so a "View on GitHub" link is
+ * both a nice gesture and the right thing to do.
+ */
+function PiperCredit(): JSX.Element {
+  return (
+    <div className="my-3 rounded-lg border border-[var(--accent-ring)] bg-gradient-to-br from-[var(--accent-soft)] to-transparent p-3">
+      <div className="mb-1.5 flex items-center gap-1.5">
+        <Heart size={11} className="text-[var(--accent)]" />
+        <p className="text-[12px] font-semibold text-white">Voices powered by Piper TTS</p>
+      </div>
+      <p className="mb-2 text-[10px] leading-relaxed text-slate-300">
+        Open-source neural text-to-speech by Michael Hansen (Rhasspy). Runs locally on your
+        machine — no cloud, no API key, no rate limits. If you like the voices, star the repo or
+        sponsor the project.
+      </p>
+      <div className="flex gap-1.5">
+        <button
+          type="button"
+          onClick={() => window.open(PIPER_REPO, '_blank')}
+          className="flex items-center gap-1 rounded-md border border-white/10 bg-black/20 px-2 py-1 text-[10px] font-semibold text-slate-200 transition hover:bg-white/5"
+        >
+          <Github size={10} />
+          View on GitHub
+          <ExternalLink size={9} className="opacity-60" />
+        </button>
+        <button
+          type="button"
+          onClick={() => window.open(PIPER_VOICES_REPO, '_blank')}
+          className="flex items-center gap-1 rounded-md border border-white/10 bg-black/20 px-2 py-1 text-[10px] font-semibold text-slate-200 transition hover:bg-white/5"
+        >
+          <Sparkles size={10} />
+          Explore more voices
+          <ExternalLink size={9} className="opacity-60" />
+        </button>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Per-session arm switch for the wake-word engine. Carried over from the
+ * v1.1.x voice settings — wake-word lives next to TTS conceptually since
+ * both are "voice" features, and the user already knows where to find it.
  */
 function ArmRow(): JSX.Element {
   const armed = useWidgetStore((s) => s.wakeArmed)
@@ -201,8 +373,6 @@ function WakeWordRow({ voice }: { voice: VoiceConfig }): JSX.Element {
   const [soulPpn, setSoulPpn] = useState(false)
 
   const refresh = async (): Promise<void> => {
-    // allSettled so one missing .ppn file or a secrets-bridge hiccup doesn't
-    // blank the whole row of badges. Each result is treated independently.
     const [picovoiceRes, vBytesRes, sBytesRes] = await Promise.allSettled([
       vs.secrets.has('picovoice'),
       vs.wakeWord.keywordBytes('void'),
@@ -219,10 +389,7 @@ function WakeWordRow({ voice }: { voice: VoiceConfig }): JSX.Element {
 
   const openFolder = async (): Promise<void> => {
     await vs.wakeWord.openFolder()
-    pushToast(
-      'info',
-      'Drop void.ppn / soul.ppn here, then toggle the wake word off and on.'
-    )
+    pushToast('info', 'Drop void.ppn / soul.ppn here, then toggle the wake word off and on.')
   }
 
   return (
@@ -239,32 +406,16 @@ function WakeWordRow({ voice }: { voice: VoiceConfig }): JSX.Element {
               void setVoice({ wakeWord: { enabled } })
               return
             }
-            // No Picovoice key required — the router falls back to the
-            // local Whisper engine when there's no key. The mic permission
-            // gate is the only hard prerequisite.
             void (async () => {
-              // Engine boot calls getUserMedia immediately — fail loudly here
-              // if the Microphone permission isn't granted, otherwise the
-              // engine errors silently and the toggle stays "on" with nothing
-              // actually listening.
               const perms = useConfigStore.getState().config?.permissions
               if (!perms?.microphone.granted) {
                 const granted = await useUiStore
                   .getState()
                   .promptPermission('microphone', 'Wake word')
                 if (!granted) {
-                  pushToast(
-                    'info',
-                    'Microphone permission is needed for wake word.'
-                  )
+                  pushToast('info', 'Microphone permission is needed for wake word.')
                   return
                 }
-                // Go through the store, not the bridge directly: the IPC
-                // handler intentionally skips broadcasting to the sender
-                // window, so this is what actually patches local state. A
-                // raw vs.permissions.set leaves the next read in the same
-                // window seeing the stale "not granted" value, which is
-                // why the toggle used to silently re-prompt forever.
                 await useConfigStore.getState().setPermission('microphone', true)
               }
               await setVoice({ wakeWord: { enabled: true } })
@@ -274,9 +425,9 @@ function WakeWordRow({ voice }: { voice: VoiceConfig }): JSX.Element {
       </div>
       <p className="text-[10px] leading-relaxed text-slate-500">
         Continuous listening for "Hey Void" / "Hey Soul". Works keyless via the local Whisper
-        model (~75 MB, downloads once — same model used for voice input). With a Picovoice
-        access key, the engine upgrades to Porcupine for lower CPU and faster detection;
-        custom .ppn keyword files dropped in the wake-words folder override the defaults.
+        model (~75 MB, downloads once — same model used for voice input). With a Picovoice access
+        key, the engine upgrades to Porcupine for lower CPU and faster detection; custom .ppn
+        keyword files dropped in the wake-words folder override the defaults.
       </p>
       {voice.wakeWord.enabled && <ArmRow />}
       <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[10px]">
@@ -302,102 +453,6 @@ function WakeWordRow({ voice }: { voice: VoiceConfig }): JSX.Element {
           Open folder
         </button>
       </div>
-    </div>
-  )
-}
-
-/**
- * Beta-tester nudge for the "voices sound robotic" complaint. Windows ships
- * the older SAPI defaults (David / Mark / Zira) on a fresh install — the
- * modern "* Online (Natural)" voices (Aria, Guy, Jenny…) live behind a
- * one-click install in Windows Settings. macOS has a similar Premium /
- * Enhanced voice download path under Accessibility → Spoken Content.
- *
- * The banner is platform-aware:
- *  · Windows — copy targets Aria/Guy + a button that deep-links to
- *    `ms-settings:speech`, the Speech settings page (no further clicks).
- *  · macOS — copy points at System Settings → Accessibility → Spoken
- *    Content → System Voice → Manage Voices.
- *  · Linux — generic note; voice quality is distro-dependent.
- *
- * Once the user installs a new voice, `onVoicesChanged` in voice.ts
- * fires and the VoicePicker selects refresh with the new entries
- * available — no app restart needed.
- */
-// `navigator.userAgent` is constant for the renderer's lifetime — compute the
-// platform booleans once at module scope so we don't redo the lowercase +
-// includes on every settings re-render.
-const UA = typeof navigator === 'undefined' ? '' : navigator.userAgent.toLowerCase()
-const IS_WINDOWS = UA.includes('windows')
-const IS_MAC = UA.includes('mac os')
-
-function NeuralVoiceTip(): JSX.Element {
-  const openSpeechSettings = (): void => {
-    // Speech → Add voices installs additional SAPI language packs. This is
-    // the only Windows path that adds voices visible to the Web Speech API
-    // that Electron uses. The Narrator "Natural HD" voices (Andrew, Ava,
-    // Brian, Emma) live in a private Microsoft pipeline and don't surface
-    // here — see the banner copy below for why.
-    if (IS_WINDOWS) {
-      window.open('ms-settings:speech', '_blank')
-    } else if (IS_MAC) {
-      window.open('x-apple.systempreferences:com.apple.preference.universalaccess', '_blank')
-    }
-  }
-
-  return (
-    <div className="mt-3 rounded-lg border border-[var(--accent-ring)] bg-[var(--accent-soft)] p-3">
-      <div className="mb-1.5 flex items-center gap-1.5">
-        <Sparkles size={12} className="text-[var(--accent)]" />
-        <p className="text-[12px] font-semibold text-white">Want smoother voices?</p>
-      </div>
-
-      {IS_WINDOWS ? (
-        <>
-          {/* Honest framing: the new Microsoft "Natural HD" voices (Andrew,
-              Ava, Brian, Emma) installed via Narrator are gated behind a
-              private API that no third-party app can reach — not via SAPI,
-              not via WinRT, not even via the undocumented Edge cloud
-              endpoint (Microsoft has hardened it against scraping). We
-              point users at Speech → Add voices, which actually does
-              install additional SAPI voices we can use. Linking honestly
-              beats sending them down a 30-minute install dead-end. */}
-          <p className="mb-1.5 text-[10px] leading-relaxed text-slate-300">
-            VoidSoul uses the Web Speech API, which reads voices from the Windows{' '}
-            <span className="text-[var(--accent)]">SAPI</span> registry. Speech → Add voices lets
-            you install extra language packs (e.g., English UK, Australian, Indian) that come with
-            their own SAPI voices.
-          </p>
-          <p className="mb-2 text-[10px] leading-relaxed text-slate-400">
-            <span className="font-semibold text-slate-300">Heads up:</span> the new{' '}
-            <span className="text-slate-200">Natural HD</span> voices (Andrew, Ava, Brian, Emma)
-            installed via Narrator are NOT exposed to third-party apps — Microsoft has kept them
-            private to Narrator. We can&apos;t access them, and neither can Chrome or any other
-            non-Microsoft app.
-          </p>
-        </>
-      ) : IS_MAC ? (
-        <p className="mb-2 text-[10px] leading-relaxed text-slate-300">
-          macOS Premium / Enhanced voices sound far smoother than the basic defaults. Install them
-          under System Settings → Accessibility → Spoken Content → System Voice → Manage Voices.
-        </p>
-      ) : (
-        <p className="mb-2 text-[10px] leading-relaxed text-slate-300">
-          Voice quality depends on your distro&apos;s speech synthesis backend. Installing
-          espeak-ng-mbrola or Mimic 3 gives noticeably more natural results than the espeak default.
-        </p>
-      )}
-
-      {(IS_WINDOWS || IS_MAC) && (
-        <button
-          type="button"
-          onClick={openSpeechSettings}
-          className="flex items-center gap-1 rounded-md border border-white/10 bg-black/20 px-2.5 py-1 text-[10px] font-medium text-slate-200 transition hover:border-[var(--accent-ring)] hover:bg-[var(--accent-soft)] hover:text-white"
-        >
-          {IS_WINDOWS ? 'Open Windows Speech settings' : 'Open Accessibility settings'}
-          <ExternalLink size={9} />
-        </button>
-      )}
     </div>
   )
 }

@@ -256,6 +256,16 @@ export interface PluginManifest {
   quickActions: QuickAction[]
 }
 
+/**
+ * A registry entry — what the marketplace browse view receives. Extends
+ * the manifest with optional non-installed metadata (`tags`) that the UI
+ * uses for filtering / search and that the installer ignores.
+ */
+export interface PluginRegistryEntry extends PluginManifest {
+  /** Free-form tags for marketplace filtering, e.g. ["productivity", "ai"]. */
+  tags?: string[]
+}
+
 /** Plugin state delivered to the renderer. */
 export interface PluginInfo {
   id: string
@@ -549,6 +559,168 @@ export interface McpServerInput {
   env?: Record<string, string>
 }
 
+/* --------------------------- Setup detection ---------------------------
+ *
+ * Results of the boot-time / on-demand scan that hunts for AI tools the
+ * user has already configured on this machine — Claude Desktop, Cursor,
+ * ChatGPT Desktop, env-var API keys, and the existing local-provider
+ * probe results. Drives the first-run "we found X, want to import?"
+ * panel + the in-Settings "Import from Claude Desktop" buttons.
+ *
+ * Security: the actual API key VALUES from env vars are NEVER included
+ * in this report — only a preview ('sk-ant-...x4z9'). The renderer asks
+ * a separate import IPC to actually write the key into the OS keychain,
+ * which reads from process.env at import time so the key never crosses
+ * the IPC boundary as plaintext.
+ * --------------------------------------------------------------------- */
+
+export interface DetectedDesktopApp {
+  installed: boolean
+  /** Absolute path to install dir / config file, when detected. */
+  path?: string
+}
+
+export interface DetectedMcpServer {
+  name: string
+  command: string
+  args: string[]
+  env: Record<string, string>
+  source: 'claude-desktop' | 'cursor'
+  /** Env keys referenced but empty in the source config — these would
+   *  need user input before the imported server could actually run. */
+  missingEnv: string[]
+}
+
+export interface DetectedEnvKey {
+  varName: string
+  providerId: ProviderId
+  /** Truncated preview safe to display — first 8 chars + last 4. */
+  keyPreview: string
+}
+
+export interface DetectedLocalProvider {
+  providerId: ProviderId
+  /** Number of models the daemon advertised on the probe response. */
+  modelCount: number
+}
+
+export interface SetupReport {
+  claudeDesktop: DetectedDesktopApp & { mcpServers: DetectedMcpServer[] }
+  cursor: DetectedDesktopApp & { mcpServers: DetectedMcpServer[] }
+  chatgptDesktop: DetectedDesktopApp
+  envKeys: DetectedEnvKey[]
+  localProviders: DetectedLocalProvider[]
+  /** ISO timestamp — useful for "last scanned" UX hints. */
+  generatedAt: string
+}
+
+/** Per-row outcome for a failed MCP-server or env-key import. */
+export interface SetupImportFailure {
+  /** Server name (MCP imports) or provider id (env-key imports). */
+  name: string
+  reason: string
+}
+
+/**
+ * Result of a batch MCP import. `imported` counts new servers actually
+ * written to disk; `skipped` counts entries already present (idempotent
+ * re-runs); `failures` carries the rest with a human-readable reason.
+ */
+export interface SetupImportResult {
+  imported: number
+  skipped: number
+  failures: SetupImportFailure[]
+}
+
+/** Result of importing a single API key from process.env. */
+export interface SetupEnvKeyImportResult {
+  providerId: ProviderId
+  success: boolean
+  error?: string
+}
+
+/* ---------------------------- MCP marketplace ---------------------------
+ *
+ * Curated registry of community MCP servers surfaced inside the in-app
+ * marketplace. Entries describe both the install command and the per-
+ * server input the user needs to provide (a folder path for filesystem,
+ * an API key for GitHub, etc.) so the install dialog can build the right
+ * form on the fly instead of dumping users into raw command-line config.
+ * ----------------------------------------------------------------------- */
+
+/**
+ * Prompt for a value the user fills in before install. `{KEY}` tokens in
+ * the server's `args` get replaced with the user-supplied value at install
+ * time.
+ *
+ *  - `type: 'folder' | 'file'` is a UI hint — the dialog could in future
+ *    show a native file/folder picker for these; today they're text inputs
+ *    either way, but the hint future-proofs the schema.
+ *  - `secret: true` flips the input to a password field (masks the value
+ *    while typing).
+ */
+export interface McpRegistryArgPrompt {
+  key: string
+  label: string
+  description?: string
+  type?: 'text' | 'folder' | 'file'
+  placeholder?: string
+  secret?: boolean
+}
+
+/** Prompt for an env var the user must paste before install. */
+export interface McpRegistryEnvPrompt {
+  key: string
+  label: string
+  description?: string
+  /** Default true for tokens / API keys — flips the input to password mode. */
+  secret?: boolean
+}
+
+export interface McpRegistryEntry {
+  id: string
+  name: string
+  description: string
+  category: string
+  tags?: string[]
+  command: string
+  args: string[]
+  env: Record<string, string>
+  argPrompts: McpRegistryArgPrompt[]
+  envPrompts: McpRegistryEnvPrompt[]
+  /** Runtime prerequisite (e.g. "uv" for uvx-based servers). UI shows a badge. */
+  requires?: string
+  author?: string
+  docsUrl?: string
+}
+
+/**
+ * User-supplied values when installing a registry entry — keyed by the
+ * `key` field on `argPrompts` / `envPrompts`. Validated against the
+ * entry's prompt lists in the main-process installer.
+ */
+export interface McpInstallValues {
+  args: Record<string, string>
+  env: Record<string, string>
+}
+
+/**
+ * Result of a marketplace install attempt.
+ *  · `ok: true, skipped: false` → freshly installed; toast "X connected"
+ *  · `ok: true, skipped: true`  → was already installed; toast "Already installed"
+ *  · `ok: false`                → install failed; `error` carries the reason
+ *
+ * The `skipped` flag is what lets the dialog avoid the misleading
+ * "X connected · 6 tools" success toast when nothing actually happened.
+ */
+export interface McpMarketplaceInstallResult {
+  ok: boolean
+  /** True when the server was already installed; no new addServer call ran. */
+  skipped?: boolean
+  status?: McpServerStatus
+  error?: string
+}
+
 /* --------------------------- File RAG --------------------------- */
 
 export interface IndexedFolder {
@@ -647,16 +819,38 @@ export interface ScheduledTask {
 
 export type VoicePersona = 'void' | 'soul'
 
+/**
+ * A Piper TTS voice installed on the user's machine. One per persona's
+ * folder under `<userData>/voices/<persona>/`. Surfaced to the settings
+ * UI so the user sees the actual voice name (Amy, Arctic, etc.) rather
+ * than a generic "voice selected" state.
+ */
+export interface InstalledVoice {
+  /** Absolute path to the .onnx model file. */
+  modelPath: string
+  /** Filename without extension (e.g., "en_US-amy-medium"). */
+  id: string
+  /** Friendly name pulled from the .onnx.json metadata when present. */
+  name: string
+  sizeBytes: number
+  language?: string
+  quality?: string
+}
+
+/** Snapshot of the voice subsystem the settings UI renders from. */
+export interface VoiceSetupStatus {
+  /** Piper binary bundled with the install + reachable from main. */
+  binaryAvailable: boolean
+  void: InstalledVoice | null
+  soul: InstalledVoice | null
+}
+
 export interface VoiceConfig {
   /** Speak assistant replies aloud. */
   enabled: boolean
   /** Which persona currently has the floor. */
   persona: VoicePersona
-  /** System speech-synthesis voice URI for the male "Void" persona. */
-  voidVoiceURI: string
-  /** System speech-synthesis voice URI for the female "Soul" persona. */
-  soulVoiceURI: string
-  /** Speech rate (0.5 – 1.6). */
+  /** Speech rate (0.5 – 1.6). Maps to Piper's `--length_scale` inversely. */
   rate: number
   /**
    * Speech volume (0 – 1). 1 = system volume, 0 = silent (but still queues —

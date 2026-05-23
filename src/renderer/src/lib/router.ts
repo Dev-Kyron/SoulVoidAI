@@ -112,8 +112,36 @@ function lowercased(s: string): string {
 }
 
 /**
+ * Pattern: fenced code block in the prompt. The user pasted code (asking
+ * to debug / refactor / review) or attached a snippet — flips us toward
+ * a coding-grade model even when the prose itself has no keyword hits.
+ */
+const FENCED_CODE_REGEX = /```[\s\S]+```|^ {4}\S/m
+
+/**
+ * Pattern: short conversational openers ("hey", "thanks", "what's up").
+ * Cheap fast model is plenty — don't burn premium tokens on small talk.
+ */
+const CONVERSATIONAL_REGEX =
+  /^(hi|hey|hello|hiya|yo|sup|thanks|thank you|ty|cheers|nice|cool|ok|okay|got it|sweet|awesome|nvm|never mind|np|no problem)\b/i
+
+/** Long-prompt threshold — above this we suspect dense context / reasoning. */
+const LONG_PROMPT_CHARS = 2000
+
+/** Short-prompt threshold — below this conversational openers count strongly. */
+const SHORT_PROMPT_CHARS = 80
+
+/**
  * Heuristic prompt-classifier. Fuzzy by design — better to abstain
  * (`general`) and let the user's active pick win than to wrongly route.
+ *
+ * Signal ladder (most decisive first):
+ *  1. Hard signals: vision attachment, agent mode.
+ *  2. Format signals: fenced code block (→ coding), very long prompt (→
+ *     reasoning).
+ *  3. Keyword density: reasoning / coding / fast keyword hits.
+ *  4. Conversational opener on a short prompt (→ fast/cheap).
+ *  5. Default: general.
  */
 export function classifyTask(input: { prompt: string; hasImages: boolean; agentMode: boolean }): TaskHint {
   const { prompt, hasImages, agentMode } = input
@@ -137,15 +165,48 @@ export function classifyTask(input: { prompt: string; hasImages: boolean; agentM
     }
   }
 
+  // Format signal: fenced code block. Pasted code is a strong coding tell
+  // even when the surrounding prose has no keyword hits ("fix this" + 50
+  // lines of TypeScript).
+  if (FENCED_CODE_REGEX.test(prompt)) {
+    return {
+      kind: 'coding',
+      requiresVision: false,
+      requiresToolUse: false,
+      label: 'coding (code block detected)'
+    }
+  }
+
   // Soft keyword signals.
   const reasoningHits = REASONING_KEYWORDS.filter((k) => lower.includes(k)).length
   const codingHits = CODING_KEYWORDS.filter((k) => lower.includes(k)).length
   const fastHits = FAST_KEYWORDS.filter((k) => lower.includes(k)).length
 
+  // Conversational opener on a short prompt — cheap fast model. Checked
+  // before the explicit "fast keyword" path because greetings like "hey,
+  // brief me on X" can still benefit from a fast cheap model even though
+  // the user didn't write "TLDR".
+  if (prompt.length < SHORT_PROMPT_CHARS && CONVERSATIONAL_REGEX.test(prompt.trim())) {
+    return { kind: 'fast', requiresVision: false, requiresToolUse: false, label: 'fast (short greeting)' }
+  }
+
   // Fast wins outright — user explicitly asked for short answer.
   if (fastHits >= 1 && prompt.length < 280) {
     return { kind: 'fast', requiresVision: false, requiresToolUse: false, label: 'fast (short answer)' }
   }
+
+  // Very long prompt → assume dense context / multi-part question →
+  // reasoning model. Threshold deliberately high (~500 words) so a long
+  // narrative description doesn't trip into the slow tier needlessly.
+  if (prompt.length > LONG_PROMPT_CHARS) {
+    return {
+      kind: 'reasoning',
+      requiresVision: false,
+      requiresToolUse: false,
+      label: 'reasoning (long prompt)'
+    }
+  }
+
   if (reasoningHits >= 2 || (reasoningHits >= 1 && prompt.length > 400)) {
     return { kind: 'reasoning', requiresVision: false, requiresToolUse: false, label: 'reasoning' }
   }

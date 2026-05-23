@@ -31,6 +31,13 @@ interface UiState {
   addActionOpen: boolean
   helpOpen: boolean
   reviewDialogOpen: boolean
+  /**
+   * Whether the first-run setup-discovery panel is currently open. Per-window
+   * (each renderer has its own zustand instance), which is intentional: the
+   * main window auto-opens it on first launch, and the Settings window opens
+   * it on demand from About → "Re-run setup" — they shouldn't race each other.
+   */
+  setupDiscoveryOpen: boolean
   /** Global cross-thread search dialog open state. Bound to Cmd/Ctrl+F. */
   globalSearchOpen: boolean
   /** Code currently shown in the Canvas dialog (open when non-null). */
@@ -53,6 +60,7 @@ interface UiState {
   setAddActionOpen: (open: boolean) => void
   setHelpOpen: (open: boolean) => void
   setReviewDialogOpen: (open: boolean) => void
+  setSetupDiscoveryOpen: (open: boolean) => void
   setGlobalSearchOpen: (open: boolean) => void
   setCanvas: (content: { code: string; language: string } | null) => void
   setActionToDelete: (target: { id: string; label: string } | null) => void
@@ -68,6 +76,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   addActionOpen: false,
   helpOpen: false,
   reviewDialogOpen: false,
+  setupDiscoveryOpen: false,
   globalSearchOpen: false,
   canvasContent: null,
   actionToDelete: null,
@@ -103,6 +112,8 @@ export const useUiStore = create<UiState>((set, get) => ({
   setHelpOpen: (open) => set({ helpOpen: open }),
 
   setReviewDialogOpen: (open) => set({ reviewDialogOpen: open }),
+
+  setSetupDiscoveryOpen: (open) => set({ setupDiscoveryOpen: open }),
 
   setGlobalSearchOpen: (open) => set({ globalSearchOpen: open }),
 

@@ -49,14 +49,23 @@ import {
 /**
  * Hard ceiling on agent-loop iterations. Set high enough that legitimate
  * multi-tool tasks (Discord bootstrap ~29 steps, multi-file refactor,
- * batch automation) complete in a single pass, but low enough that a
- * runaway loop still bails before incinerating tokens.
+ * batch automation, website audits crawling 10-20 pages) complete in a
+ * single pass, but low enough that a runaway loop still bails before
+ * incinerating tokens.
  *
  * Pre-v1.1 this was 6 — silently exited halfway through anything
- * non-trivial. The new ceiling surfaces a clear "step cap reached"
- * failure when hit, so the user always knows why the loop stopped.
+ * non-trivial. v1.1 bumped to 30, which beta testers hit on legitimate
+ * multi-page audits ("audit voidsoulstudio.com" → fetch homepage + apps +
+ * pricing + about + per-section reads = 25+ steps just on web_fetch
+ * alone, before any reasoning steps). v1.2 doubles to 60 — still bounded
+ * (a truly runaway loop bails within a minute), but no longer cuts a
+ * straightforward "go look at every page and summarise" task in half.
+ *
+ * The cap surfaces a clear "step cap reached" pause when hit, with a
+ * `type "continue" to keep going` hint — so the user can always extend
+ * if they actually want to.
  */
-const MAX_AGENT_STEPS = 30
+const MAX_AGENT_STEPS = 60
 /** Token estimate above which older turns roll into a "story so far" recap. */
 const SUMMARIZE_TRIGGER_TOKENS = 10_000
 /** Minimum recent messages to keep verbatim once a summary is in play. */
@@ -197,6 +206,36 @@ function buildSystemPrompt(historySummary?: string): string {
       'Every tool call is permission-gated and logged — the user explicitly approves anything ' +
       'sensitive. Chain tools for multi-step tasks, then summarise briefly.'
   }
+
+  // Collaborative-decisions card. Injected at request time rather than baked
+  // into DEFAULT_SYSTEM_PROMPT so users on older versions (whose stored
+  // systemPrompt is the v1.1.0 default text and therefore overrides the
+  // baseline) still pick up this behaviour without having to "reset to
+  // default" their custom prompt.
+  prompt +=
+    '\n\nCOLLABORATIVE DECISIONS — when you face a meaningful fork in a ' +
+    'request (picking a library, architecture pattern, design approach, name, ' +
+    'file structure, etc.) and 2-4 distinct options would genuinely change the ' +
+    'outcome, present them as an interactive decision card instead of listing ' +
+    'them in prose. Use a fenced ```askuser block with this JSON shape:\n\n' +
+    '```askuser\n' +
+    '{\n' +
+    '  "question": "Which database for the new feature?",\n' +
+    '  "header": "Database",\n' +
+    '  "multiSelect": false,\n' +
+    '  "options": [\n' +
+    '    { "label": "PostgreSQL", "description": "Mature, strong consistency, great with relational data." },\n' +
+    '    { "label": "SQLite",     "description": "Zero ops, embedded — perfect for a single-user app." }\n' +
+    '  ]\n' +
+    '}\n' +
+    '```\n\n' +
+    'Rules: list the recommended option first; labels under 5 words; ' +
+    'descriptions one short sentence; only use multiSelect when the user ' +
+    'could legitimately pick more than one. Do NOT use for trivial yes/no, ' +
+    'for purely informational replies, or when you already know the right ' +
+    'answer — just answer in those cases. After the user picks, continue ' +
+    'based on their selection.'
+
   return prompt
 }
 

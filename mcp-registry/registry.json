@@ -1,0 +1,199 @@
+{
+  "version": 1,
+  "description": "Curated registry of popular MCP servers surfaced by the in-app marketplace at Settings → MCP → Browse. Edit this file via PR; the in-app marketplace fetches it live.",
+  "servers": [
+    {
+      "id": "filesystem",
+      "name": "Filesystem",
+      "description": "Read, write, search, and list files in a folder you allow. Essential for any 'edit this codebase' task.",
+      "category": "files",
+      "tags": ["essential", "files"],
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "{PATH}"],
+      "env": {},
+      "argPrompts": [
+        {
+          "key": "PATH",
+          "label": "Folder to expose",
+          "description": "Absolute path. The server can read/write files inside this folder only.",
+          "type": "folder",
+          "placeholder": "C:\\Users\\you\\code"
+        }
+      ],
+      "envPrompts": [],
+      "author": "Anthropic",
+      "docsUrl": "https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem"
+    },
+    {
+      "id": "github",
+      "name": "GitHub",
+      "description": "Read issues, PRs, repos and files. Create comments, manage labels, search across code.",
+      "category": "dev",
+      "tags": ["essential", "dev"],
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {},
+      "argPrompts": [],
+      "envPrompts": [
+        {
+          "key": "GITHUB_PERSONAL_ACCESS_TOKEN",
+          "label": "GitHub token",
+          "description": "Create one at github.com/settings/tokens — needs at minimum the `repo` scope.",
+          "secret": true
+        }
+      ],
+      "author": "Anthropic",
+      "docsUrl": "https://github.com/modelcontextprotocol/servers/tree/main/src/github"
+    },
+    {
+      "id": "memory",
+      "name": "Memory · knowledge graph",
+      "description": "Persistent entity-relationship graph the AI can read and write across sessions. Remembers people, projects, decisions.",
+      "category": "memory",
+      "tags": ["essential", "memory"],
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-memory"],
+      "env": {},
+      "argPrompts": [],
+      "envPrompts": [],
+      "author": "Anthropic",
+      "docsUrl": "https://github.com/modelcontextprotocol/servers/tree/main/src/memory"
+    },
+    {
+      "id": "brave-search",
+      "name": "Brave Search",
+      "description": "Web + local search via the Brave Search API. Free tier covers 2k queries/month.",
+      "category": "web",
+      "tags": ["web", "search"],
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-brave-search"],
+      "env": {},
+      "argPrompts": [],
+      "envPrompts": [
+        {
+          "key": "BRAVE_API_KEY",
+          "label": "Brave Search API key",
+          "description": "Sign up free at brave.com/search/api — copy the key.",
+          "secret": true
+        }
+      ],
+      "author": "Anthropic",
+      "docsUrl": "https://github.com/modelcontextprotocol/servers/tree/main/src/brave-search"
+    },
+    {
+      "id": "puppeteer",
+      "name": "Puppeteer browser",
+      "description": "Drive a headless Chrome — navigate, click, fill forms, screenshot pages. Browser automation for any website.",
+      "category": "web",
+      "tags": ["web", "automation"],
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-puppeteer"],
+      "env": {},
+      "argPrompts": [],
+      "envPrompts": [],
+      "author": "Anthropic",
+      "docsUrl": "https://github.com/modelcontextprotocol/servers/tree/main/src/puppeteer"
+    },
+    {
+      "id": "fetch",
+      "name": "Fetch · web pages",
+      "description": "Pull a URL and return its readable content (markdown by default). Lighter than Puppeteer when you just need to read a page.",
+      "category": "web",
+      "tags": ["web"],
+      "command": "uvx",
+      "args": ["mcp-server-fetch"],
+      "env": {},
+      "argPrompts": [],
+      "envPrompts": [],
+      "requires": "uv",
+      "author": "Anthropic",
+      "docsUrl": "https://github.com/modelcontextprotocol/servers/tree/main/src/fetch"
+    },
+    {
+      "id": "postgres",
+      "name": "PostgreSQL",
+      "description": "Read-only SQL access to a Postgres database. Run queries, inspect schema, debug data issues from chat.",
+      "category": "data",
+      "tags": ["data", "database"],
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-postgres", "{CONNECTION_STRING}"],
+      "env": {},
+      "argPrompts": [
+        {
+          "key": "CONNECTION_STRING",
+          "label": "Postgres connection string",
+          "description": "e.g. postgresql://user:pass@localhost:5432/dbname",
+          "placeholder": "postgresql://user:pass@localhost:5432/mydb",
+          "secret": true
+        }
+      ],
+      "envPrompts": [],
+      "author": "Anthropic",
+      "docsUrl": "https://github.com/modelcontextprotocol/servers/tree/main/src/postgres"
+    },
+    {
+      "id": "sqlite",
+      "name": "SQLite",
+      "description": "Read/write access to a SQLite file. Great for local data exploration, prototypes, or any .sqlite/.db file on disk.",
+      "category": "data",
+      "tags": ["data", "database"],
+      "command": "uvx",
+      "args": ["mcp-server-sqlite", "--db-path", "{DB_PATH}"],
+      "env": {},
+      "argPrompts": [
+        {
+          "key": "DB_PATH",
+          "label": "SQLite file path",
+          "description": "Absolute path to a .sqlite or .db file.",
+          "type": "file",
+          "placeholder": "C:\\Users\\you\\data.sqlite"
+        }
+      ],
+      "envPrompts": [],
+      "requires": "uv",
+      "author": "Anthropic",
+      "docsUrl": "https://github.com/modelcontextprotocol/servers/tree/main/src/sqlite"
+    },
+    {
+      "id": "slack",
+      "name": "Slack",
+      "description": "Send messages, read channels, manage threads. Both DMs and channels.",
+      "category": "comms",
+      "tags": ["comms"],
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-slack"],
+      "env": {},
+      "argPrompts": [],
+      "envPrompts": [
+        {
+          "key": "SLACK_BOT_TOKEN",
+          "label": "Slack bot token",
+          "description": "Bot user OAuth token from api.slack.com — starts with xoxb-.",
+          "secret": true
+        },
+        {
+          "key": "SLACK_TEAM_ID",
+          "label": "Slack workspace ID",
+          "description": "Your workspace ID — e.g. T01234567 (find via the Slack admin URL).",
+          "secret": false
+        }
+      ],
+      "author": "Anthropic",
+      "docsUrl": "https://github.com/modelcontextprotocol/servers/tree/main/src/slack"
+    },
+    {
+      "id": "sequential-thinking",
+      "name": "Sequential thinking",
+      "description": "Adds a 'think step by step' tool the model can call to reason through hard problems via an explicit scratchpad.",
+      "category": "reasoning",
+      "tags": ["reasoning"],
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"],
+      "env": {},
+      "argPrompts": [],
+      "envPrompts": [],
+      "author": "Anthropic",
+      "docsUrl": "https://github.com/modelcontextprotocol/servers/tree/main/src/sequentialthinking"
+    }
+  ]
+}

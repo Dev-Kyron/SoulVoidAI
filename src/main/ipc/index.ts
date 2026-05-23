@@ -59,7 +59,9 @@ import {
   setPluginEnabled,
   reloadPlugins,
   getPluginActions,
-  pluginsDirectory
+  pluginsDirectory,
+  installPlugin,
+  fetchRegistry
 } from '../services/plugins/plugins'
 import { captureScreen } from '../services/screen/screenshot'
 import { extractText } from '../services/screen/ocr'
@@ -141,6 +143,24 @@ import {
   removeServer as mcpRemoveServer,
   setServerEnabled as mcpSetServerEnabled
 } from '../services/mcp/manager'
+import { runSetupDetection } from '../services/setup/detect'
+import {
+  importClaudeDesktopServers,
+  importCursorServers,
+  importEnvKey
+} from '../services/setup/import'
+import {
+  fetchMcpRegistry,
+  installRegistryServer
+} from '../services/setup/mcp-marketplace'
+import type { McpInstallValues, McpRegistryEntry } from '@shared/types'
+import {
+  getVoiceSetupStatus,
+  migrateLegacyVoices,
+  synthesise as piperSynthesise,
+  voicesDirectoryPath,
+  type VoicePersona
+} from '../services/voice/piper'
 import {
   addTask as schedAddTask,
   listTasks as schedListTasks,
@@ -548,6 +568,11 @@ export function registerIpc(): void {
   ipcMain.handle('plugins:reload', () => reloadPlugins())
   ipcMain.handle('plugins:actions', () => getPluginActions())
   ipcMain.handle('plugins:open-folder', () => shell.openPath(pluginsDirectory()))
+  // Marketplace — fetch the public registry list, install a manifest from
+  // the renderer. Network errors bubble up as plain Error messages so the
+  // settings UI can render them in a toast.
+  ipcMain.handle('plugins:browse', () => fetchRegistry())
+  ipcMain.handle('plugins:install', (_e, manifest: unknown) => installPlugin(manifest))
 
   /* ------------------------------ screen ------------------------------- */
 
@@ -734,6 +759,55 @@ export function registerIpc(): void {
     'mcp:call-tool',
     (_e, name: string, args: Record<string, unknown>) => mcpCallTool(name, args)
   )
+
+  /* --------------------------------- setup ------------------------------ */
+
+  // First-run "we found X on your machine" scan. Pure read — never mutates
+  // state or carries raw API-key values across IPC (only previews; see the
+  // SetupReport docs in shared/types.ts for the security rationale).
+  ipcMain.handle('setup:detect', () => runSetupDetection())
+
+  // Selective imports — caller passes the names from the report it just
+  // received. We re-detect inside the import functions so the data can't
+  // go stale between the user opening the panel and clicking import.
+  ipcMain.handle('setup:import-claude', (_e, names: string[]) =>
+    importClaudeDesktopServers(names)
+  )
+  ipcMain.handle('setup:import-cursor', (_e, names: string[]) =>
+    importCursorServers(names)
+  )
+  // Env-key import reads process.env on this side so the raw key value
+  // never has to cross IPC — only the provider id does.
+  ipcMain.handle('setup:import-env-key', (_e, providerId: ProviderId) =>
+    importEnvKey(providerId)
+  )
+
+  // MCP marketplace — fetch the curated registry list and install a
+  // selected entry with the user's filled-in args / env.
+  ipcMain.handle('mcp:browse-registry', () => fetchMcpRegistry())
+  ipcMain.handle(
+    'mcp:install-registry',
+    (_e, entry: McpRegistryEntry, values: McpInstallValues) =>
+      installRegistryServer({ entry, values })
+  )
+
+  /* -------------------------------- voice ------------------------------- */
+
+  // Piper TTS — replaces the Web Speech API path. Each `synthesise` call
+  // spawns the bundled piper binary, pipes text in, returns WAV bytes
+  // the renderer wraps in a Blob URL + plays via <audio>.
+  ipcMain.handle('voice:status', () => getVoiceSetupStatus())
+  ipcMain.handle(
+    'voice:synthesise',
+    async (_e, args: { persona: VoicePersona; text: string; rate?: number }) => {
+      const wav = await piperSynthesise(args)
+      // Buffer transfers across IPC as Uint8Array — explicit conversion
+      // keeps the wire format predictable across Electron versions.
+      return new Uint8Array(wav)
+    }
+  )
+  ipcMain.handle('voice:open-folder', () => shell.openPath(voicesDirectoryPath()))
+  ipcMain.handle('voice:migrate-legacy', () => migrateLegacyVoices())
 
   /* ---------------------------- notebooks ------------------------------ */
 

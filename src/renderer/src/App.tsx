@@ -3,6 +3,7 @@ import { FloatingWidget } from './components/widget/FloatingWidget'
 import { Orb } from './components/widget/Orb'
 import { QuickAIOverlay } from './components/panel/QuickAIOverlay'
 import { GlobalSearchDialog } from './components/chat/GlobalSearchDialog'
+import { SetupDiscoveryPanel } from './components/setup/SetupDiscoveryPanel'
 import { useConfigStore } from './store/useConfigStore'
 import { useUiStore } from './store/useUiStore'
 import { useMemoryStore } from './store/useMemoryStore'
@@ -188,9 +189,19 @@ export default function App(): JSX.Element {
     []
   )
 
-  // On first ever boot, open the panel so the welcome tour is visible.
+  // On first ever boot, open the panel so the welcome tour is visible —
+  // AND fire the setup-discovery scan once the panel is up, so the magic-
+  // moment overlay shows on the user's literal first frame of VoidSoul.
+  //
+  // We open the discovery panel unconditionally on first launch (even if
+  // detection finds nothing) — the panel renders a friendly "nothing
+  // found, here's how to configure manually" state in that case. Better
+  // to greet every user than silently skip the ones with clean machines.
   useEffect(() => {
-    if (ready && onboarded === false) void useWidgetStore.getState().expand()
+    if (ready && onboarded === false) {
+      void useWidgetStore.getState().expand()
+      useUiStore.getState().setSetupDiscoveryOpen(true)
+    }
   }, [ready, onboarded])
 
   useAccentTheme(accent)
@@ -218,6 +229,7 @@ export default function App(): JSX.Element {
       <FloatingWidget />
       <QuickAIOverlay />
       <GlobalSearchBinding />
+      <SetupDiscoveryPanel />
     </>
   )
 }

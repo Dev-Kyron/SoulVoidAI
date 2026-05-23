@@ -13,6 +13,7 @@ import {
   Github,
   Heart,
   RefreshCw,
+  Search,
   ShieldCheck,
   Sparkles,
   Star
@@ -71,6 +72,12 @@ export function About(): JSX.Element {
             label="Leave a review"
             onClick={() => useUiStore.getState().setReviewDialogOpen(true)}
             hint="Star rating + a note — sent privately to the studio."
+          />
+          <ActionButton
+            icon={<Search size={12} />}
+            label="Re-run setup"
+            onClick={() => useUiStore.getState().setSetupDiscoveryOpen(true)}
+            hint="Re-scan this machine for AI tools you've configured elsewhere."
           />
           <ActionButton
             icon={<Heart size={12} />}

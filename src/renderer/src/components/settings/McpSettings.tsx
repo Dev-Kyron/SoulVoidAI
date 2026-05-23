@@ -4,7 +4,7 @@
  * automation actions. Add a server with a command + args, toggle it on, and
  * its tools surface to the model automatically.
  */
-import { useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import {
   Plus,
   Trash2,
@@ -12,14 +12,27 @@ import {
   Power,
   RefreshCw,
   AlertTriangle,
+  Sparkles,
+  Store,
   Wrench
 } from 'lucide-react'
 import { useMcpStore } from '../../store/useMcpStore'
 import { useUiStore } from '../../store/useUiStore'
 import { EmptyState, Toggle } from '../common/ui'
 import { CollapsibleSection } from './CollapsibleSection'
+import { vs } from '../../lib/bridge'
 import { cn } from '../../lib/utils'
-import type { McpServerStatus } from '@shared/types'
+import type { McpServerStatus, SetupReport } from '@shared/types'
+import type { ImportSource } from './SetupImportDialog'
+
+// Lazy — both dialogs only render on click; keep them out of the settings
+// initial chunk so opening Settings is one fewer ms of parse work.
+const SetupImportDialog = lazy(() =>
+  import('./SetupImportDialog').then((m) => ({ default: m.SetupImportDialog }))
+)
+const McpMarketplaceDialog = lazy(() =>
+  import('./McpMarketplaceDialog').then((m) => ({ default: m.McpMarketplaceDialog }))
+)
 
 const FIELD =
   'w-full rounded-lg border border-white/10 bg-black/30 px-2.5 py-1.5 text-[11px] text-slate-100 outline-none transition focus:border-[var(--accent-ring)] placeholder:text-slate-600 font-mono'
@@ -309,13 +322,41 @@ export function McpSettings(): JSX.Element {
   const servers = useMcpStore((s) => s.servers)
   const load = useMcpStore((s) => s.load)
 
+  // Setup-detection result. Fetched once on mount + refreshed after each
+  // import so the "Import from X" buttons reflect the current source-config
+  // state. Null while the IPC round-trip is in flight (UI hides the import
+  // strip during that brief window — empty is the right default).
+  const [report, setReport] = useState<SetupReport | null>(null)
+  const [importSource, setImportSource] = useState<ImportSource | null>(null)
+  const [marketplaceOpen, setMarketplaceOpen] = useState(false)
+
+  const refreshReport = (): void => {
+    void vs.setup.detect().then(setReport)
+  }
+
   useEffect(() => {
     void load()
+    refreshReport()
   }, [load])
 
   const totalTools = servers.reduce(
     (sum, s) => sum + (s.connected ? s.tools.length : 0),
     0
+  )
+
+  // Pass installed names into the dialog so it can mark already-imported
+  // entries as non-checkable. We memo on a STRING KEY derived from the
+  // names — not the `servers` array reference — so reconnects / toggle /
+  // tool-count refreshes don't allocate a new Set and re-fire the
+  // dialog's detection useEffect each time.
+  const installedNamesKey = servers
+    .map((s) => s.name)
+    .sort()
+    .join('|')
+  const installedNames = useMemo(
+    () => new Set(servers.map((s) => s.name)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- key drives identity
+    [installedNamesKey]
   )
 
   return (
@@ -333,6 +374,16 @@ export function McpSettings(): JSX.Element {
         </div>
       </div>
 
+      {/* Import + browse strip — surfaces the "you've already configured
+          things elsewhere, want them here?" buttons (when detected) plus
+          the always-on "Browse marketplace" entry point so users can
+          discover canonical MCP servers without typing npx commands. */}
+      <ImportStrip
+        report={report}
+        onOpen={setImportSource}
+        onBrowse={() => setMarketplaceOpen(true)}
+      />
+
       <div className="space-y-1.5">
         {servers.length === 0 ? (
           <EmptyState
@@ -348,6 +399,105 @@ export function McpSettings(): JSX.Element {
       <div className="mt-2">
         <AddServerForm onAdd={() => void load()} />
       </div>
+
+      {/* Both dialogs are lazy-loaded; wrapping in a no-fallback Suspense
+          keeps the brief chunk-fetch flicker invisible (each dialog has
+          its own loading state on top of that anyway). Gating on the
+          open flag means the chunk isn't even fetched until the user
+          actually clicks to open the dialog. */}
+      {importSource !== null && (
+        <Suspense fallback={null}>
+          <SetupImportDialog
+            source={importSource}
+            installedNames={installedNames}
+            onClose={() => setImportSource(null)}
+            onImported={() => {
+              void load()
+              refreshReport()
+            }}
+          />
+        </Suspense>
+      )}
+
+      {marketplaceOpen && (
+        <Suspense fallback={null}>
+          <McpMarketplaceDialog
+            open={marketplaceOpen}
+            onClose={() => setMarketplaceOpen(false)}
+          />
+        </Suspense>
+      )}
     </CollapsibleSection>
+  )
+}
+
+/**
+ * Top-of-section action strip. Always shows "Browse marketplace" — the
+ * canonical discovery surface; additionally surfaces "Import from Claude
+ * Desktop" / "Import from Cursor" when detected so users who already set
+ * up MCP servers in those apps can mirror them in one click. Each import
+ * button carries a small count chip ("5") so the user knows there's
+ * something there to import before clicking.
+ */
+function ImportStrip({
+  report,
+  onOpen,
+  onBrowse
+}: {
+  report: SetupReport | null
+  onOpen: (source: ImportSource) => void
+  onBrowse: () => void
+}): JSX.Element {
+  const claudeCount = report?.claudeDesktop.mcpServers.length ?? 0
+  const cursorCount = report?.cursor.mcpServers.length ?? 0
+  const claudeAvailable = (report?.claudeDesktop.installed ?? false) && claudeCount > 0
+  const cursorAvailable = (report?.cursor.installed ?? false) && cursorCount > 0
+  return (
+    <div className="mb-3 flex flex-wrap gap-1.5">
+      <button
+        type="button"
+        onClick={onBrowse}
+        className="flex items-center gap-1.5 rounded-lg border border-[var(--accent-ring)] bg-[var(--accent-soft)] px-2.5 py-1.5 text-[10px] font-semibold text-[var(--accent)] transition hover:brightness-110"
+      >
+        <Store size={11} />
+        Browse marketplace
+      </button>
+      {claudeAvailable && (
+        <ImportButton
+          label="Import from Claude Desktop"
+          count={claudeCount}
+          onClick={() => onOpen('claude-desktop')}
+        />
+      )}
+      {cursorAvailable && (
+        <ImportButton
+          label="Import from Cursor"
+          count={cursorCount}
+          onClick={() => onOpen('cursor')}
+        />
+      )}
+    </div>
+  )
+}
+
+function ImportButton({
+  label,
+  count,
+  onClick
+}: {
+  label: string
+  count: number
+  onClick: () => void
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex items-center gap-1.5 rounded-lg border border-[var(--accent-ring)] bg-[var(--accent-soft)] px-2.5 py-1.5 text-[10px] font-semibold text-[var(--accent)] transition hover:brightness-110"
+    >
+      <Sparkles size={11} />
+      {label}
+      <span className="rounded-full bg-white/10 px-1.5 text-[9px] text-white">{count}</span>
+    </button>
   )
 }

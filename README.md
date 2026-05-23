@@ -25,6 +25,68 @@ Bring whichever AI you already love — **12 providers, one interface** — and 
 
 ---
 
+## 🆕 What's new in v1.2.0
+
+The biggest release since v1.0 — turns "I downloaded VoidSoul, now what?" into "VoidSoul found my stuff, I'm chatting in 30 seconds."
+
+**Magic-moment setup**
+
+- **Auto-detection on first launch** — scans for Claude Desktop, Cursor, ChatGPT Desktop, env-var API keys (Anthropic, OpenAI, Gemini, Groq, xAI, OpenRouter, DeepSeek, Mistral), and running local providers (Ollama, LM Studio). One-click "Import everything" pulls all your existing MCP servers + API keys into VoidSoul with zero typing.
+- **Settings → MCP also gains import shortcuts** — *"Import from Claude Desktop · 5"* / *"Import from Cursor · 3"* buttons surface when those tools are detected. Idempotent — re-run after adding a new MCP server to Claude Desktop and only the new one gets imported.
+- **Re-run setup from Settings → About** — manual re-trigger of the discovery panel.
+
+**MCP server marketplace**
+
+- **Settings → MCP → Browse marketplace** — curated list of 10 popular MCP servers (Filesystem, GitHub, Memory, Brave Search, Puppeteer, Fetch, Postgres, SQLite, Slack, Sequential Thinking). One-click install with per-server config dialog (folder path, API key, etc.).
+- Fetched live from the project repo + bundled fallback in the installer so it works offline.
+- "Browse all community servers ↗" link to the wider awesome-mcp-servers catalog.
+
+**Voice — full Piper TTS swap**
+
+- Replaced the Web Speech / Microsoft SAPI voices with **[Piper](https://github.com/rhasspy/piper)** neural TTS. Real character voices for Void (Arctic) and Soul (Amy), running locally, no API key, no cloud.
+- Piper binary bundled in the installer (~22 MB Windows). Voice models live in `<userData>/voices/<persona>/` and the picker shows them with name, language, quality tier, and file size.
+- **Powered by Piper TTS** credit card in Settings → Voice links out to Michael Hansen's repo for stars / sponsorship — supporting the open-source maintainer this is built on.
+- Streaming TTS still chunks per sentence; one piper subprocess per sentence renders WAV → blob → `<audio>` queue. Real-time factor 0.07× — sentences ready inside 200 ms.
+- `--length_scale` mapped from the existing rate slider; volume applied per-utterance.
+
+**Collaborative decision cards**
+
+- The AI can now emit a ```askuser fenced JSON block when it faces a meaningful design fork (library / pattern / approach choice). The block renders as an interactive card in the chat with checkboxes, an "Other" free-text fallback, preview tooltips, and **inline-editable labels** so you can refine the AI's wording before submitting.
+- System prompt teaches the AI when to use it (skipped for trivial yes/no, used for "which database?" style forks).
+
+**Plugin marketplace** (lightweight)
+
+- Settings → Plugins now has **Installed** / **Browse** tabs. Browse fetches the curated plugin registry from the project repo, one-click install pulls the manifest into your plugins folder.
+- Three starter packs ship: **Dev Bookmarks**, **AI Research Shortcuts**, **Creator Toolkit**.
+
+**Auto-routing expansion**
+
+- Router classifier picks up new signals: **fenced code block** in your prompt → coding-grade model; **conversational opener** ("hey", "thanks", short prompt) → fast cheap model; **long prompt** (>2000 chars) → reasoning model.
+- Composer pill now shows **"✨ Auto · sonnet-4-6"** when no manual lock is set, with a tooltip explaining the per-prompt routing. Lock to a specific model with the existing dropdown.
+
+**Quality of life**
+
+- **Per-message mute button** on every assistant reply — same icon used as a smart toggle (play / stop while speaking).
+- **Speech volume slider** in Settings → Voice (separate from OS volume).
+- **In-app reviews** (Settings → About → Leave a review) — star rating + comment → emails the studio via Formspree. Curated reviews land on voidsoul.app.
+- **Ctrl+V image paste** in the chat composer (and the Nexus inline composer).
+- **Inline composer on the Nexus panel** — quick follow-ups without switching to the full chat tab.
+- **Rolling-line voice preview** in Nexus — replaces the scrollable text box with a single sentence that ticks forward as TTS reads.
+- **Tap orb → start/stop voice input** — both Nexus layouts. The orb now matches the "tap the orb to talk" hint that was already shown beside it.
+- **Frameless Settings window** — drops the OS title bar / File-Edit-View menu, keeps native min/max/close as a slim overlay.
+- **Provider settings cleanup** — *NEW MODELS* callout collapses behind a "Show all" toggle, *Remove stored key* shrunk to a trash icon next to the saved badge, *Endpoint override* collapsed under an Advanced disclosure for cloud providers.
+- **Agent step ceiling bumped 30 → 60** — multi-page audits and long automation chains finish in one pass without hitting the "type continue" pause.
+
+**Fixes**
+
+- **Windows installer icon** — multi-resolution `.ico` generated by `npm run icons` (BMP DIB for small sizes, PNG for 256). Start Menu / Desktop shortcuts and the EXE icon now show the orb instead of the generic Electron logo.
+- **Gemini schema fix** — `$schema`, `additionalProperties`, and similar JSON Schema meta-fields recursively stripped from MCP tool definitions before they hit Gemini's strict OpenAPI-subset validator. The 400 "Unknown name '$schema'" errors are gone.
+- **Marketplace install** — already-installed servers now read as "Already installed" instead of the misleading "X connected · N tools" success toast.
+- **Race fixes** — close-during-import races in the discovery panel and MCP import dialog no longer write state to unmounted components.
+- **Plugin / MCP registries** — bundled fallback ships in the installer so both marketplaces work offline or before a registry update has propagated through the CDN.
+
+---
+
 ## 🆕 What's new in v1.1.1
 
 Polish pass from beta-tester feedback — UX cleanup across the board, no breaking changes.

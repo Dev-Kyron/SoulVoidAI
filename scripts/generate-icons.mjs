@@ -134,18 +134,71 @@ function write(relPath, size) {
   console.log(`  ✓ ${relPath} (${size}x${size})`)
 }
 
-/* ---- minimal ICO encoder ------------------------------------------------
- * ICO is a tiny directory that points to one image payload per entry. Each
- * payload can be a BMP or — since Vista — a PNG, which is what we use so
- * the 256×256 entry doesn't bloat the file. Windows reads the directory
- * and picks whichever size best matches the surface it's painting (taskbar,
- * Start Menu, Alt-Tab, file-Explorer thumbnail).
+/* ---- BMP DIB encoder (for ICO small-size entries) -----------------------
  *
- * Layout: ICONDIR(6) | ICONDIRENTRY*N(16 each) | imageData*N
+ * Earlier versions of this script packed PNG payloads for EVERY ICO entry
+ * including 16/24/32. That works in Explorer / modern shells but the NSIS
+ * installer's icon compiler + some shortcut-icon paths on Windows 10/11
+ * still bail on PNG-in-ICO for small sizes — and silently fall back to
+ * the generic Electron icon. v1.1.1 shipped with that ICO and beta testers
+ * reported the icon STILL wasn't right after a fresh install.
+ *
+ * Fix: encode sizes ≤128 as BMP DIB (the format every Windows ICO loader
+ * has supported since Win 3.0) and keep PNG only for 256×256 where BMP
+ * would balloon to ~263 KB per entry. The directory entry doesn't need a
+ * format flag — Windows sniffs it from the payload's magic bytes.
+ *
+ * BMP DIB inside ICO has two quirks vs a standalone .bmp:
+ *  1. No file header (BITMAPFILEHEADER) — directly starts with DIB header
+ *  2. biHeight is DOUBLED (XOR pixel mask + AND transparency mask stacked)
+ * The AND mask is unused at 32 bpp (alpha channel handles transparency)
+ * but Windows insists on its presence, all-zero is the right default.
+ */
+function encodeBMP(size, rgba) {
+  // BITMAPINFOHEADER — 40 bytes, all little-endian
+  const header = Buffer.alloc(40)
+  header.writeUInt32LE(40, 0)        // biSize
+  header.writeInt32LE(size, 4)        // biWidth
+  header.writeInt32LE(size * 2, 8)    // biHeight (doubled for ICO)
+  header.writeUInt16LE(1, 12)         // biPlanes
+  header.writeUInt16LE(32, 14)        // biBitCount (BGRA)
+  header.writeUInt32LE(0, 16)         // biCompression = BI_RGB
+
+  // XOR pixel data — BGRA, bottom-up rows. Source rgba is top-down,
+  // so source row (size-1-y) lands at destination row y.
+  const xor = Buffer.alloc(size * size * 4)
+  for (let y = 0; y < size; y++) {
+    const srcY = size - 1 - y
+    for (let x = 0; x < size; x++) {
+      const s = (srcY * size + x) * 4
+      const d = (y * size + x) * 4
+      xor[d]     = rgba[s + 2] // B
+      xor[d + 1] = rgba[s + 1] // G
+      xor[d + 2] = rgba[s]     // R
+      xor[d + 3] = rgba[s + 3] // A
+    }
+  }
+
+  // AND mask — 1 bit per pixel, row padded to 4 bytes. All-zero = opaque.
+  // Required by the ICO spec even though the 32 bpp BGRA already carries
+  // alpha; Windows reads the alpha channel and ignores the mask.
+  const andStride = Math.ceil(size / 32) * 4
+  const andMask = Buffer.alloc(andStride * size)
+
+  return Buffer.concat([header, xor, andMask])
+}
+
+/* ---- ICO container ------------------------------------------------------
+ * Layout: ICONDIR(6) | ICONDIRENTRY*N(16 each) | imageData*N.
  * For 256×256 the width/height bytes are stored as 0 (per spec).
  */
 function encodeICO(sizes) {
-  const images = sizes.map((size) => encodePNG(size, drawOrb(size)))
+  const images = sizes.map((size) => {
+    const rgba = drawOrb(size)
+    // PNG only for 256 (BMP would be ~263 KB). BMP for everything smaller
+    // because NSIS + older shell paths choke on PNG-in-ICO for small sizes.
+    return size >= 256 ? encodePNG(size, rgba) : encodeBMP(size, rgba)
+  })
   const dir = Buffer.alloc(6)
   dir.writeUInt16LE(0, 0) // reserved
   dir.writeUInt16LE(1, 2) // image type: 1 = icon
@@ -153,7 +206,7 @@ function encodeICO(sizes) {
 
   const entries = Buffer.alloc(16 * images.length)
   let offset = 6 + 16 * images.length
-  images.forEach((png, i) => {
+  images.forEach((payload, i) => {
     const size = sizes[i]
     const e = i * 16
     entries[e + 0] = size >= 256 ? 0 : size // width
@@ -162,9 +215,9 @@ function encodeICO(sizes) {
     entries[e + 3] = 0 // reserved
     entries.writeUInt16LE(1, e + 4) // colour planes
     entries.writeUInt16LE(32, e + 6) // bits per pixel
-    entries.writeUInt32LE(png.length, e + 8) // image data size
+    entries.writeUInt32LE(payload.length, e + 8) // image data size
     entries.writeUInt32LE(offset, e + 12) // image data offset
-    offset += png.length
+    offset += payload.length
   })
 
   return Buffer.concat([dir, entries, ...images])

@@ -154,7 +154,9 @@ const bridge: VoidSoulBridge = {
     setEnabled: (id, enabled) => invoke('plugins:set-enabled', id, enabled),
     reload: () => invoke('plugins:reload'),
     actions: () => invoke('plugins:actions'),
-    openFolder: () => invoke('plugins:open-folder')
+    openFolder: () => invoke('plugins:open-folder'),
+    browse: () => invoke('plugins:browse'),
+    install: (manifest) => invoke('plugins:install', manifest)
   },
   notebook: {
     list: () => invoke('notebook:list'),
@@ -213,6 +215,22 @@ const bridge: VoidSoulBridge = {
     parsePdf: (args) => invoke('system:parse-pdf', args),
     info: () => invoke('app:info'),
     stats: () => invoke('system:stats')
+  },
+  setup: {
+    detect: () => invoke('setup:detect'),
+    importClaudeServers: (names) => invoke('setup:import-claude', names),
+    importCursorServers: (names) => invoke('setup:import-cursor', names),
+    importEnvKey: (providerId) => invoke('setup:import-env-key', providerId)
+  },
+  mcpMarketplace: {
+    browse: () => invoke('mcp:browse-registry'),
+    install: (entry, values) => invoke('mcp:install-registry', entry, values)
+  },
+  voice: {
+    status: () => invoke('voice:status'),
+    synthesise: (args) => invoke('voice:synthesise', args),
+    openFolder: () => invoke('voice:open-folder'),
+    migrateLegacy: () => invoke('voice:migrate-legacy')
   },
   events: {
     onChunk: (cb) => subscribe('ai:chunk', cb),

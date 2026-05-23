@@ -15,7 +15,8 @@ import {
   Trash2,
   Brain,
   ChevronDown,
-  Eye
+  Eye,
+  Sparkles
 } from 'lucide-react'
 import { useChatStore } from '../../store/useChatStore'
 import { useConfigStore } from '../../store/useConfigStore'
@@ -84,38 +85,66 @@ function ModelPickerPill(): JSX.Element | null {
   const activeModel = modelOverride || provider.model
   const overridden = Boolean(modelOverride)
 
+  // When no manual override is set, the router picks per-prompt — vision,
+  // tool-heavy, coding, reasoning, fast, etc. Surface that in the pill so
+  // beta testers stop manually switching providers thinking they have to;
+  // the badge tells them VoidSoul is already choosing the right one each
+  // time. The actual model used lands on every assistant bubble via the
+  // existing `model:` stamp.
+  const tooltip = overridden
+    ? `Locked to ${activeModel} for this thread. Click to change or unlock.`
+    : `Auto-routing per prompt — vision goes to a vision model, code to a coding model, etc. Default: ${activeModel}. Click to lock to one model.`
+
   return (
     <div ref={rootRef} className="relative">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        title={overridden ? `Using ${activeModel} for this thread` : 'Change model for this thread'}
+        title={tooltip}
         className={cn(
           'flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] transition',
           overridden
             ? 'border-[var(--accent-ring)] bg-[var(--accent-soft)] text-[var(--accent)]'
-            : 'border-white/10 bg-white/5 text-slate-400 hover:bg-white/10 hover:text-slate-200'
+            : 'border-emerald-400/30 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/15'
         )}
       >
-        {modelHasVision(activeModel) && <Eye size={9} className="text-emerald-400" />}
-        <span className="max-w-[180px] truncate">{activeModel}</span>
+        {overridden ? (
+          modelHasVision(activeModel) && <Eye size={9} className="text-emerald-400" />
+        ) : (
+          <Sparkles size={9} className="text-emerald-300" />
+        )}
+        <span className="max-w-[180px] truncate">
+          {overridden ? activeModel : `Auto · ${activeModel}`}
+        </span>
         <ChevronDown size={10} />
       </button>
       {open && (
-        <div className="absolute bottom-full left-0 z-30 mb-1 w-[260px] rounded-lg border border-white/10 bg-[var(--surface-card-strong)] py-1 shadow-xl">
+        // Anchored `right-0` so the popover grows LEFTWARDS from the pill —
+        // the pill sits at the right edge of the composer toolbar, so a
+        // `left-0` anchor would extend past the panel wall and get clipped
+        // by the outer `overflow-hidden`. Width capped relative to the
+        // viewport too, in case a future narrower panel surface mounts this.
+        <div className="absolute bottom-full right-0 z-30 mb-1 w-[240px] max-w-[calc(100vw-2rem)] rounded-lg border border-white/10 bg-[var(--surface-card-strong)] py-1 shadow-xl">
           <button
             type="button"
             onClick={() => {
               setModelOverride(null)
               setOpen(false)
             }}
+            title="VoidSoul picks per prompt across every configured provider — vision tasks go to a vision model, agent runs to a fast tool-use model, etc."
             className={cn(
-              'flex w-full items-center justify-between px-3 py-1.5 text-left text-[11px] transition hover:bg-white/5',
+              'flex w-full items-start gap-2 px-3 py-2 text-left text-[11px] transition hover:bg-white/5',
               !overridden ? 'text-[var(--accent)]' : 'text-slate-300'
             )}
           >
-            <span>Provider default ({provider.model})</span>
-            {!overridden && <span className="text-[9px]">active</span>}
+            <Sparkles size={11} className={cn('mt-0.5 shrink-0', !overridden ? 'text-emerald-300' : 'text-slate-500')} />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate font-semibold">Auto-route</span>
+              <span className="block truncate text-[9px] text-slate-500">
+                Picks per prompt · {provider.model}
+              </span>
+            </span>
+            {!overridden && <span className="mt-0.5 shrink-0 text-[9px]">active</span>}
           </button>
           {merged.length > 0 && <div className="my-1 border-t border-white/5" />}
           <div className="scrollbar-void max-h-[240px] overflow-y-auto">

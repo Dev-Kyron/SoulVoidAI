@@ -91,7 +91,16 @@ export function createMainWindow(): BrowserWindow {
       // Disabling background throttling keeps a hidden renderer running
       // at normal pace, so a 30-step research task that takes 2 minutes
       // visible takes 2 minutes hidden too.
-      backgroundThrottling: false
+      backgroundThrottling: false,
+      // Streaming TTS plays HTMLAudioElement instances asynchronously
+      // after the AI provider responds — Chromium's default autoplay
+      // policy can block these `audio.play()` calls because they're not
+      // a direct user gesture (the user clicked Send, then we awaited
+      // a 4-second SSE stream, then we tried to play). Without this flag
+      // the preview button in Voice settings works (direct click) but
+      // the real-time spoken replies are silent. Same trick `--autoplay-policy`
+      // on Chromium's CLI does, scoped to this BrowserWindow.
+      autoplayPolicy: 'no-user-gesture-required'
     }
   })
 
@@ -306,7 +315,12 @@ export function openSettingsWindow(): BrowserWindow {
       sandbox: true,
       contextIsolation: true,
       nodeIntegration: false,
-      spellcheck: false
+      spellcheck: false,
+      // Match the main window's policy — the preview button in Voice
+      // settings is direct-gesture so it works without this, but any
+      // future async audio path (e.g. a "speak this" link on a doc page)
+      // would silently fail otherwise. Keep both windows aligned.
+      autoplayPolicy: 'no-user-gesture-required'
     }
   })
 

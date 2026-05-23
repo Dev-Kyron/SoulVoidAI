@@ -45,13 +45,23 @@ import type {
   CustomActionKind,
   ModeId,
   OcrResult,
+  McpInstallValues,
+  McpMarketplaceInstallResult,
+  McpRegistryEntry,
   PluginInfo,
+  PluginManifest,
+  PluginRegistryEntry,
   ProviderId,
   QuickAction,
   RecentProject,
   ScreenshotResult,
+  SetupEnvKeyImportResult,
+  SetupImportResult,
+  SetupReport,
   SyncResult,
   SystemStats,
+  VoicePersona,
+  VoiceSetupStatus,
   UpdaterStatus,
   UserFact,
   VoiceConfig
@@ -289,6 +299,10 @@ export interface VoidSoulBridge {
     reload(): Promise<PluginInfo[]>
     actions(): Promise<QuickAction[]>
     openFolder(): Promise<void>
+    /** Fetch the curated public registry of community plugins. */
+    browse(): Promise<PluginRegistryEntry[]>
+    /** Install a manifest (typically one returned by `browse()`). */
+    install(manifest: PluginManifest): Promise<PluginInfo[]>
   }
   notebook: {
     list(): Promise<NotebookSummary[]>
@@ -377,6 +391,62 @@ export interface VoidSoulBridge {
     parsePdf(args: { bytes: ArrayBuffer; name: string }): Promise<string>
     info(): Promise<AppInfo>
     stats(): Promise<SystemStats>
+  }
+  setup: {
+    /**
+     * Scan the machine for already-configured AI tools — Claude Desktop,
+     * Cursor, ChatGPT Desktop, env-var API keys, local providers. Returns
+     * a structured report the first-run panel + "Import" buttons render
+     * from. Pure read; never carries raw API keys (only previews).
+     */
+    detect(): Promise<SetupReport>
+    /** Selectively import named MCP servers from Claude Desktop's config. */
+    importClaudeServers(names: string[]): Promise<SetupImportResult>
+    /** Selectively import named MCP servers from Cursor's MCP config. */
+    importCursorServers(names: string[]): Promise<SetupImportResult>
+    /**
+     * Import an API key for the given provider from `process.env`.
+     * Reads the secret on the main side so it never crosses IPC as
+     * plaintext — only the provider id does.
+     */
+    importEnvKey(providerId: ProviderId): Promise<SetupEnvKeyImportResult>
+  }
+  mcpMarketplace: {
+    /** Fetch the curated MCP server registry from the project repo. */
+    browse(): Promise<McpRegistryEntry[]>
+    /**
+     * Install a registry entry. `values.args` fills the `{KEY}` tokens
+     * in `entry.args`; `values.env` is merged on top of `entry.env`.
+     * Returns `{ ok: false, error }` on missing prompts or addServer
+     * failure, `{ ok: true, status }` on success or already-installed.
+     */
+    install(
+      entry: McpRegistryEntry,
+      values: McpInstallValues
+    ): Promise<McpMarketplaceInstallResult>
+  }
+  voice: {
+    /** Snapshot of binary availability + installed Void/Soul voices. */
+    status(): Promise<VoiceSetupStatus>
+    /**
+     * Synthesise a chunk of text via Piper. Returns WAV bytes as a
+     * Uint8Array — the renderer wraps in a Blob URL + plays via the
+     * standard HTMLAudioElement queue.
+     */
+    synthesise(args: {
+      persona: VoicePersona
+      text: string
+      rate?: number
+    }): Promise<Uint8Array>
+    /** Opens the per-user voices folder in the OS file explorer. */
+    openFolder(): Promise<string>
+    /**
+     * One-shot copy of any `Voices/` folder at the repo root into the
+     * canonical per-user voices/ folder. Called on first launch so the
+     * dev's manually-placed Piper voices land in the right place
+     * automatically.
+     */
+    migrateLegacy(): Promise<{ copied: number }>
   }
   events: {
     onChunk(cb: (chunk: ChatStreamChunk) => void): Unsubscribe

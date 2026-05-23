@@ -87,10 +87,13 @@ const DEFAULT_CONFIG: AppConfigFile = {
     dnd: { enabled: false, quietStart: null, quietEnd: null }
   },
   voice: {
+    // Spoken replies on by default — v1.2.0 ships local Piper voices, so
+    // there's no longer a "no voices configured" gap for new users to fall
+    // into. The migration on first launch copies any Voices/<persona>/
+    // files into the per-user voices folder; if none are present the
+    // settings UI shows a clear "drop a .onnx file" empty state.
     enabled: true,
     persona: 'void',
-    voidVoiceURI: '',
-    soulVoiceURI: '',
     rate: 1,
     volume: 1,
     wakeWord: { enabled: false }

@@ -74,8 +74,38 @@ describe('classifyTask', () => {
   })
 
   it('falls back to general when no clear signal', () => {
-    const t = classifyTask({ prompt: 'hello there', hasImages: false, agentMode: false })
+    // 'hello there' would now match the conversational opener regex —
+    // use a neutral mid-length prompt with no greeting / fast / code /
+    // reasoning markers to land in the general bucket.
+    const t = classifyTask({
+      prompt: 'Walk me through the deployment process for a typical web app.',
+      hasImages: false,
+      agentMode: false
+    })
     expect(t.kind).toBe('general')
+  })
+
+  it('routes short conversational openers to fast', () => {
+    const t = classifyTask({ prompt: 'hey what\'s up', hasImages: false, agentMode: false })
+    expect(t.kind).toBe('fast')
+    expect(t.label).toContain('greeting')
+  })
+
+  it('detects fenced code blocks → coding', () => {
+    const prompt = 'fix this:\n```ts\nconst x: number = "wrong"\n```'
+    const t = classifyTask({ prompt, hasImages: false, agentMode: false })
+    expect(t.kind).toBe('coding')
+    expect(t.label).toContain('code block')
+  })
+
+  it('long prompts → reasoning', () => {
+    const t = classifyTask({
+      prompt: 'a'.repeat(2100),
+      hasImages: false,
+      agentMode: false
+    })
+    expect(t.kind).toBe('reasoning')
+    expect(t.label).toContain('long')
   })
 })
 

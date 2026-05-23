@@ -1,93 +1,41 @@
 /**
- * Voice output for the two VoidSoul personas — Void (male) and Soul (female) —
- * built on the browser Speech Synthesis API. No external services: it speaks
- * with whichever voices the operating system provides.
+ * Voice output, powered by Piper TTS (https://github.com/rhasspy/piper).
  *
- * Streaming TTS: rather than wait for the model to finish typing and THEN
- * read the whole reply, we chunk on sentence boundaries and enqueue each
- * sentence as it streams in. The Web Speech API's speechSynthesis.speak()
- * naturally queues utterances, so the user hears the assistant start
- * talking while the text is still arriving. Drops perceived latency on
- * a long answer from "wait for paragraph, then voice" to "voice within
- * the first sentence".
+ * v1.1.x ran on the browser Web Speech API, which on Windows meant SAPI
+ * voices (David, Mark, Zira) plus whatever extra SAPI packs the user had
+ * installed — collectively pretty robotic. v1.2.0 swaps to Piper neural
+ * voices: each persona (Void, Soul) has a single .onnx voice file under
+ * `<userData>/voices/<persona>/`, and the main process spawns the bundled
+ * piper binary per sentence to render WAV audio we play in the renderer.
+ *
+ * Streaming TTS architecture (unchanged in shape): the model streams
+ * tokens; we chunk on sentence boundaries via `extractCompleteSentences`,
+ * call `enqueueSpeak` per sentence the moment it closes, and an internal
+ * audio queue plays them in FIFO order. The user hears the assistant
+ * start talking before typing finishes — same UX as v1.1.x, just with
+ * voices that don't sound like a 2002 GPS unit.
+ *
+ * Per-sentence cost: ~300 ms cold start (piper loads the .onnx into
+ * memory the first time) + ~70 ms per second of audio. For a 4-sentence
+ * reply, the user hears sentence 1 within 600 ms of token-arrival, then
+ * each subsequent sentence is gapless.
  */
+import { vs } from './bridge'
 import type { VoiceConfig, VoicePersona } from '@shared/types'
 
-export interface SimpleVoice {
-  uri: string
-  name: string
-  lang: string
-}
-
-/**
- * High-priority "neural" voice tells. These names mark modern,
- * non-robotic TTS voices that ship on recent OS versions:
- *   - Windows 10/11 "Microsoft * Online" family (Aria, Guy, Jenny, etc.)
- *   - macOS "(Premium)" and "(Enhanced)" suffixed voices
- *   - Google "Wavenet" / "Neural" entries on Linux + ChromeOS
- * When any of these are present, guessVoice prefers them over the
- * older SAPI defaults (David, Zira) that earlier users described as
- * "robotic and choppy".
- */
-const NEURAL_HINT = /\b(online|premium|enhanced|natural|neural|wavenet|studio)\b/i
-
-/**
- * Per-persona "first-choice" name lists, ordered from best to worst quality.
- * The picker walks these one at a time before falling back to the broad
- * MALE_HINT / FEMALE_HINT regex — so "Microsoft Guy Online (Natural)" wins
- * over "Microsoft Mark Desktop (SAPI)" even though both match the male hint.
+/* ---------------- currently-spoken-sentence signal ---------------------
  *
- * Listed names are limited to what's actually reachable via the Web Speech
- * API (SAPI on Windows, NSSpeechSynthesizer on macOS, espeak/etc. on Linux).
- * The newer Microsoft "Natural HD" voices (Andrew, Ava, Brian, Emma)
- * installed via Narrator are deliberately omitted — Microsoft has gated
- * them behind a private API that third-party apps can't reach, so even if
- * they appear in Narrator's picker they never surface here.
- */
-const PREFERRED_VOID_VOICES = [
-  'guy',    // Natural (Win, when available via en-US locale pack)
-  'davis',  // Natural (Win)
-  'tony',   // Natural (Win)
-  'christopher',
-  'eric',
-  'roger',
-  'steffan',
-  'mark',   // SAPI fallback
-  'david'   // SAPI default
-]
-const PREFERRED_SOUL_VOICES = [
-  'aria',   // Natural (Win, when available)
-  'jenny',  // Natural (Win)
-  'michelle',
-  'sara',
-  'nancy',
-  'emma',   // some non-HD installs surface Emma via SAPI
-  'zira'    // SAPI default
-]
-
-const MALE_HINT = /\b(david|mark|george|james|guy|paul|ryan|eric|daniel|alex|fred|tom|william|davis|tony|brandon|nathan|andrew|brian|christopher|roger|steffan)\b/i
-const FEMALE_HINT =
-  /\b(zira|hazel|susan|catherine|linda|eva|aria|jenny|sonia|samantha|victoria|karen|moira|tessa|nancy|emma|ava|jane|michelle|sara|female)\b/i
-
-let cache: SpeechSynthesisVoice[] = []
-const listeners = new Set<() => void>()
-
-function refresh(): void {
-  cache = window.speechSynthesis?.getVoices() ?? []
-  listeners.forEach((listener) => listener())
-}
-
-/* ---------- currently-spoken-sentence signal -----------------------------
+ * A small reactive slot pointing at the sentence the audio queue is
+ * playing RIGHT NOW. Drives the Nexus panel's rolling-line preview —
+ * instead of spilling the whole reply into a scrollable box, the panel
+ * shows just the line being voiced and lets it tick to the next as the
+ * queue advances.
  *
- * A small reactive slot pointing at the sentence the synthesizer is reading
- * RIGHT NOW. Drives the Nexus panel's rolling-line preview — instead of
- * spilling the whole reply into a scrollable box, the panel shows just the
- * line being voiced and lets it tick to the next as TTS progresses.
- *
- * Updated from the SpeechSynthesisUtterance.onstart hook attached in
- * enqueueSpeak(). Cleared when the synth queue drains, when stopSpeaking()
- * cancels, or on an utterance error.
- * ------------------------------------------------------------------------- */
+ * Updated from the HTMLAudioElement.onplaying / onended hooks the audio
+ * queue attaches per chunk. Cleared when the queue drains, when
+ * stopSpeaking() cancels, or on an audio error.
+ * --------------------------------------------------------------------- */
+
 let currentSpoken: string | null = null
 const currentSpokenListeners = new Set<(s: string | null) => void>()
 
@@ -97,84 +45,23 @@ function setCurrentSpoken(value: string | null): void {
   currentSpokenListeners.forEach((listener) => listener(value))
 }
 
-/** Subscribe to changes in the currently-spoken sentence. */
 export function subscribeCurrentSpoken(callback: (sentence: string | null) => void): () => void {
   currentSpokenListeners.add(callback)
   return () => currentSpokenListeners.delete(callback)
 }
 
-/** Read the currently-spoken sentence synchronously (for `useState` seeding). */
 export function getCurrentSpoken(): string | null {
   return currentSpoken
 }
 
-if (window.speechSynthesis) {
-  refresh()
-  window.speechSynthesis.onvoiceschanged = refresh
-}
-
-/** The system voice list, refreshed as the OS reports it. */
-export function availableVoices(): SimpleVoice[] {
-  return cache.map((v) => ({ uri: v.voiceURI, name: v.name, lang: v.lang }))
-}
-
-/** Subscribe to voice-list changes (the OS populates them asynchronously). */
-export function onVoicesChanged(callback: () => void): () => void {
-  listeners.add(callback)
-  return () => listeners.delete(callback)
-}
+/* ----------------------- text → speech-friendly ----------------------- */
 
 /**
- * Best-guess default voice for a persona — preferred order:
- *   1. A name from the per-persona preferred list, in list order
- *      (Andrew → Void, Ava → Soul win when installed; Aria/Guy next; etc.)
- *   2. English neural voice matching the persona hint
- *      (e.g. "Microsoft Aria Online (Natural)" for Soul)
- *   3. Any English voice matching the persona hint
- *      (e.g. "Microsoft Zira Desktop" for Soul)
- *   4. Any English neural voice
- *   5. First English voice
- *   6. First voice overall
- *
- * Walking the preferred-name list first lets us steer the default at
- * "Andrew (Natural HD)" over "Guy (Natural)" over "Mark (SAPI)" without
- * the regex caring — each is a strictly better choice than the next.
- * Beta testers who install just one new voice get the best one auto-
- * selected, which closes the "the voices still sound robotic after I
- * installed Andrew" loop.
+ * Strips markdown so the spoken output reads naturally. Identical to the
+ * v1.1.x helper — Piper takes plain text, same as Web Speech did.
+ * Code blocks collapse to a brief tone, inline code drops backticks,
+ * link text survives, markdown markers vanish.
  */
-export function guessVoice(persona: VoicePersona): string {
-  refresh()
-  const english = cache.filter((v) => v.lang.toLowerCase().startsWith('en'))
-  const pool = english.length > 0 ? english : cache
-  const personaHint = persona === 'void' ? MALE_HINT : FEMALE_HINT
-  const preferred = persona === 'void' ? PREFERRED_VOID_VOICES : PREFERRED_SOUL_VOICES
-
-  // First-pick walk: try each preferred name in order, prioritising
-  // neural variants when both an SAPI and a neural copy exist (some
-  // installs surface "Microsoft Eric" as both a desktop voice AND a
-  // Natural voice — we want the Natural one).
-  for (const name of preferred) {
-    const needle = new RegExp(`\\b${name}\\b`, 'i')
-    const neural = pool.find((v) => needle.test(v.name) && NEURAL_HINT.test(v.name))
-    if (neural) return neural.voiceURI
-    const plain = pool.find((v) => needle.test(v.name))
-    if (plain) return plain.voiceURI
-  }
-
-  const neuralPersona = pool.find((v) => NEURAL_HINT.test(v.name) && personaHint.test(v.name))
-  if (neuralPersona) return neuralPersona.voiceURI
-
-  const personaMatch = pool.find((v) => personaHint.test(v.name))
-  if (personaMatch) return personaMatch.voiceURI
-
-  const anyNeural = pool.find((v) => NEURAL_HINT.test(v.name))
-  if (anyNeural) return anyNeural.voiceURI
-
-  return (pool[0] ?? cache[0])?.voiceURI ?? ''
-}
-
-/** Strips markdown so the spoken output stays natural. */
 function forSpeech(text: string): string {
   return text
     .replace(/```[\s\S]*?```/g, '. (code block) .')
@@ -185,120 +72,201 @@ function forSpeech(text: string): string {
     .trim()
 }
 
-/**
- * Pitch tweak — 1.05 rather than the flat 1.0 takes a touch of the
- * monotone-robot edge off the older SAPI voices without sliding into
- * cartoon territory. Subtle but reliably calms the "choppy" perception.
- */
-const VOICE_PITCH = 1.05
+/* ------------------------ audio queue manager ------------------------- */
 
-/**
- * Wires the currently-spoken signal up to an utterance. `display` is the
- * sentence shown in the Nexus rolling preview — it's the ORIGINAL text
- * (with markdown intact), not the speech-stripped variant, so the user
- * sees what they'd read on screen rather than the bracket-free TTS prompt.
- *
- * The onend clear only fires when no more utterances are pending — if the
- * synth queue still has work, the next utterance's onstart will overwrite
- * the signal cleanly without an in-between flicker to null.
- */
-function attachSpokenSignal(utterance: SpeechSynthesisUtterance, display: string): void {
-  const synth = window.speechSynthesis
-  utterance.onstart = (): void => setCurrentSpoken(display)
-  const clearIfIdle = (): void => {
-    if (!synth || (!synth.speaking && !synth.pending)) setCurrentSpoken(null)
-  }
-  utterance.onend = clearIfIdle
-  utterance.onerror = clearIfIdle
+interface QueueItem {
+  url: string // object URL backing the WAV blob
+  display: string // unstripped sentence shown in the rolling preview
+  volume: number // 0-1, applied per-element so per-utterance volume tweaks work
 }
 
-/** Clamp a volume to the [0, 1] range the Web Speech API expects. */
+/**
+ * FIFO playback queue for synthesised WAV chunks. Only one audio element
+ * is alive at a time — `play()` is awaited via `ended` → advance to next.
+ * Tracking the `current` lets `clear()` actually stop in-flight audio
+ * rather than just dropping the pending list.
+ */
+class AudioQueue {
+  private current: HTMLAudioElement | null = null
+  private pending: QueueItem[] = []
+
+  enqueue(item: QueueItem): void {
+    this.pending.push(item)
+    if (!this.current) this.playNext()
+  }
+
+  private playNext(): void {
+    const item = this.pending.shift()
+    if (!item) {
+      this.current = null
+      setCurrentSpoken(null)
+      return
+    }
+    const audio = new Audio(item.url)
+    audio.volume = clampVolume(item.volume)
+    audio.onplaying = (): void => {
+      setCurrentSpoken(item.display)
+      // Renderer-only debug breadcrumb — visible in DevTools, not piped
+      // to the on-disk logs panel. Streaming TTS would otherwise burn 3
+      // IPC calls per sentence × N sentences just for diagnostics.
+      console.info(`[voice] audio playing (vol ${audio.volume.toFixed(2)})`)
+    }
+    const advance = (): void => {
+      URL.revokeObjectURL(item.url)
+      this.current = null
+      this.playNext()
+    }
+    audio.onended = advance
+    audio.onerror = (e): void => {
+      const msg = (e as Event & { message?: string }).message ?? 'unknown'
+      void vs.logs.write('error', 'system', `[voice] audio element error: ${msg}`)
+      advance()
+    }
+    this.current = audio
+    void audio.play().catch((err) => {
+      // Autoplay can be blocked on certain renderer contexts — log and
+      // skip to the next chunk so the queue doesn't lock up.
+      const msg = err instanceof Error ? err.message : String(err)
+      void vs.logs.write(
+        'error',
+        'system',
+        `[voice] audio.play() rejected: ${msg} — likely autoplay policy. Restart the app if you just changed it.`
+      )
+      console.warn('[voice] audio playback failed', err)
+      advance()
+    })
+  }
+
+  /** Pause + drop in-flight audio, throw away pending, revoke all URLs. */
+  clear(): void {
+    if (this.current) {
+      this.current.pause()
+      this.current.onended = null
+      this.current.onerror = null
+      this.current.onplaying = null
+      this.current.src = ''
+      this.current = null
+    }
+    for (const item of this.pending) URL.revokeObjectURL(item.url)
+    this.pending = []
+    setCurrentSpoken(null)
+  }
+}
+
+const audioQueue = new AudioQueue()
+
+/* --------------------- piper IPC + chained synth ---------------------- */
+
+/**
+ * Sequential promise chain so streaming sentences end up in the audio
+ * queue in the order they were fed, even though `vs.voice.synthesise()`
+ * is async and faster sentences could otherwise finish out of order.
+ * Replaced with a fresh resolved Promise on `stopSpeaking()` so any
+ * in-flight synth becomes a no-op once it lands.
+ */
+let synthChain: Promise<void> = Promise.resolve()
+/** Generation counter — bumped on stopSpeaking so chained .then callbacks
+ *  can detect they're stale and bail. */
+let synthGeneration = 0
+
 function clampVolume(volume: number): number {
   if (!Number.isFinite(volume)) return 1
   return Math.min(1, Math.max(0, volume))
 }
 
 /**
- * Build a configured `SpeechSynthesisUtterance` for the given text, voice,
- * rate and volume — with rate/volume clamped to the platform's accepted
- * range and the spoken-signal hooks already attached. Shared between
- * `speak` and `enqueueSpeak` so the utterance setup stays in one place;
- * the only thing the callers differ on is whether they cancel the queue
- * first (`speak`) or append to it (`enqueueSpeak`).
+ * Queue one sentence through the piper IPC → audio queue pipeline.
+ * Async work happens inside `synthChain` so order is preserved.
+ *
+ * `displayText` is the original (pre-`forSpeech`) text so the rolling
+ * preview shows what the user reads on screen, not the bracket-stripped
+ * variant we hand to Piper.
  */
-function buildUtterance(
+function queueOne(
   text: string,
-  voiceURI: string,
+  displayText: string,
+  persona: VoicePersona,
   rate: number,
   volume: number
-): SpeechSynthesisUtterance {
-  const utterance = new SpeechSynthesisUtterance(forSpeech(text))
-  const voice = cache.find((v) => v.voiceURI === voiceURI)
-  if (voice) utterance.voice = voice
-  utterance.rate = Math.min(1.6, Math.max(0.5, rate))
-  utterance.pitch = VOICE_PITCH
-  utterance.volume = clampVolume(volume)
-  attachSpokenSignal(utterance, text.trim())
-  return utterance
+): void {
+  const myGen = synthGeneration
+  synthChain = synthChain.then(async () => {
+    // Bail if stopSpeaking() bumped the generation while we were waiting
+    // in line — without this guard, late-arriving synth bytes would
+    // queue audio after the user explicitly stopped.
+    if (myGen !== synthGeneration) return
+    try {
+      console.info(`[voice] synth start (${persona}, ${text.length} chars)`)
+      const bytes = await vs.voice.synthesise({ persona, text, rate })
+      if (myGen !== synthGeneration) {
+        console.info('[voice] synth result dropped — superseded by stop')
+        return
+      }
+      if (bytes.length === 0) {
+        void vs.logs.write('warn', 'system', '[voice] synth returned 0 bytes — piper produced no audio')
+        return
+      }
+      console.info(`[voice] synth ok — ${bytes.length} bytes, enqueuing audio`)
+      // Cast through BlobPart — TS's strict view of Uint8Array.buffer
+      // (potentially SharedArrayBuffer) flags the literal `new Blob([bytes])`,
+      // even though every Uint8Array we receive from IPC is plain.
+      const blob = new Blob([bytes as BlobPart], { type: 'audio/wav' })
+      const url = URL.createObjectURL(blob)
+      audioQueue.enqueue({ url, display: displayText, volume })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      void vs.logs.write('error', 'system', `[voice] synth failed: ${msg}`)
+      console.warn('[voice] piper synthesis failed', err)
+    }
+  })
 }
 
-export function speak(text: string, voiceURI: string, rate = 1, volume = 1): void {
-  const synth = window.speechSynthesis
-  if (!synth || !text.trim()) return
-  synth.cancel()
-  setCurrentSpoken(null)
-  synth.speak(buildUtterance(text, voiceURI, rate, volume))
+/* ---------------------------- public API ------------------------------ */
+
+/**
+ * Speak text immediately, replacing anything currently playing. Used by
+ * the test buttons in voice settings, the persona-greet on toggle, etc.
+ */
+export function speak(text: string, persona: VoicePersona, rate = 1, volume = 1): void {
+  stopSpeaking()
+  enqueueSpeak(text, persona, rate, volume)
 }
 
 /**
- * Like speak() but does NOT cancel the existing queue first. Use this
- * when feeding streaming-TTS sentence chunks — each chunk queues behind
- * whatever's already playing, so the voice flows continuously as new
- * text arrives.
+ * Append a sentence to the playback queue without clearing what's
+ * already playing. Used by `StreamingSpeaker` to feed sentence-chunks
+ * as a streaming reply arrives.
  */
-export function enqueueSpeak(text: string, voiceURI: string, rate = 1, volume = 1): void {
-  const synth = window.speechSynthesis
-  if (!synth || !text.trim()) return
-  synth.speak(buildUtterance(text, voiceURI, rate, volume))
+export function enqueueSpeak(text: string, persona: VoicePersona, rate = 1, volume = 1): void {
+  if (!text.trim()) return
+  const spoken = forSpeech(text)
+  if (!spoken) return
+  queueOne(spoken, text.trim(), persona, rate, volume)
 }
 
-/** Resolves the configured voice URI for the active persona, with a fallback. */
-export function resolveVoiceURI(voice: VoiceConfig): string {
-  const stored = voice.persona === 'void' ? voice.voidVoiceURI : voice.soulVoiceURI
-  return stored || guessVoice(voice.persona)
-}
-
-/** Speaks text using the active persona's configured voice + rate + volume. */
+/** Speak text using the given config's persona + rate + volume. */
 export function speakWith(voice: VoiceConfig, text: string): void {
-  speak(text, resolveVoiceURI(voice), voice.rate, voice.volume)
+  speak(text, voice.persona, voice.rate, voice.volume)
 }
 
-export function stopSpeaking(): void {
-  window.speechSynthesis?.cancel()
-  setCurrentSpoken(null)
-}
-
-/* --------------------------- streaming TTS --------------------------------
- *
- * The model streams tokens; the user should hear the assistant START
- * talking before the typing finishes. We chunk on sentence boundaries
- * (`. ! ?` followed by whitespace, or paragraph breaks) and enqueue
- * each one as soon as it closes.
- *
- * Subtleties:
- *   - We do NOT split inside an unclosed code fence. A streaming
- *     ```python\ndef foo():` would contain periods (`foo.bar()`) that
- *     are NOT sentence terminators — speaking the half-block sounds
- *     awful. So we cap the safe-to-emit slice at the last fence
- *     opening when the fence count is odd.
- *   - `spokenIndex` tracks how far through the accumulated text we've
- *     already enqueued, so successive feed() calls only emit the new
- *     completed sentences since last time.
- *   - flush(text) speaks whatever fragment remains unspoken — called
- *     when the stream finishes so a trailing sentence-without-punct
- *     still gets read.
- * --------------------------------------------------------------------------
+/**
+ * Cancel everything — drop the in-flight synth chain, clear the audio
+ * queue, clear the currently-spoken signal. Safe to call when nothing is
+ * playing.
  */
+export function stopSpeaking(): void {
+  synthGeneration++
+  synthChain = Promise.resolve()
+  audioQueue.clear()
+}
+
+/* --------------------------- streaming TTS ---------------------------- *
+ *
+ * Same architecture as v1.1.x — chunk on sentence boundaries, enqueue
+ * each as it closes. The chunking logic is identical because Piper
+ * speaks sentences the same way Web Speech did. Only the per-chunk
+ * dispatch is different (IPC → piper → WAV vs. utterance.speak).
+ * --------------------------------------------------------------------- */
 
 /**
  * Walks `text` from `startIndex` looking for completed sentence
@@ -306,7 +274,8 @@ export function stopSpeaking(): void {
  * `nextIndex` the caller should pass back on the following call.
  *
  * Unclosed code fences are respected — text past an unclosed ```
- * is held back until the fence closes.
+ * is held back until the fence closes, otherwise we'd speak half a
+ * code block and it sounds awful.
  */
 export function extractCompleteSentences(
   text: string,
@@ -314,16 +283,12 @@ export function extractCompleteSentences(
 ): { sentences: string[]; nextIndex: number } {
   if (startIndex >= text.length) return { sentences: [], nextIndex: startIndex }
   let tail = text.slice(startIndex)
-  // If there's an odd number of ``` in the tail, the last one is an
-  // unclosed fence. Don't emit anything past its opening.
   const fenceMatches = tail.match(/```/g)
   if (fenceMatches && fenceMatches.length % 2 === 1) {
     const lastFence = tail.lastIndexOf('```')
     tail = tail.slice(0, lastFence)
   }
-  // Sentence boundary: period / question mark / exclamation followed
-  // by whitespace, OR a paragraph break. Conservative — we'd rather
-  // delay a sentence than emit a half-formed one.
+  // Period / question / exclamation + whitespace, OR paragraph break.
   const boundary = /[.!?]+\s+|\n{2,}/g
   const sentences: string[] = []
   let pos = 0
@@ -339,8 +304,8 @@ export function extractCompleteSentences(
 
 /**
  * Stateful helper around enqueueSpeak — owns the spokenIndex pointer
- * so the agent loop doesn't have to manage it. One instance per
- * send() (or per agent run); the caller resets via `new` each turn.
+ * so the agent loop doesn't have to manage it. One instance per send()
+ * (or per agent run); the caller resets via `new` each turn.
  *
  *   const speaker = new StreamingSpeaker(cfg.voice)
  *   // on every chunk arrival:
@@ -350,12 +315,12 @@ export function extractCompleteSentences(
  */
 export class StreamingSpeaker {
   private spokenIndex = 0
-  private readonly voiceURI: string
+  private readonly persona: VoicePersona
   private readonly rate: number
   private readonly volume: number
 
   constructor(voice: VoiceConfig) {
-    this.voiceURI = resolveVoiceURI(voice)
+    this.persona = voice.persona
     this.rate = voice.rate
     this.volume = voice.volume
   }
@@ -364,7 +329,7 @@ export class StreamingSpeaker {
   feed(text: string): void {
     const { sentences, nextIndex } = extractCompleteSentences(text, this.spokenIndex)
     for (const sentence of sentences) {
-      enqueueSpeak(sentence, this.voiceURI, this.rate, this.volume)
+      enqueueSpeak(sentence, this.persona, this.rate, this.volume)
     }
     this.spokenIndex = nextIndex
   }
@@ -375,8 +340,7 @@ export class StreamingSpeaker {
    */
   flush(text: string): void {
     const tail = text.slice(this.spokenIndex).trim()
-    if (tail) enqueueSpeak(tail, this.voiceURI, this.rate)
+    if (tail) enqueueSpeak(tail, this.persona, this.rate, this.volume)
     this.spokenIndex = text.length
   }
 }
-

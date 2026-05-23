@@ -75,79 +75,152 @@ function forSpeech(text: string): string {
 /* ------------------------ audio queue manager ------------------------- */
 
 interface QueueItem {
-  url: string // object URL backing the WAV blob
+  /** Raw WAV bytes from piper. Decoded lazily inside playNext() so the
+   *  AudioContext only fires up once playback actually starts. */
+  bytes: Uint8Array
   display: string // unstripped sentence shown in the rolling preview
-  volume: number // 0-1, applied per-element so per-utterance volume tweaks work
+  volume: number // 0-1, applied via a per-source GainNode
 }
 
 /**
- * FIFO playback queue for synthesised WAV chunks. Only one audio element
- * is alive at a time — `play()` is awaited via `ended` → advance to next.
- * Tracking the `current` lets `clear()` actually stop in-flight audio
- * rather than just dropping the pending list.
+ * Single shared AudioContext. Created lazily on first use because some
+ * Chromium versions still demand a user-gesture before resuming a suspended
+ * context — the very first speech happens behind a click anyway (test
+ * preview button, mic mute, send button), so by the time we synthesise
+ * audio the context is allowed to run. We hold one for the app lifetime
+ * rather than creating per-utterance to avoid the cold-start latency
+ * (~30 ms on Windows the first time a sample rate is negotiated).
+ */
+let audioCtx: AudioContext | null = null
+
+function getAudioContext(): AudioContext {
+  if (!audioCtx) {
+    audioCtx = new AudioContext()
+  }
+  if (audioCtx.state === 'suspended') {
+    // Best-effort resume — if Chromium hasn't seen a user gesture this
+    // session, this still rejects, but we'll log it in playNext().
+    void audioCtx.resume()
+  }
+  return audioCtx
+}
+
+/**
+ * FIFO playback queue for synthesised WAV chunks, played through the Web
+ * Audio API rather than `<audio>` elements.
+ *
+ * Why Web Audio: HTMLAudioElement's WAV decoder is finicky about header
+ * layout — it rejects valid PCM streams when chunk sizes are 0xFFFFFFFF
+ * (streaming WAVs), when extra LIST/INFO chunks are present, or when the
+ * file uses WAVE_FORMAT_EXTENSIBLE (0xFFFE) instead of plain PCM. Piper
+ * 2023.11.14-2 on Windows writes one of these flavours and Chromium's
+ * `<audio>` rejects it with the unhelpful "no supported source was found"
+ * error, leaving only a brief decoder-state buzz behind. AudioContext.
+ * decodeAudioData uses a separate, more permissive decoder that handles
+ * all these WAV variants correctly.
+ *
+ * Trade-offs: slightly more code (decode + buffer source + gain), but
+ * the cost is one decodeAudioData call per sentence (~5 ms for 4 sec
+ * of audio) and we get cleaner stop semantics — `source.stop()` is
+ * truly instant, unlike `audio.pause()` which can leave a partial buffer
+ * draining for a few ms.
  */
 class AudioQueue {
-  private current: HTMLAudioElement | null = null
+  private current: AudioBufferSourceNode | null = null
+  private currentGain: GainNode | null = null
   private pending: QueueItem[] = []
+  /**
+   * Bumped on clear() so a decodeAudioData() that resolves AFTER the
+   * user pressed Stop doesn't sneak its source into playback. Same idea
+   * as synthGeneration, scoped to playback.
+   */
+  private playbackGeneration = 0
 
   enqueue(item: QueueItem): void {
     this.pending.push(item)
-    if (!this.current) this.playNext()
+    if (!this.current) void this.playNext()
   }
 
-  private playNext(): void {
+  private async playNext(): Promise<void> {
     const item = this.pending.shift()
     if (!item) {
       this.current = null
+      this.currentGain = null
       setCurrentSpoken(null)
       return
     }
-    const audio = new Audio(item.url)
-    audio.volume = clampVolume(item.volume)
-    audio.onplaying = (): void => {
-      setCurrentSpoken(item.display)
-      // Renderer-only debug breadcrumb — visible in DevTools, not piped
-      // to the on-disk logs panel. Streaming TTS would otherwise burn 3
-      // IPC calls per sentence × N sentences just for diagnostics.
-      console.info(`[voice] audio playing (vol ${audio.volume.toFixed(2)})`)
-    }
-    const advance = (): void => {
-      URL.revokeObjectURL(item.url)
-      this.current = null
-      this.playNext()
-    }
-    audio.onended = advance
-    audio.onerror = (e): void => {
-      const msg = (e as Event & { message?: string }).message ?? 'unknown'
-      void vs.logs.write('error', 'system', `[voice] audio element error: ${msg}`)
-      advance()
-    }
-    this.current = audio
-    void audio.play().catch((err) => {
-      // Autoplay can be blocked on certain renderer contexts — log and
-      // skip to the next chunk so the queue doesn't lock up.
+    const myGen = this.playbackGeneration
+    const ctx = getAudioContext()
+
+    let buffer: AudioBuffer
+    try {
+      // decodeAudioData wants an ArrayBuffer it owns — slice() makes a
+      // copy detached from the Uint8Array's underlying buffer so we don't
+      // hand the decoder a view that could be modified mid-decode.
+      const arrayBuffer = item.bytes.buffer.slice(
+        item.bytes.byteOffset,
+        item.bytes.byteOffset + item.bytes.byteLength
+      ) as ArrayBuffer
+      buffer = await ctx.decodeAudioData(arrayBuffer)
+    } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       void vs.logs.write(
         'error',
         'system',
-        `[voice] audio.play() rejected: ${msg} — likely autoplay policy. Restart the app if you just changed it.`
+        `[voice] decodeAudioData failed (${item.bytes.length} bytes): ${msg}`
       )
-      console.warn('[voice] audio playback failed', err)
-      advance()
-    })
+      console.warn('[voice] decodeAudioData failed', err)
+      // Skip to the next chunk so the queue doesn't lock up.
+      this.current = null
+      this.currentGain = null
+      void this.playNext()
+      return
+    }
+
+    // Bail if clear() ran while we were decoding — playbackGeneration
+    // bumped, this source no longer belongs to the active queue.
+    if (myGen !== this.playbackGeneration) return
+
+    const source = ctx.createBufferSource()
+    source.buffer = buffer
+    const gain = ctx.createGain()
+    gain.gain.value = clampVolume(item.volume)
+    source.connect(gain).connect(ctx.destination)
+
+    source.onended = (): void => {
+      // Only advance if THIS source is still the current one — clear()
+      // calls source.stop() which fires onended, and we don't want to
+      // chain into another playNext after an explicit cancel.
+      if (myGen !== this.playbackGeneration) return
+      this.current = null
+      this.currentGain = null
+      void this.playNext()
+    }
+
+    this.current = source
+    this.currentGain = gain
+    setCurrentSpoken(item.display)
+    console.info(
+      `[voice] playing ${buffer.duration.toFixed(2)}s @ ${buffer.sampleRate} Hz (vol ${gain.gain.value.toFixed(2)})`
+    )
+    source.start()
   }
 
-  /** Pause + drop in-flight audio, throw away pending, revoke all URLs. */
+  /** Stop in-flight audio, throw away pending. Instant — Web Audio's
+   *  stop() is synchronous, unlike <audio>'s drain-then-pause. */
   clear(): void {
+    this.playbackGeneration++
     if (this.current) {
-      this.current.pause()
-      this.current.onended = null
-      this.current.onerror = null
-      this.current.onplaying = null
-      this.current.src = ''
+      try {
+        this.current.stop()
+      } catch {
+        /* already stopped or never started — both safe to ignore */
+      }
+      this.current.disconnect()
+      this.currentGain?.disconnect()
       this.current = null
+      this.currentGain = null
     }
-    for (const item of this.pending) URL.revokeObjectURL(item.url)
     this.pending = []
     setCurrentSpoken(null)
   }
@@ -207,12 +280,10 @@ function queueOne(
         return
       }
       console.info(`[voice] synth ok — ${bytes.length} bytes, enqueuing audio`)
-      // Cast through BlobPart — TS's strict view of Uint8Array.buffer
-      // (potentially SharedArrayBuffer) flags the literal `new Blob([bytes])`,
-      // even though every Uint8Array we receive from IPC is plain.
-      const blob = new Blob([bytes as BlobPart], { type: 'audio/wav' })
-      const url = URL.createObjectURL(blob)
-      audioQueue.enqueue({ url, display: displayText, volume })
+      // Pass raw bytes directly — AudioQueue uses Web Audio API's
+      // decodeAudioData, which wants an ArrayBuffer it can own. We
+      // skip the Blob/URL hop entirely.
+      audioQueue.enqueue({ bytes, display: displayText, volume })
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       void vs.logs.write('error', 'system', `[voice] synth failed: ${msg}`)

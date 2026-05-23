@@ -64,6 +64,7 @@ import type {
   MemoryConfig,
   ProactiveVoiceConfig,
   SessionSentiment,
+  WatchSpec,
   WatchTask,
   SystemStats,
   VoicePersona,
@@ -179,7 +180,9 @@ export interface VoidSoulBridge {
     forgetRecentSentiment(days?: number): Promise<{ deleted: number }>
   }
   /** v1.5.0 proactive watch tasks — Soul can initiate without being asked.
-   *  All four built-in tasks ship disabled; user opts in via Settings. */
+   *  All four built-in tasks ship disabled; user opts in via Settings.
+   *  v1.6.0: users can create their own custom tasks via `add()` from
+   *  the CustomWatchTaskDialog in the Voice settings panel. */
   proactive: {
     list(): Promise<WatchTask[]>
     setEnabled(id: string, enabled: boolean): Promise<WatchTask | null>
@@ -187,6 +190,10 @@ export interface VoidSoulBridge {
     /** Chat store fires this on every user send so idle-duration watches
      *  measure from real user activity, not from app start. */
     bumpInteraction(): Promise<{ ok: boolean }>
+    /** Create a user-defined watch task. The renderer fully constructs
+     *  the spec; main just persists it via the same code path the
+     *  boot-time seeder uses for built-ins. */
+    add(input: { name: string; spec: WatchSpec; enabled?: boolean }): Promise<WatchTask>
   }
   history: {
     /** Lightweight thread list (no message bodies). */

@@ -25,7 +25,9 @@ import {
   Heart,
   Loader2,
   Play,
+  Plus,
   Sparkles,
+  Trash2,
   Volume2
 } from 'lucide-react'
 import { useConfigStore } from '../../store/useConfigStore'
@@ -33,6 +35,7 @@ import { useUiStore } from '../../store/useUiStore'
 import { useWidgetStore } from '../../store/useWidgetStore'
 import { Toggle } from '../common/ui'
 import { CollapsibleSection } from './CollapsibleSection'
+import { CustomWatchTaskDialog } from './CustomWatchTaskDialog'
 import { speak } from '../../lib/voice'
 import { vs } from '../../lib/bridge'
 import { cn, relativeTime } from '../../lib/utils'
@@ -523,19 +526,28 @@ function formatSize(bytes: number): string {
  * both a nice gesture and the right thing to do.
  */
 /**
- * v1.5.0 Phase 4 — proactive voice settings. Master toggle + per-task
- * enable/disable + last-fired timestamps. All four built-in watch tasks
- * are seeded disabled on first boot; user opts into the ones they want.
+ * Proactive voice settings — master toggle + per-task enable + custom
+ * task builder (v1.6.0).
  *
- * Settings panel is intentionally lightweight — surfaces what's running
- * without a Quick-Settings depth of customisation. Custom watch tasks
- * (UI to create new ones) deferred to v1.5.1.
+ * The four v1.5 built-ins (Task complete / Long idle / Stuck loop /
+ * Morning recap) seed automatically on boot. Users can add their own
+ * tasks via the "+ Custom task" button — `addWatchTask` was always
+ * part of the watch-task API, but v1.5 only exposed it through the
+ * boot-time seeder. The CustomWatchTaskDialog flips that into a
+ * platform feature: anyone can compose "When X happens, Soul says Y".
+ *
+ * Built-in tasks are detected by name (they re-seed on boot if
+ * deleted, so the delete button stays hidden for them — surfacing a
+ * delete that does nothing would be confusing).
  */
+const BUILT_IN_NAMES = new Set(['Task complete', 'Long idle', 'Stuck loop', 'Morning recap'])
+
 function ProactiveVoiceBody(): JSX.Element {
   const config = useConfigStore((s) => s.config)
   const pushToast = useUiStore((s) => s.pushToast)
   const [tasks, setTasks] = useState<import('@shared/types').WatchTask[]>([])
   const [loading, setLoading] = useState(false)
+  const [dialogOpen, setDialogOpen] = useState(false)
 
   const refresh = useCallback(async (): Promise<void> => {
     try {
@@ -582,10 +594,27 @@ function ProactiveVoiceBody(): JSX.Element {
     }
   }
 
+  const handleTaskRemove = async (id: string, name: string): Promise<void> => {
+    if (loading) return
+    if (!window.confirm(`Remove watch task "${name}"? This can't be undone.`)) return
+    setLoading(true)
+    try {
+      await vs.proactive.remove(id)
+      pushToast('success', `Removed "${name}".`)
+      await refresh()
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const summarise = (task: import('@shared/types').WatchTask): string => {
     const t = task.spec.type
     if (t === 'idle-duration') {
-      return `After ${task.spec.params.minutes ?? 30} min idle`
+      const mins = task.spec.params.minutes ?? 30
+      const from = task.spec.params.activeFrom as string | undefined
+      const to = task.spec.params.activeTo as string | undefined
+      const window = from && to ? ` (${from}–${to})` : ''
+      return `After ${mins} min idle${window}`
     }
     if (t === 'task-complete') {
       return `When a long task (>${task.spec.params.minDurationSec ?? 10}s) finishes`
@@ -604,8 +633,8 @@ function ProactiveVoiceBody(): JSX.Element {
       <p className="mb-2 text-[10px] leading-relaxed text-slate-500">
         Soul can initiate without being asked — a quick nudge when a long
         task finishes, when you've been idle a while, when she notices
-        you're stuck. All four below ship OFF — opt into the ones you
-        want. DND + voice mute always override.
+        you're stuck. Opt in to the ones you want, or build your own with
+        "+ Custom task". DND + voice mute always override.
       </p>
 
       <div className="mb-2 flex items-center justify-between rounded-lg border border-white/5 bg-black/20 px-2.5 py-2">
@@ -621,39 +650,77 @@ function ProactiveVoiceBody(): JSX.Element {
       </div>
 
       {masterOn && (
-        <div className="space-y-1">
-          {tasks.length === 0 ? (
-            <p className="text-[10px] italic text-slate-500">
-              Loading built-in tasks…
-            </p>
-          ) : (
-            tasks.map((task) => (
-              <div
-                key={task.id}
-                className="rounded-md border border-white/5 bg-black/20 px-2.5 py-2"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <div className="min-w-0 flex-1">
-                    <p className="text-[11px] font-semibold text-white">
-                      {task.name}
-                    </p>
-                    <p className="text-[10px] text-slate-500">{summarise(task)}</p>
-                    {task.lastRun && (
-                      <p className="mt-0.5 text-[9px] text-slate-600">
-                        Last fired {relativeTime(task.lastRun)}
-                      </p>
-                    )}
+        <>
+          <div className="space-y-1">
+            {tasks.length === 0 ? (
+              <p className="text-[10px] italic text-slate-500">
+                Loading built-in tasks…
+              </p>
+            ) : (
+              tasks.map((task) => {
+                const isCustom = !BUILT_IN_NAMES.has(task.name)
+                return (
+                  <div
+                    key={task.id}
+                    className="rounded-md border border-white/5 bg-black/20 px-2.5 py-2"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <p className="flex items-center gap-1.5 text-[11px] font-semibold text-white">
+                          {task.name}
+                          {isCustom && (
+                            <span className="rounded bg-[var(--accent-soft)] px-1 py-0.5 text-[8px] font-semibold uppercase tracking-wide text-[var(--accent)]">
+                              Custom
+                            </span>
+                          )}
+                        </p>
+                        <p className="text-[10px] text-slate-500">{summarise(task)}</p>
+                        {task.lastRun && (
+                          <p className="mt-0.5 text-[9px] text-slate-600">
+                            Last fired {relativeTime(task.lastRun)}
+                          </p>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Toggle
+                          checked={task.enabled}
+                          onChange={(v) => void handleTaskToggle(task.id, task.name, v)}
+                        />
+                        {isCustom && (
+                          <button
+                            type="button"
+                            onClick={() => void handleTaskRemove(task.id, task.name)}
+                            title="Remove this custom task"
+                            aria-label={`Remove ${task.name}`}
+                            className="flex h-6 w-6 items-center justify-center rounded-md text-slate-500 transition hover:bg-rose-500/15 hover:text-rose-300"
+                          >
+                            <Trash2 size={11} />
+                          </button>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                  <Toggle
-                    checked={task.enabled}
-                    onChange={(v) => void handleTaskToggle(task.id, task.name, v)}
-                  />
-                </div>
-              </div>
-            ))
-          )}
-        </div>
+                )
+              })
+            )}
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setDialogOpen(true)}
+            className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-md border border-dashed border-white/15 bg-black/10 py-2 text-[11px] font-semibold text-slate-300 transition hover:border-[var(--accent-ring)] hover:bg-[var(--accent-soft)] hover:text-[var(--accent)]"
+          >
+            <Plus size={12} />
+            Custom task
+          </button>
+        </>
       )}
+
+      <CustomWatchTaskDialog
+        open={dialogOpen}
+        onClose={() => setDialogOpen(false)}
+        onAdded={() => void refresh()}
+      />
     </>
   )
 }

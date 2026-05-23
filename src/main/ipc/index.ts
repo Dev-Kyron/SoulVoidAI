@@ -692,6 +692,19 @@ export function registerIpc(): void {
     bumpInteraction()
     return { ok: true }
   })
+  // v1.6.0 — user-created watch tasks. The renderer sends a fully-formed
+  // WatchSpec (validated client-side by CustomWatchTaskDialog); main just
+  // hands it to the same `addWatchTask` that the boot-time seeder uses.
+  ipcMain.handle(
+    'proactive:add',
+    async (
+      _e,
+      input: { name: string; spec: import('@shared/types').WatchSpec; enabled?: boolean }
+    ) => {
+      const { addWatchTask } = await import('../services/proactive/watchTasks')
+      return addWatchTask(input)
+    }
+  )
 
   /* ----------------------------- history ------------------------------- */
 

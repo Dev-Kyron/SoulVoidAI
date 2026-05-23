@@ -87,7 +87,8 @@ const bridge: VoidSoulBridge = {
     list: () => invoke('proactive:list'),
     setEnabled: (id, enabled) => invoke('proactive:set-enabled', id, enabled),
     remove: (id) => invoke('proactive:remove', id),
-    bumpInteraction: () => invoke('proactive:bump-interaction')
+    bumpInteraction: () => invoke('proactive:bump-interaction'),
+    add: (input) => invoke('proactive:add', input)
   },
   history: {
     summaries: () => invoke('history:summaries'),

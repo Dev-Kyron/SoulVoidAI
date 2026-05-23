@@ -145,7 +145,17 @@ export const useVoiceInputStore = create<VoiceInputState>((set, get) => ({
       await useConfigStore.getState().setPermission('microphone', true)
     }
     try {
-      await startRecording()
+      // v1.7.4 — hands-free voice mode. Auto-stop after sustained
+      // silence so the user doesn't have to tap mic again to send.
+      // The callback re-enters toggle() which takes the
+      // recording→transcribing→send path.
+      await startRecording({
+        onSilenceAutoStop: () => {
+          // Only auto-stop if we're still recording (user might have
+          // tapped mic in the meantime, or wake fired and cancelled).
+          if (get().status === 'recording') void get().toggle()
+        }
+      })
       set({ status: 'recording' })
       useWidgetStore.getState().setOrbState('listening')
     } catch {

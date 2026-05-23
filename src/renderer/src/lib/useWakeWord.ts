@@ -29,6 +29,7 @@ import { isQuietNow, type VoicePersona } from '@shared/types'
 import { createWhisperWakeEngine } from './wakeword/whisper'
 import { createPorcupineWakeEngine } from './wakeword/porcupine'
 import type { WakeEngine } from './wakeword/types'
+import { relayWakeState } from './wakeBridge'
 
 let activeEngine: WakeEngine | null = null
 /** Bumped on every boot/shutdown; engines started for stale generations are dropped. */
@@ -43,6 +44,7 @@ let whisperModelWarm = false
 async function shutdown(): Promise<void> {
   bootGen++
   useWidgetStore.getState().setWakeListening(false)
+  relayWakeState()
   if (!activeEngine) return
   const engine = activeEngine
   activeEngine = null
@@ -67,10 +69,16 @@ async function boot(): Promise<void> {
   // store's wakeHeard ticker so the Wake Word settings panel can show
   // exactly what the model is doing. Porcupine doesn't transcribe
   // (keyword-only) so it doesn't get this callback.
+  //
+  // v1.7.3 — after writing to the local store, also relay to other
+  // renderer windows (Settings is a separate Electron window with its
+  // own per-renderer Zustand instance, so it can't see the main
+  // panel's store updates directly).
   const engine = picovoiceKey
     ? createPorcupineWakeEngine(picovoiceKey, onWakeDetected)
     : createWhisperWakeEngine(onWakeDetected, (text, matched, error) => {
         useWidgetStore.getState().pushWakeHeard(text, matched, error)
+        relayWakeState()
       })
 
   // Whisper-engine cold path: the first transcribe call has to download
@@ -108,6 +116,7 @@ async function boot(): Promise<void> {
             'Wake-word model could not load. Check connection or disk space and re-arm to retry.'
           )
         useWidgetStore.getState().setWakeArmed(false)
+        relayWakeState()
       }
       return
     }
@@ -118,6 +127,7 @@ async function boot(): Promise<void> {
   // take ~50-300ms (mic permission, AudioContext init). The catch block
   // below rolls this back if start fails.
   useWidgetStore.getState().setWakeListening(true)
+  relayWakeState()
   try {
     await engine.start()
     if (generation !== bootGen) {
@@ -127,6 +137,7 @@ async function boot(): Promise<void> {
         /* best-effort */
       })
       useWidgetStore.getState().setWakeListening(false)
+      relayWakeState()
       return
     }
     activeEngine = engine
@@ -137,6 +148,7 @@ async function boot(): Promise<void> {
     )
   } catch (err) {
     useWidgetStore.getState().setWakeListening(false)
+    relayWakeState()
     void vs.logs.write(
       'error',
       'system',

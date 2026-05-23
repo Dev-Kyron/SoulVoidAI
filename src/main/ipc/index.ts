@@ -706,6 +706,32 @@ export function registerIpc(): void {
     bumpInteraction()
     return { ok: true }
   })
+
+  // v1.7.3 — cross-window wake-word diagnostic relay. The Whisper engine
+  // runs in the main panel renderer (it needs the browser audio APIs),
+  // but the diagnostic UI lives in the de-docked Settings window. Stores
+  // are per-renderer in Electron, so the engine's local store updates
+  // are invisible to the Settings window. This handler accepts a state
+  // snapshot from any renderer and relays it to the OTHER windows, so
+  // the Settings window can mirror what the main panel is recording.
+  ipcMain.handle(
+    'wake-diagnostic:relay',
+    (
+      e,
+      snapshot: {
+        armed: boolean
+        listening: boolean
+        scans: number
+        blockedReason: string | null
+        heard: Array<{ at: number; text: string; matched: boolean; error?: string }>
+      }
+    ) => {
+      // exceptSenderId so the source window doesn't echo to itself —
+      // it already updated its local store directly before calling this.
+      broadcast('wake-diagnostic:update', snapshot, e.sender.id)
+      return { ok: true }
+    }
+  )
   // v1.6.0 — user-created watch tasks. The renderer sends a fully-formed
   // WatchSpec (validated client-side by CustomWatchTaskDialog); main just
   // hands it to the same `addWatchTask` that the boot-time seeder uses.

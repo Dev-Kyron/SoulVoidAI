@@ -44,6 +44,23 @@ interface WidgetStore {
    * this (keyword-based, no text). v1.7.2 added error + silence-beat.
    */
   wakeHeard: Array<{ at: number; text: string; matched: boolean; error?: string }>
+  /**
+   * Diagnostic — total scan attempts the wake-word engine has made
+   * since arm. Bumped on EVERY scan() call before any short-circuit,
+   * so it stays useful even when nothing else is firing. If this is
+   * 0 after the engine reports listening, the scan loop isn't
+   * actually running. If it's growing but no wakeHeard events appear,
+   * every scan is short-circuiting before transcribe (see
+   * `wakeLastBlockedReason`).
+   */
+  wakeScans: number
+  /**
+   * Diagnostic — the reason the most recent scan short-circuited
+   * (e.g. "voice input not idle", "ring buffer empty", "cooldown").
+   * Null while scans are flowing normally. Updated at most once per
+   * scan; never cleared until app reload.
+   */
+  wakeLastBlockedReason: string | null
   activeTab: PanelTab
 
   setTab: (tab: PanelTab) => void
@@ -52,6 +69,7 @@ interface WidgetStore {
   setWakeArmed: (armed: boolean) => void
   pushWakeHeard: (text: string, matched: boolean, error?: string) => void
   clearWakeHeard: () => void
+  recordWakeScan: (blockedReason?: string | null) => void
   expand: () => Promise<void>
   collapse: () => void
   toggle: () => Promise<void>
@@ -67,6 +85,8 @@ export const useWidgetStore = create<WidgetStore>((set, get) => ({
   wakeListening: false,
   wakeArmed: false,
   wakeHeard: [],
+  wakeScans: 0,
+  wakeLastBlockedReason: null,
   activeTab: 'nexus',
 
   setTab: (tab) => set({ activeTab: tab }),
@@ -113,7 +133,16 @@ export const useWidgetStore = create<WidgetStore>((set, get) => ({
     set({ wakeHeard: next })
   },
 
-  clearWakeHeard: () => set({ wakeHeard: [] }),
+  clearWakeHeard: () => set({ wakeHeard: [], wakeScans: 0, wakeLastBlockedReason: null }),
+
+  recordWakeScan: (blockedReason) => {
+    set((state) => ({
+      wakeScans: state.wakeScans + 1,
+      // Update reason only when explicitly passed; null param means
+      // "scan reached transcribe" (no block).
+      wakeLastBlockedReason: blockedReason ?? null
+    }))
+  },
 
   expand: async () => {
     if (get().expanded || get().busy) return

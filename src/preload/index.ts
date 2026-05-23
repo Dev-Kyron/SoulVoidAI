@@ -91,6 +91,9 @@ const bridge: VoidSoulBridge = {
     bumpInteraction: () => invoke('proactive:bump-interaction'),
     add: (input) => invoke('proactive:add', input)
   },
+  wakeDiagnostic: {
+    relay: (snapshot) => invoke('wake-diagnostic:relay', snapshot)
+  },
   screenWatch: {
     status: () => invoke('screen-watch:status'),
     restart: () => invoke('screen-watch:restart'),
@@ -272,6 +275,7 @@ const bridge: VoidSoulBridge = {
     onFilesRagProgress: (cb) => subscribe('files-rag:progress', cb),
     onFilesRagDone: (cb) => subscribe('files-rag:done', cb),
     onConfigUpdated: (cb) => subscribe('config:updated', cb),
+    onWakeDiagnostic: (cb) => subscribe('wake-diagnostic:update', cb),
     onTrayOpenTab: (cb) => subscribe('tray:open-tab', cb),
     onTrayRunPrompt: (cb) => subscribe('tray:run-prompt', cb),
     onScheduledTaskRan: (cb) => subscribe('scheduler:task-ran', cb),

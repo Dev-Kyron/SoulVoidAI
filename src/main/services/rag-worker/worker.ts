@@ -290,7 +290,19 @@ const WHISPER_MODEL_ID = 'Xenova/whisper-tiny.en'
 interface AsrPipeline {
   (
     audio: Float32Array,
-    opts?: { chunk_length_s?: number; stride_length_s?: number }
+    opts?: {
+      chunk_length_s?: number
+      stride_length_s?: number
+      /**
+       * Generation-side guard against the "thank you thank you thank you…"
+       * repetition loop Whisper-tiny falls into on low-energy or noisy
+       * input. With n=3 the decoder refuses to emit any 3-gram it's
+       * already emitted in the same call. Cheap, deterministic, and the
+       * downside (rare loss of legitimate triple-word repeats like
+       * "yes yes yes") is irrelevant to a wake-phrase use case.
+       */
+      no_repeat_ngram_size?: number
+    }
   ): Promise<{ text: string }>
 }
 
@@ -324,8 +336,16 @@ async function handleTranscribeAudio(
   const pipeline = await getAsrPipeline()
   // chunk_length_s=30 matches Whisper's training context; clips under 30s
   // skip the chunking codepath entirely. stride_length_s prevents word-loss
-  // at chunk boundaries for longer clips.
-  const out = await pipeline(req.pcm, { chunk_length_s: 30, stride_length_s: 5 })
+  // at chunk boundaries for longer clips. no_repeat_ngram_size=3 kills the
+  // "thank you thank you thank you" repetition loop the tiny.en model
+  // falls into on quiet/noisy input — VAD already drops most silent
+  // buffers (see whisper.ts wake engine) but the rare buffer that makes
+  // it past VAD still benefits from the decoder-side guard.
+  const out = await pipeline(req.pcm, {
+    chunk_length_s: 30,
+    stride_length_s: 5,
+    no_repeat_ngram_size: 3
+  })
   return { text: (out.text ?? '').trim() }
 }
 

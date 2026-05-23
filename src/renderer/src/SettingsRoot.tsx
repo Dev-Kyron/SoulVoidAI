@@ -27,6 +27,7 @@ import { usePluginStore } from './store/usePluginStore'
 import { vs } from './lib/bridge'
 import { cn, lazyNamed } from './lib/utils'
 import { useAccentTheme, useConfigBroadcastSync } from './lib/useConfigBridge'
+import { useWakeBroadcastSync } from './lib/wakeBridge'
 import { useTheme } from './lib/useTheme'
 import { useGlobalSearchHotkey } from './lib/useGlobalSearchHotkey'
 import { Overlays } from './components/panel/Overlays'
@@ -291,6 +292,11 @@ export function SettingsRoot(): JSX.Element {
   }, [load, loadMemory, loadPlugins])
 
   useConfigBroadcastSync()
+  // Cross-window WAKE sync — when the user clicks "Arm now" in this
+  // window, the main panel must receive it so useWakeWord boots the
+  // engine. Without this, clicking Arm here flips the local store but
+  // the main panel never knows, engine stays dormant, Scans=0.
+  useWakeBroadcastSync()
   useAccentTheme(accent)
   useTheme()
   // Cmd/Ctrl+F here closes the Settings window and pops the global search

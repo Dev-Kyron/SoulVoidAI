@@ -200,6 +200,23 @@ export interface VoidSoulBridge {
      *  boot-time seeder uses for built-ins. */
     add(input: { name: string; spec: WatchSpec; enabled?: boolean }): Promise<WatchTask>
   }
+  /** v1.7.3 wake-word state relay across renderer windows. Stores are
+   *  per-renderer in Electron, so the Settings-window ArmRow setting
+   *  wakeArmed=true does NOTHING for the main-panel useWakeWord hook
+   *  unless we explicitly mirror the state. This relay covers BOTH the
+   *  arm/listening flags (set by clicks) AND the diagnostic data
+   *  (scans/heard) so both windows stay in sync. Any write to any
+   *  wake-* field in any window: write locally, then call this; main
+   *  rebroadcasts to other windows via wake-diagnostic:update event. */
+  wakeDiagnostic: {
+    relay(snapshot: {
+      armed: boolean
+      listening: boolean
+      scans: number
+      blockedReason: string | null
+      heard: Array<{ at: number; text: string; matched: boolean; error?: string }>
+    }): Promise<{ ok: boolean }>
+  }
   /** v1.7 screen-watch loop — periodic vision observation that may
    *  proactively speak when the model decides there's something
    *  useful to say. Gated by the screenCapture permission + a hard
@@ -586,6 +603,19 @@ export interface VoidSoulBridge {
      * leaves the other showing the old values.
      */
     onConfigUpdated(cb: (config: ClientConfig) => void): Unsubscribe
+    /** v1.7.3 — wake-word diagnostic snapshots from the main panel
+     *  renderer (where the engine runs). Settings window subscribes
+     *  so its diagnostic panel mirrors the engine's actual state
+     *  instead of staring at its own empty per-renderer store. */
+    onWakeDiagnostic(
+      cb: (snapshot: {
+        armed: boolean
+        listening: boolean
+        scans: number
+        blockedReason: string | null
+        heard: Array<{ at: number; text: string; matched: boolean; error?: string }>
+      }) => void
+    ): Unsubscribe
     /** Tray asked us to switch to a specific panel tab. */
     onTrayOpenTab(cb: (tab: 'nexus' | 'chat' | 'logs') => void): Unsubscribe
     /** Tray fired a saved quick prompt — renderer sends it as a chat turn. */

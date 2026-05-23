@@ -20,6 +20,7 @@ import { useWidgetStore } from './store/useWidgetStore'
 import { vs } from './lib/bridge'
 import { enqueueSpeak } from './lib/voice'
 import { useWakeWord } from './lib/useWakeWord'
+import { useWakeBroadcastSync } from './lib/wakeBridge'
 import { useAccentTheme, useConfigBroadcastSync } from './lib/useConfigBridge'
 import { useTheme } from './lib/useTheme'
 import { useGlobalSearchHotkey } from './lib/useGlobalSearchHotkey'
@@ -62,6 +63,11 @@ export default function App(): JSX.Element {
 
   // Cross-window config sync — picks up edits made in the Settings window.
   useConfigBroadcastSync()
+  // Cross-window WAKE sync — picks up Arm/Disarm clicks from Settings
+  // and mirrors engine state back so Settings shows the truth, not a
+  // local-store lie. Both windows mount this; main is the engine host,
+  // Settings is the UI control surface.
+  useWakeBroadcastSync()
 
   // Toast the user when a configured monthly-budget threshold is first crossed.
   useEffect(

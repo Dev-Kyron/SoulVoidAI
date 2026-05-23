@@ -37,6 +37,7 @@ import { Toggle } from '../common/ui'
 import { CollapsibleSection } from './CollapsibleSection'
 import { CustomWatchTaskDialog } from './CustomWatchTaskDialog'
 import { ScreenWatchSectionBody } from './ScreenWatchSection'
+import { relayWakeState } from '../../lib/wakeBridge'
 import { speak } from '../../lib/voice'
 import { vs } from '../../lib/bridge'
 import { cn, relativeTime } from '../../lib/utils'
@@ -789,7 +790,14 @@ function ArmRow(): JSX.Element {
       </div>
       <button
         type="button"
-        onClick={() => setArmed(!armed)}
+        onClick={() => {
+          setArmed(!armed)
+          // v1.7.3 — relay across windows so the main panel's
+          // useWakeWord hook actually sees the change and boots the
+          // engine. Without this, Settings flips its local store but
+          // the engine in main panel stays dormant forever.
+          relayWakeState()
+        }}
         className={`rounded px-2 py-0.5 text-[10px] font-medium transition-colors ${
           armed
             ? 'bg-rose-500/15 text-rose-300 hover:bg-rose-500/25'
@@ -911,7 +919,15 @@ function WakeWordBody({ voice }: { voice: VoiceConfig }): JSX.Element {
  */
 function WakeHeardTicker(): JSX.Element {
   const heard = useWidgetStore((s) => s.wakeHeard)
+  const scans = useWidgetStore((s) => s.wakeScans)
+  const blockedReason = useWidgetStore((s) => s.wakeLastBlockedReason)
   const clear = useWidgetStore((s) => s.clearWakeHeard)
+  const [testing, setTesting] = useState(false)
+  const [testResult, setTestResult] = useState<string | null>(null)
+  const pushToast = useUiStore((s) => s.pushToast)
+
+  // Cross-window state sync is mounted at the SettingsRoot level via
+  // useWakeBroadcastSync(). No per-component subscription needed.
 
   const stats = heard.reduce(
     (acc, h) => {
@@ -924,34 +940,99 @@ function WakeHeardTicker(): JSX.Element {
     { matched: 0, heard: 0, silence: 0, errors: 0 }
   )
 
+  /** Fires a one-off transcribe with a 1-second silence buffer to
+   *  isolate the IPC path from the wake-word scan loop. Tells the user
+   *  whether the bug is in the engine (loop not running / short-
+   *  circuiting) or in the transcribe pipeline (model not loaded /
+   *  IPC broken). */
+  const handleTestTranscribe = async (): Promise<void> => {
+    setTesting(true)
+    setTestResult(null)
+    try {
+      const sampleRate = 16_000
+      const pcm = new Float32Array(sampleRate) // 1 second of silence
+      const t0 = performance.now()
+      const result = await vs.ai.transcribe({ pcm, sampleRate })
+      const ms = Math.round(performance.now() - t0)
+      if (result.error) {
+        setTestResult(`error (${ms}ms): ${result.error}`)
+        pushToast('error', `Transcribe failed: ${result.error}`)
+      } else if (!result.text) {
+        setTestResult(`ok (${ms}ms): empty text — model loaded, mic input was silence`)
+        pushToast('success', 'Transcribe IPC works. Model is loaded.')
+      } else {
+        setTestResult(`ok (${ms}ms): "${result.text}"`)
+        pushToast('success', `Transcribe returned: "${result.text}"`)
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      setTestResult(`threw: ${msg}`)
+      pushToast('error', `Transcribe threw: ${msg}`)
+    } finally {
+      setTesting(false)
+    }
+  }
+
   return (
     <div className="mt-2 rounded-md border border-white/5 bg-black/20 px-2 py-1.5">
       <div className="mb-1 flex items-center justify-between">
         <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
           What Whisper heard
         </p>
-        {heard.length > 0 && (
+        <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={() => clear()}
-            className="text-[9px] text-slate-500 transition hover:text-slate-300"
+            onClick={() => void handleTestTranscribe()}
+            disabled={testing}
+            className="rounded-md border border-[var(--accent-ring)] bg-[var(--accent-soft)] px-2 py-0.5 text-[9px] font-semibold text-[var(--accent)] transition hover:bg-[var(--accent)]/15 disabled:opacity-50"
           >
-            clear
+            {testing ? 'testing…' : 'Test transcribe'}
           </button>
-        )}
+          {heard.length > 0 && (
+            <button
+              type="button"
+              onClick={() => clear()}
+              className="text-[9px] text-slate-500 transition hover:text-slate-300"
+            >
+              clear
+            </button>
+          )}
+        </div>
       </div>
-      {heard.length > 0 && (
-        <p className="mb-1 flex flex-wrap items-baseline gap-x-2 font-mono text-[9px] text-slate-500">
-          <span className="text-emerald-400">{stats.matched} matched</span>
-          <span>· {stats.heard} heard</span>
-          <span>· {stats.silence} silent</span>
-          {stats.errors > 0 && <span className="text-rose-300">· {stats.errors} errors</span>}
+
+      {/* v1.7.3 — Always-on diagnostics. Shows the scan counter +
+       *  most-recent short-circuit reason whether or not any events
+       *  have fired. If Scans=0 after the engine reports listening,
+       *  the loop isn't running. If Scans>0 but no events, every scan
+       *  is short-circuiting — reason shows why. */}
+      <p className="mb-1 flex flex-wrap items-baseline gap-x-2 font-mono text-[9px] text-slate-500">
+        <span className={scans === 0 ? 'text-rose-300' : 'text-slate-300'}>
+          Scans: {scans}
+        </span>
+        {heard.length > 0 && (
+          <>
+            <span className="text-emerald-400">· {stats.matched} matched</span>
+            <span>· {stats.heard} heard</span>
+            <span>· {stats.silence} silent</span>
+            {stats.errors > 0 && <span className="text-rose-300">· {stats.errors} errors</span>}
+          </>
+        )}
+      </p>
+      {blockedReason && (
+        <p className="mb-1 truncate font-mono text-[9px] text-amber-300">
+          Last block: {blockedReason}
+        </p>
+      )}
+      {testResult && (
+        <p className="mb-1 truncate font-mono text-[9px] text-cyan-200">
+          Test transcribe: {testResult}
         </p>
       )}
       {heard.length === 0 ? (
         <p className="text-[10px] italic text-slate-500">
-          No events yet. The first silence-beat appears in ~9 seconds; transcriptions
-          and errors appear as they happen.
+          {scans === 0
+            ? "Scan loop hasn't fired yet. If this stays at 0 for more than 10 seconds, the engine isn't actually running — check the activity log."
+            : 'Scan loop is alive. Waiting on a transcription or silence beat (every ~9s).'}
         </p>
       ) : (
         <ul className="space-y-0.5">

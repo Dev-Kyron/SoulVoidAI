@@ -35,6 +35,8 @@ import { matchWakePhrase } from './match'
 import { useConfigStore } from '../../store/useConfigStore'
 import { isQuietNow } from '@shared/types'
 import type { WakeDetectCallback, WakeEngine, WakeHeardCallback } from './types'
+import { useWidgetStore } from '../../store/useWidgetStore'
+import { relayWakeState as relayDiagnostic } from '../wakeBridge'
 
 /** Whisper's native sample rate; AudioContext resamples the mic to match. */
 const SAMPLE_RATE = 16_000
@@ -116,22 +118,96 @@ export function createWhisperWakeEngine(
   // ticker with a "(silence)" entry every 900ms (it'd be unreadable), but
   // we DO want occasional heartbeat entries so the user can tell the
   // engine is alive when their wake phrase isn't being heard at all.
-  // Fire one silence beat every SILENCE_BEAT_EVERY successful-but-empty
-  // scans (~every 9s at the default cadence).
+  // Fire one silence beat every SILENCE_BEAT_EVERY silent scans
+  // (~every 9s at the default cadence). Both VAD-gated and Whisper-
+  // returned-empty scans count as "silent".
   const SILENCE_BEAT_EVERY = 10
   let silentStreak = 0
 
+  /** Count one silent scan; emit the heartbeat event once per
+   *  SILENCE_BEAT_EVERY ticks. Shared so the VAD-skipped path and the
+   *  Whisper-returned-empty path stay in sync on a single counter. */
+  const tickSilenceBeat = (): void => {
+    silentStreak++
+    if (silentStreak >= SILENCE_BEAT_EVERY) {
+      silentStreak = 0
+      onHeard?.('', false)
+    }
+  }
+
+  // v1.7.5 — VAD pre-filter. Whisper's training was heavily YouTube-
+  // weighted, so feeding it ~1.6 seconds of mostly-silence reliably
+  // produces hallucinated transcriptions like "Thank you for watching"
+  // / "Bye" / "Please subscribe" / 🤩 emoji runs. Those then get
+  // logged as "heard" in the diagnostic but never match a wake phrase
+  // because the user wasn't actually saying anything.
+  //
+  // The fix: check the RMS energy of the audio buffer BEFORE calling
+  // transcribe. If it's below the threshold, the buffer is silence —
+  // skip Whisper entirely. Saves a transcribe IPC + worker round-trip
+  // per silent scan AND eliminates the hallucinations.
+  //
+  // 0.015 is calibrated for typical room noise vs spoken voice; bump
+  // to ~0.025 for noisier environments at the cost of needing the user
+  // to speak louder.
+  const VAD_RMS_THRESHOLD = 0.015
+
+  function computeRms(samples: Float32Array): number {
+    let sumSq = 0
+    for (let i = 0; i < samples.length; i++) sumSq += samples[i] * samples[i]
+    return Math.sqrt(sumSq / samples.length)
+  }
+
   async function scan(): Promise<void> {
-    if (stopped || !ring) return
-    if (performance.now() < cooldownUntil) return
+    // v1.7.3 — count + reason logged on EVERY scan attempt, before any
+    // short-circuit. Without this a wake-word loop that's stuck behind
+    // a gate looks identical to a wake-word loop that isn't running at
+    // all. The diagnostic panel in Wake Word settings reads from these
+    // values, mirrored across renderer windows via `relayDiagnostic`.
+    const widget = useWidgetStore.getState()
+    const recordAndRelay = (reason: string | null): void => {
+      widget.recordWakeScan(reason)
+      relayDiagnostic()
+    }
+    if (stopped || !ring) {
+      recordAndRelay(stopped ? 'engine stopped' : 'ring buffer not initialised')
+      return
+    }
+    if (performance.now() < cooldownUntil) {
+      recordAndRelay('post-detection cooldown')
+      return
+    }
     // Skip while voice input is actively capturing — both code paths open
     // their own mic stream, and running Whisper on the user's actual
     // question would trigger another wake-detect on its own contents.
-    if (useVoiceInputStore.getState().status !== 'idle') return
-    if (!scanLock.tryAcquire()) return
+    const voiceStatus = useVoiceInputStore.getState().status
+    if (voiceStatus !== 'idle') {
+      recordAndRelay(`voice input busy (${voiceStatus})`)
+      return
+    }
+    if (!scanLock.tryAcquire()) {
+      recordAndRelay('previous scan still in flight')
+      return
+    }
     try {
       const pcm = snapshot()
-      if (!pcm) return
+      if (!pcm) {
+        recordAndRelay('snapshot returned null')
+        return
+      }
+      // VAD pre-filter — skip Whisper entirely when the buffer is
+      // silence. Eliminates the "Thank you for watching" / "Bye" /
+      // emoji hallucinations that flood the diagnostic when nobody
+      // is speaking. Counts toward silence-beats so the user still
+      // sees the engine alive.
+      const rms = computeRms(pcm)
+      if (rms < VAD_RMS_THRESHOLD) {
+        recordAndRelay(null)
+        tickSilenceBeat()
+        return
+      }
+      // Reached transcribe — clear any prior block reason.
+      recordAndRelay(null)
       const result = await vs.ai.transcribe({ pcm, sampleRate: SAMPLE_RATE })
       // `stop()` can have run during the await — re-check both the stopped
       // flag and the ring reference (which `stop()` nulls). Without this,
@@ -150,11 +226,7 @@ export function createWhisperWakeEngine(
         // throttled "silence beat" so the user knows the engine is
         // alive — without it, a stuck mic looks identical to a
         // working mic listening to a quiet room.
-        silentStreak++
-        if (silentStreak >= SILENCE_BEAT_EVERY) {
-          silentStreak = 0
-          onHeard?.('', false)
-        }
+        tickSilenceBeat()
         return
       }
       silentStreak = 0
@@ -192,6 +264,24 @@ export function createWhisperWakeEngine(
       audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
     })
     audioCtx = new AudioContext({ sampleRate: SAMPLE_RATE })
+    // v1.7.3 — explicitly resume. Chromium creates AudioContext in
+    // `suspended` state unless tied to a fresh user-gesture frame; our
+    // boot() chain awaits enough things (secrets.get, getUserMedia)
+    // that the gesture context is lost by the time we get here. Without
+    // resume(), processor.onaudioprocess NEVER fires, the ring buffer
+    // stays zero-filled, and Whisper transcribes silence — which it
+    // hallucinates as "you" because of training-data bias. Spent a week
+    // chasing this masquerading as "mic not working".
+    if (audioCtx.state === 'suspended') {
+      try {
+        await audioCtx.resume()
+      } catch {
+        // Browser refused to resume; log via the diagnostic relay
+        // so the Settings panel can surface it as an error row.
+        useWidgetStore.getState().pushWakeHeard('', false, 'AudioContext could not resume')
+        relayDiagnostic()
+      }
+    }
     source = audioCtx.createMediaStreamSource(stream)
     // ScriptProcessor is deprecated in favour of AudioWorklet, but worklets
     // require a separate worklet file URL that's awkward with electron-vite's

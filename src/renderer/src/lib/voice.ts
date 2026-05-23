@@ -231,7 +231,19 @@ class AudioQueue {
     const source = ctx.createBufferSource()
     source.buffer = buffer
     const gain = ctx.createGain()
-    gain.gain.value = clampVolume(item.volume)
+    // Make-up gain on top of the user's slider. Piper voices peak around
+    // -20 dBFS (much quieter than typical OS TTS or YouTube playback) so
+    // a literal 0.15 slider value renders sub-audible on most desktop
+    // speakers. 1.7× lifts the perceived loudness into the range users
+    // expect WITHOUT clipping (headroom math: -20 dBFS + ~4.6 dB = still
+    // -15 dBFS, well under 0 dBFS clip). Hard-cap at 1.5 final-gain so
+    // a 100% slider doesn't push the signal into distortion territory.
+    const PIPER_MAKEUP_GAIN = 1.7
+    const PIPER_GAIN_CEILING = 1.5
+    gain.gain.value = Math.min(
+      PIPER_GAIN_CEILING,
+      clampVolume(item.volume) * PIPER_MAKEUP_GAIN
+    )
     source.connect(gain).connect(ctx.destination)
 
     source.onended = (): void => {

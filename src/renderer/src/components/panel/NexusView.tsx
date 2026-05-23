@@ -202,6 +202,12 @@ function VoiceBar(): JSX.Element | null {
  */
 function flattenForPreview(text: string): string {
   return text
+    // Strip v1.3.0+ voice markup BEFORE markdown — otherwise the
+    // `[*_#>~|`]` rule below eats the `<` from `<voice...>` and leaves
+    // a half-mangled tag in the rolling-line readback. The chat bubble
+    // uses stripVoiceTagsOnly elsewhere; the Nexus preview needs the
+    // same treatment.
+    .replace(/<\/?voice(?:\s[^>]*)?>/gi, '')
     .replace(/```[\s\S]*?```/g, ' ')
     .replace(/`([^`]+)`/g, '$1')
     .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')

@@ -173,6 +173,17 @@ export function VoiceSettings(): JSX.Element | null {
             onChange={(e) => void setVoice({ volume: Number(e.target.value) })}
             className="w-full accent-[var(--accent)]"
           />
+          {/* Low-volume warning. Piper voices are quieter than typical TTS,
+           *  so even with the v1.3.4 make-up gain, sliders below ~30%
+           *  produce playback that's hard to hear over ambient room noise.
+           *  Beta testers consistently set this low by accident and read
+           *  the resulting silence as "voice is broken." Flag it cheaply. */}
+          {voice.volume > 0 && voice.volume < 0.3 && (
+            <p className="mt-1 text-[10px] text-amber-300/80">
+              Slider is low — Piper voices may be barely audible at this level.
+              Try 50–80% if chat replies sound silent.
+            </p>
+          )}
         </div>
       </div>
 
@@ -284,7 +295,13 @@ function VoiceDirectionRow({ voice }: { voice: VoiceConfig }): JSX.Element {
               type="button"
               onClick={() => {
                 setPlaying(t.tone)
-                speak(t.sample, voice.persona, voice.rate, voice.volume, t.tone)
+                // Auditioning a tone is a diagnostic — fixed full volume
+                // regardless of the user's speech volume slider. If the
+                // slider is at 15% the user wouldn't hear the audition
+                // and would think the feature is broken; auditioning at
+                // 1.0 separates "tone sounds right" from "volume is set
+                // wrong" as two clearly distinct decisions.
+                speak(t.sample, voice.persona, voice.rate, 1, t.tone)
                 // The voice queue doesn't expose "finished" — guard the
                 // spinner with a generous timer matching the sample length.
                 window.setTimeout(() => setPlaying((cur) => (cur === t.tone ? null : cur)), 4000)

@@ -136,5 +136,5 @@ export async function httpError(res: Response, label: string): Promise<ProviderE
     detail = res.statusText
   }
   const trimmed = String(detail).slice(0, 300).trim()
-  return new ProviderError(`${label} request failed (${res.status}): ${trimmed}`)
+  return new ProviderError(`${label} request failed (${res.status}): ${trimmed}`, res.status)
 }

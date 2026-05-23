@@ -91,6 +91,27 @@ export default function App(): JSX.Element {
     []
   )
 
+  // The dispatcher auto-swapped to a different provider mid-request because
+  // the user's selection hit a 429 / quota / server-overload. Surface this
+  // explicitly — silently switching would be confusing ("why is this reply
+  // styled like Claude when I picked Gemini?"). The reason is kept short so
+  // the toast doesn't grow into a paragraph.
+  useEffect(
+    () =>
+      vs.events.onProviderFallback(({ fromLabel, toLabel, reason }) => {
+        const shortReason = reason.includes('429')
+          ? 'quota / rate limit'
+          : reason.length > 80
+            ? `${reason.slice(0, 77)}…`
+            : reason
+        useUiStore.getState().pushToast(
+          'info',
+          `${fromLabel} unavailable (${shortReason}) — replied via ${toLabel} instead.`
+        )
+      }),
+    []
+  )
+
   // Scheduled-task completions surface as a toast (in addition to the OS
   // notification the scheduler fires). DND — both the manual override and
   // scheduled quiet hours — suppresses the toast entirely. The scheduler

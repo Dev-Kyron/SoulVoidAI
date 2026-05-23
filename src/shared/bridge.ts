@@ -470,6 +470,19 @@ export interface VoidSoulBridge {
     onNewModels(
       cb: (info: { provider: ProviderId; models: string[] }) => void
     ): Unsubscribe
+    /** Fired when an in-flight completion hit a retryable error on the
+     *  selected provider and the dispatcher silently swapped to another
+     *  configured one. UI surfaces this as a transient toast so the user
+     *  knows their reply is coming from a different model than they picked. */
+    onProviderFallback(
+      cb: (info: {
+        from: ProviderId
+        fromLabel: string
+        to: ProviderId
+        toLabel: string
+        reason: string
+      }) => void
+    ): Unsubscribe
     /** Fired while a file-RAG scan walks the folder; nullable on completion. */
     onFilesRagProgress(cb: (progress: ScanProgress) => void): Unsubscribe
     /** Fired when a file-RAG scan run finishes (single folder or all). */

@@ -10,7 +10,7 @@ import { ollamaProvider } from './ollama'
 import { PROVIDER_META, ProviderError, isLocalProvider } from './types'
 import type { AIProvider, ProviderMeta } from './types'
 import { getApiKey, hasApiKey } from '../storage/keys'
-import { resolveBaseUrl, recordSeenModels } from '../storage/config'
+import { resolveBaseUrl, recordSeenModels, getConfig } from '../storage/config'
 import {
   refreshLocalProviderDetection,
   markLocalProviderReachable,
@@ -21,6 +21,7 @@ import { broadcast } from '../../events'
 import { TOOL_SPECS } from '../automation/tools'
 import { getProviderTools as getMcpTools } from '../mcp/manager'
 import { recordUsage } from '../usage'
+import { isRetryableProviderError, pickFallbackProvider } from './fallback'
 import type { AgentRequest, AgentResult, ChatRequest, ChatTurn, ProviderId } from '@shared/types'
 
 /** Joins a turn list into a single string for token estimation. */
@@ -82,10 +83,49 @@ function humanError(err: unknown, label: string): string {
   return 'Unexpected error during completion.'
 }
 
+/**
+ * Resolve the model to use when falling back to a different provider.
+ * Each provider has its own model namespace (Claude's "claude-sonnet-4-5"
+ * means nothing to Gemini) so we read the user's stored selection for
+ * the fallback provider, then back off to the provider's default.
+ */
+function fallbackModelFor(providerId: ProviderId): string {
+  const cfg = getConfig()
+  const stored = cfg.providers?.[providerId]?.model
+  if (stored) return stored
+  return ALL_PROVIDERS_META[providerId].defaultModel
+}
+
+/** Notify renderers that a fallback fired so the UI can toast the user. */
+function broadcastFallback(from: ProviderId, to: ProviderId, reason: string): void {
+  broadcast('ai:fallback', {
+    from,
+    fromLabel: ALL_PROVIDERS_META[from].label,
+    to,
+    toLabel: ALL_PROVIDERS_META[to].label,
+    reason
+  })
+}
+
 export async function runCompletion(
   req: ChatRequest,
   onDelta: (delta: string) => void,
   signal: AbortSignal
+): Promise<CompletionOutcome> {
+  return runCompletionAttempt(req, onDelta, signal, new Set())
+}
+
+/**
+ * Internal worker for runCompletion that threads a `tried` set so the
+ * recursive fallback call doesn't re-pick a provider we already failed
+ * against. Public callers go through runCompletion which seeds an empty
+ * set; that wrapper exists so the IPC surface stays one-arg.
+ */
+async function runCompletionAttempt(
+  req: ChatRequest,
+  onDelta: (delta: string) => void,
+  signal: AbortSignal,
+  tried: ReadonlySet<ProviderId>
 ): Promise<CompletionOutcome> {
   const provider = PROVIDERS[req.provider]
   const meta = PROVIDER_META[req.provider]
@@ -106,6 +146,17 @@ export async function runCompletion(
   const unreachable = localUnavailableError(req.provider, meta)
   if (unreachable) return { text: '', error: unreachable }
 
+  // Wrap the user's onDelta so we know whether any tokens have streamed
+  // before an error fires. Mid-stream failures CAN'T cleanly fall back —
+  // the renderer has already rendered partial text from the first provider,
+  // and rewinding would confuse the reader. So we only retry when nothing
+  // has been emitted yet.
+  let streamed = false
+  const trackingOnDelta = (delta: string): void => {
+    if (delta.length > 0) streamed = true
+    onDelta(delta)
+  }
+
   try {
     const text = await provider.complete({
       apiKey,
@@ -115,7 +166,7 @@ export async function runCompletion(
       messages: req.messages,
       temperature: req.temperature,
       signal,
-      onDelta
+      onDelta: trackingOnDelta
     })
     const flat = flattenTurns(req.system, req.messages)
     recordUsage({
@@ -130,6 +181,20 @@ export async function runCompletion(
     return { text }
   } catch (err) {
     if (signal.aborted) return { text: '', error: 'aborted' }
+    if (!streamed && isRetryableProviderError(err)) {
+      const nextTried = new Set(tried).add(req.provider)
+      const fallbackId = pickFallbackProvider(req.provider, nextTried)
+      if (fallbackId) {
+        const fallbackModel = fallbackModelFor(fallbackId)
+        broadcastFallback(req.provider, fallbackId, humanError(err, meta.label))
+        return runCompletionAttempt(
+          { ...req, provider: fallbackId, model: fallbackModel },
+          onDelta,
+          signal,
+          nextTried
+        )
+      }
+    }
     return { text: '', error: humanError(err, meta.label) }
   }
 }
@@ -138,6 +203,19 @@ export async function runCompletion(
 export async function invokeCompletion(
   req: AgentRequest,
   signal: AbortSignal
+): Promise<AgentResult> {
+  return invokeCompletionAttempt(req, signal, new Set())
+}
+
+/**
+ * Internal worker mirroring runCompletionAttempt — agent steps are
+ * non-streaming so the "no tokens emitted" guard isn't needed; any
+ * retryable error is a clean restart on a fresh provider.
+ */
+async function invokeCompletionAttempt(
+  req: AgentRequest,
+  signal: AbortSignal,
+  tried: ReadonlySet<ProviderId>
 ): Promise<AgentResult> {
   const provider = PROVIDERS[req.provider]
   const meta = PROVIDER_META[req.provider]
@@ -188,6 +266,19 @@ export async function invokeCompletion(
     return { text: result.text, toolCalls: result.toolCalls }
   } catch (err) {
     if (signal.aborted) return { text: '', toolCalls: [], error: 'aborted' }
+    if (isRetryableProviderError(err)) {
+      const nextTried = new Set(tried).add(req.provider)
+      const fallbackId = pickFallbackProvider(req.provider, nextTried)
+      if (fallbackId) {
+        const fallbackModel = fallbackModelFor(fallbackId)
+        broadcastFallback(req.provider, fallbackId, humanError(err, meta.label))
+        return invokeCompletionAttempt(
+          { ...req, provider: fallbackId, model: fallbackModel },
+          signal,
+          nextTried
+        )
+      }
+    }
     return { text: '', toolCalls: [], error: humanError(err, meta.label) }
   }
 }

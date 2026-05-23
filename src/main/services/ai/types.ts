@@ -215,8 +215,18 @@ export interface AIProvider {
 }
 
 export class ProviderError extends Error {
-  constructor(message: string) {
+  /**
+   * HTTP status code from the upstream provider, when the error came from an
+   * HTTP response. Undefined for non-HTTP errors (JSON parse failures, etc.).
+   * The auto-fallback dispatcher reads this directly rather than regexing
+   * `message` — adding a structured field keeps the trigger conditions
+   * (429 / 502-504 / network) trivially testable.
+   */
+  readonly status?: number
+
+  constructor(message: string, status?: number) {
     super(message)
     this.name = 'ProviderError'
+    this.status = status
   }
 }

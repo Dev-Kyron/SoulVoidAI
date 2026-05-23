@@ -242,6 +242,7 @@ const bridge: VoidSoulBridge = {
     onUpdaterStatus: (cb) => subscribe('updater:status', cb),
     onBudgetWarning: (cb) => subscribe('usage:budget-warning', cb),
     onNewModels: (cb) => subscribe('ai:new-models', cb),
+    onProviderFallback: (cb) => subscribe('ai:fallback', cb),
     onFilesRagProgress: (cb) => subscribe('files-rag:progress', cb),
     onFilesRagDone: (cb) => subscribe('files-rag:done', cb),
     onConfigUpdated: (cb) => subscribe('config:updated', cb),

@@ -80,8 +80,12 @@ describe('modelHasVision', () => {
 
   it('classifies reasoning tiers from model names', () => {
     expect(capabilitiesOf('o1-preview').reasoning).toBe('extended')
-    expect(capabilitiesOf('claude-opus-4-7').reasoning).toBe('extended')
+    // Anthropic extended thinking is opt-in via request flag, not a model
+    // id — the `thinking` suffix when surfaced via a custom variant gets
+    // recognised. Plain Opus is strong-tier.
+    expect(capabilitiesOf('claude-opus-thinking').reasoning).toBe('extended')
     expect(capabilitiesOf('deepseek-r1').reasoning).toBe('extended')
+    expect(capabilitiesOf('claude-opus-4-1').reasoning).toBe('strong')
     expect(capabilitiesOf('claude-sonnet-4-5').reasoning).toBe('strong')
     expect(capabilitiesOf('gpt-4o').reasoning).toBe('strong')
     expect(capabilitiesOf('gpt-4o-mini').reasoning).toBe('basic')
@@ -93,7 +97,10 @@ describe('modelHasVision', () => {
     expect(capabilitiesOf('gpt-4o-mini').speed).toBe('fast')
     expect(capabilitiesOf('gemini-1.5-flash').speed).toBe('fast')
     expect(capabilitiesOf('o1-preview').speed).toBe('slow')
-    expect(capabilitiesOf('claude-opus-4-7').speed).toBe('slow')
+    // Opus generations are slow-tier; the real model id is opus-4-1 (or
+    // future opus-4-X), not the speculative -4-7 the earlier defaults
+    // listed.
+    expect(capabilitiesOf('claude-opus-4-1').speed).toBe('slow')
   })
 
   it('marks local providers as free regardless of model', () => {

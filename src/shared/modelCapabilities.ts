@@ -144,7 +144,11 @@ const EXTENDED_REASONING_PATTERNS: RegExp[] = [
   /thinking/i,
   /^deepseek-r/,
   /^qwq/,
-  /^claude-opus-4-7/, // Opus 4.7 ships as a thinking-by-default variant
+  // Anthropic exposes extended thinking via a `thinking` request flag rather
+  // than a dedicated model id — caught by the `/thinking/i` pattern above
+  // when surfaced in the model name (e.g. via a custom dropdown variant).
+  // Plain `claude-opus-4-*` models are caught by the strong-reasoning list
+  // below; extended thinking is opt-in, not a model identity.
   /\/(o1|o3|o4|deepseek-r)/
 ]
 
@@ -189,8 +193,10 @@ const STRONG_REASONING_PATTERNS: RegExp[] = [
  * silently inherits the parent's number.
  */
 const CONTEXT_WINDOW: Array<{ pattern: RegExp; tokens: number }> = [
-  // Anthropic 1M-context variants
-  { pattern: /^claude-opus-4-7/, tokens: 200_000 },
+  // Anthropic — Opus/Sonnet/Haiku 4.x all advertise 200K context. The 1M
+  // beta is opt-in via the `context-1m-2025-08-07` request header (it isn't
+  // a separate model id), so we keep the default at 200K and let callers
+  // bump when they enable the beta.
   { pattern: /^claude-(sonnet|opus|haiku)-4/, tokens: 200_000 },
   { pattern: /^claude-3\.7/, tokens: 200_000 },
   { pattern: /^claude-3\.5/, tokens: 200_000 },
@@ -253,7 +259,10 @@ const SLOW_PATTERNS: RegExp[] = [
   /^o3/,
   /^o4/,
   /thinking/i,
-  /^claude-opus-4-7/,
+  // Plain `claude-opus-*` catches every Opus generation (4.1, future 4.x);
+  // the previous narrower `^claude-opus-4-7` was a forward-looking guess
+  // that never shipped on the public API and would never match real model
+  // ids regardless.
   /^claude-opus/,
   /^deepseek-r/,
   /^qwq/,

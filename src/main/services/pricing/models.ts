@@ -26,14 +26,14 @@ const DEFAULT_PRICING: Record<string, ModelPricing> = {
   'gpt-4.1-mini': { input: 0.4, output: 1.6 },
   'o3-mini': { input: 1.1, output: 4.4 },
 
-  // Anthropic
-  'claude-opus-4-7': { input: 15, output: 75 },
-  'claude-opus-4-7-1m': { input: 15, output: 75 },
-  'claude-opus-4-6': { input: 15, output: 75 },
+  // Anthropic — covers every model that actually ships on the public API
+  // today. Removed the speculative `opus-4-7` / `opus-4-7-1m` / `opus-4-6`
+  // / `sonnet-4-6` entries: those names were forward-guesses that returned
+  // 404 in production and any code that picked them got wedged.
   'claude-opus-4-1': { input: 15, output: 75 },
-  'claude-sonnet-4-6': { input: 3, output: 15 },
   'claude-sonnet-4-5': { input: 3, output: 15 },
   'claude-haiku-4-5': { input: 1, output: 5 },
+  'claude-3-5-sonnet-latest': { input: 3, output: 15 },
   'claude-3-5-haiku-latest': { input: 0.8, output: 4 },
 
   // Gemini

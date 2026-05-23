@@ -122,10 +122,38 @@ interface LegacyChatFields {
   ragEnabled?: boolean
 }
 
+/**
+ * Model ids that shipped in earlier defaults but never existed on the
+ * upstream API — picking them at chat time returns 404. We rewrite any
+ * stored selection that lands on one of these to the provider's current
+ * defaultModel on next load. Keyed by exact match because partial matches
+ * would also catch real models the user might have legitimately set.
+ *
+ * Entries here are one-way tombstones; once a user has been migrated off
+ * the bad name, the next save persists the rewrite and they never see
+ * the 404 again.
+ */
+const RETIRED_MODEL_IDS = new Set<string>([
+  // Speculative Anthropic names from the v1.0-v1.2.4 defaults that
+  // returned "model: ..." 404 in production.
+  'claude-opus-4-7',
+  'claude-opus-4-7-1m',
+  'claude-opus-4-6',
+  'claude-sonnet-4-6'
+])
+
 function normalize(c: AppConfigFile): AppConfigFile {
   const providers = {} as Record<ProviderId, ProviderSettings>
   for (const id of Object.keys(PROVIDER_META) as ProviderId[]) {
-    providers[id] = { ...DEFAULT_PROVIDERS[id], ...c.providers?.[id] }
+    const merged = { ...DEFAULT_PROVIDERS[id], ...c.providers?.[id] }
+    // Auto-recover from the retired-model trap: existing users who picked
+    // one of the bad defaults before the cleanup land here on the next
+    // launch and get bumped to the provider's current defaultModel
+    // (claude-sonnet-4-5 for Anthropic). One-time, idempotent.
+    if (merged.model && RETIRED_MODEL_IDS.has(merged.model)) {
+      merged.model = PROVIDER_META[id].defaultModel
+    }
+    providers[id] = merged
   }
   // Migrate the pre-bundled flat keys (agentMode, autoMemory, privateChat,
   // ragEnabled) into the new `chat` group. Existing users keep their settings.

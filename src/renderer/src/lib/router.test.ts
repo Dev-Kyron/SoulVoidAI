@@ -167,7 +167,7 @@ describe('pickProvider', () => {
 
   it('tool-heavy task prefers fast tool-use models over slow premium', () => {
     // Two candidates that BOTH support tool use:
-    //   - claude-opus-4-7 (slow, premium, extended thinking)
+    //   - claude-opus-4-1 (slow, premium, extended thinking)
     //   - claude-sonnet-4-5 (balanced/fast for sonnet, strong reasoning)
     // For 29-step agent loops Sonnet wins because speed dominates.
     const result = pickProvider({
@@ -175,7 +175,7 @@ describe('pickProvider', () => {
       hasImages: false,
       agentMode: true,
       available: [
-        provider('anthropic', 'claude-opus-4-7'),
+        provider('anthropic', 'claude-opus-4-1'),
         provider('anthropic', 'claude-sonnet-4-5')
       ],
       activeProviderId: 'anthropic'

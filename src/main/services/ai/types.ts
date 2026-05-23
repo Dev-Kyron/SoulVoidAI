@@ -39,15 +39,18 @@ export const PROVIDER_META: Record<ProviderId, ProviderMeta> = {
     needsKey: true,
     defaultModel: 'claude-sonnet-4-5',
     defaultModels: [
-      // Newest first — the Refresh button will pull whatever the API actually
-      // returns; this list is the fallback so the dropdown is never empty.
-      'claude-opus-4-7',
-      'claude-opus-4-7-1m',
-      'claude-sonnet-4-6',
+      // Only models that actually exist on the public Anthropic API today.
+      // The previous version of this list speculated forward to `opus-4-7`
+      // / `opus-4-7-1m` / `sonnet-4-6` — none of those ship, and selecting
+      // them returned 404 in production. Long context (1M tokens) is a
+      // beta-header opt-in on top of the regular Opus model, not its own
+      // model id — there is no "-1m" suffix in the API. The Refresh button
+      // pulls the canonical list straight from /v1/models, so this default
+      // only matters for the first second after install.
+      'claude-opus-4-1',
       'claude-sonnet-4-5',
       'claude-haiku-4-5',
-      'claude-opus-4-6',
-      'claude-opus-4-1',
+      'claude-3-5-sonnet-latest',
       'claude-3-5-haiku-latest'
     ],
     defaultBaseUrl: 'https://api.anthropic.com'

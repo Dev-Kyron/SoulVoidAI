@@ -24,12 +24,14 @@ function content(turn: ChatTurn): unknown {
 
 /**
  * Models where Anthropic has deprecated the `temperature` parameter — the
- * API now rejects requests that send it with a 400. Currently the
- * extended-thinking-flavoured Opus models. Keep this list narrow — most
- * models still accept temperature and silently clamp it; we only want to
- * strip it for the ones that actively error.
+ * API now rejects requests that send it with a 400. Empty right now —
+ * the `thinking` substring guard below catches the extended-thinking
+ * family by pattern, so explicit listings are only needed for models
+ * whose names don't carry that suffix. Keep this list narrow: most
+ * models accept temperature and silently clamp it; we only strip it
+ * for the ones that actively error.
  */
-const TEMPERATURE_DEPRECATED = new Set<string>(['claude-opus-4-7'])
+const TEMPERATURE_DEPRECATED = new Set<string>([])
 
 function modelAcceptsTemperature(model: string): boolean {
   if (TEMPERATURE_DEPRECATED.has(model)) return false

@@ -28,8 +28,10 @@
 import { app } from 'electron'
 import { spawn } from 'node:child_process'
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
-import { copyFile } from 'node:fs/promises'
+import { copyFile, readFile, unlink } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { randomUUID } from 'node:crypto'
 import { log } from '../logger'
 import { ensureDataPath } from '../storage/store'
 
@@ -242,16 +244,28 @@ export interface SynthesiseOptions {
 /**
  * Run piper on a single sentence (or short paragraph) and return the
  * resulting WAV bytes. Throws if piper isn't installed, the voice file
- * isn't present, or synthesis exits non-zero.
+ * isn't present, synthesis exits non-zero, or the output isn't a valid
+ * WAV stream.
+ *
+ * Implementation note: we write to a real temp file rather than piping
+ * via `--output_file -` to stdout. The Windows piper 2023.11.14-2 build
+ * has a long-standing quirk where stdout redirection produces truncated
+ * or malformed WAV — the WAV header writes correctly but PCM sample
+ * flushing relies on libc stdout buffering that piper doesn't always
+ * close cleanly, leaving Chromium's `<audio>` decoder with a header-only
+ * stream that plays as a brief buzz before failing with "no supported
+ * source." Writing to a temp file uses piper's well-tested file path,
+ * costs us one fs round-trip per sentence (~1 ms for ~30 KB WAVs), and
+ * lets us validate the WAV header before handing bytes to the renderer.
  *
  * Caller (renderer via IPC) plays the WAV by wrapping it in a Blob URL
  * and feeding it to an `<audio>` element — the standard browser path.
  *
- * Cost: one spawn per call. Piper cold-start is ~300 ms (loading the
- * .onnx model into memory), subsequent synthesis is ~70 ms per second
- * of audio at "medium" quality. For sentence-level streaming TTS, the
- * first sentence is the only one with the model-load tax — every later
- * sentence reuses the warm OS file cache.
+ * Cost: one spawn + one fs write/read per call. Piper cold-start is
+ * ~300 ms (loading the .onnx model into memory), subsequent synthesis
+ * is ~70 ms per second of audio at "medium" quality. For sentence-level
+ * streaming TTS, the first sentence is the only one with the model-load
+ * tax — every later sentence reuses the warm OS file cache.
  */
 export function synthesise(opts: SynthesiseOptions): Promise<Buffer> {
   return new Promise((resolve, reject) => {
@@ -283,9 +297,14 @@ export function synthesise(opts: SynthesiseOptions): Promise<Buffer> {
     const rateInput = Math.min(1.6, Math.max(0.5, opts.rate ?? 1))
     const lengthScale = 1 / rateInput
 
+    // Temp file in the OS temp dir — gets unlinked after we read it back.
+    // UUID suffix so concurrent synth calls (rare but possible during
+    // streaming TTS) don't collide.
+    const outPath = join(tmpdir(), `piper-${randomUUID()}.wav`)
+
     const args = [
       '--model', voice.modelPath,
-      '--output_file', '-', // stdout
+      '--output_file', outPath,
       '--length_scale', lengthScale.toFixed(3)
     ]
 
@@ -298,30 +317,70 @@ export function synthesise(opts: SynthesiseOptions): Promise<Buffer> {
       windowsHide: true
     })
 
-    const chunks: Buffer[] = []
     let stderr = ''
-    proc.stdout.on('data', (chunk: Buffer) => chunks.push(chunk))
     proc.stderr.on('data', (chunk: Buffer) => {
       stderr += chunk.toString('utf-8')
     })
     proc.on('error', (err) => {
+      // Cleanup best-effort — if piper never started, the file likely
+      // doesn't exist, but unlink errors are non-fatal either way.
+      void unlink(outPath).catch(() => {})
       reject(new Error(`Piper failed to start: ${err.message}`))
     })
     proc.on('exit', (code) => {
-      if (code !== 0) {
-        reject(
-          new Error(
-            `Piper exited with code ${code}. ${stderr.trim().slice(0, 240) || '(no stderr)'}`
-          )
-        )
-        return
-      }
-      const wav = Buffer.concat(chunks)
-      if (wav.length === 0) {
-        reject(new Error('Piper produced no audio.'))
-        return
-      }
-      resolve(wav)
+      void (async () => {
+        try {
+          if (code !== 0) {
+            throw new Error(
+              `Piper exited with code ${code}. ${stderr.trim().slice(0, 240) || '(no stderr)'}`
+            )
+          }
+          let wav: Buffer
+          try {
+            wav = await readFile(outPath)
+          } catch (readErr) {
+            const msg = readErr instanceof Error ? readErr.message : String(readErr)
+            throw new Error(
+              `Piper reported success but produced no output file (${msg}). ` +
+                `Stderr: ${stderr.trim().slice(0, 240) || '(empty)'}`
+            )
+          }
+          if (wav.length < 44) {
+            // RIFF header is 12 bytes + fmt chunk is 24 bytes minimum +
+            // data chunk header is 8 bytes = 44 bytes for the smallest
+            // valid WAV. Anything shorter is a guaranteed broken stream.
+            throw new Error(
+              `Piper produced a truncated WAV (${wav.length} bytes). ` +
+                `Stderr: ${stderr.trim().slice(0, 240) || '(empty)'}`
+            )
+          }
+          // Validate the magic bytes — Chromium's <audio> decoder rejects
+          // anything that isn't "RIFF....WAVE", and we'd rather see a
+          // clear error here than a useless "no supported source" in the
+          // renderer.
+          const riff = wav.subarray(0, 4).toString('ascii')
+          const wave = wav.subarray(8, 12).toString('ascii')
+          if (riff !== 'RIFF' || wave !== 'WAVE') {
+            throw new Error(
+              `Piper output isn't a valid WAV (magic: "${riff}"/"${wave}"). ` +
+                `Stderr: ${stderr.trim().slice(0, 240) || '(empty)'}`
+            )
+          }
+          // Surface any piper warnings even on success — historically the
+          // "buzz of death" bugs leave a trail in stderr that's easy to
+          // miss when synthesis returns bytes the renderer can't play.
+          if (stderr.trim()) {
+            log('info', 'system', `Piper stderr (success): ${stderr.trim().slice(0, 400)}`)
+          }
+          resolve(wav)
+        } catch (err) {
+          reject(err instanceof Error ? err : new Error(String(err)))
+        } finally {
+          // Always clean up the temp file — leaving them around would
+          // accumulate fast with streaming TTS (one per sentence).
+          void unlink(outPath).catch(() => {})
+        }
+      })()
     })
 
     // Feed the prompt + close stdin so piper knows we're done.

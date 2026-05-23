@@ -112,6 +112,15 @@ export function createWhisperWakeEngine(
     return out
   }
 
+  // v1.7.2 — silence-beat counter. We don't want to flood the diagnostic
+  // ticker with a "(silence)" entry every 900ms (it'd be unreadable), but
+  // we DO want occasional heartbeat entries so the user can tell the
+  // engine is alive when their wake phrase isn't being heard at all.
+  // Fire one silence beat every SILENCE_BEAT_EVERY successful-but-empty
+  // scans (~every 9s at the default cadence).
+  const SILENCE_BEAT_EVERY = 10
+  let silentStreak = 0
+
   async function scan(): Promise<void> {
     if (stopped || !ring) return
     if (performance.now() < cooldownUntil) return
@@ -128,7 +137,27 @@ export function createWhisperWakeEngine(
       // flag and the ring reference (which `stop()` nulls). Without this,
       // the ring.fill(0) below would NPE on a stop-mid-transcribe.
       if (stopped || !ring) return
-      if (result.error || !result.text) return
+      if (result.error) {
+        // Transcribe succeeded technically but the provider returned an
+        // error envelope (worker not ready, model not loaded, etc).
+        // Surface it to the diagnostic ticker so the user can SEE the
+        // problem instead of staring at "Listening" with no feedback.
+        onHeard?.('', false, result.error)
+        return
+      }
+      if (!result.text) {
+        // Whisper returned empty text (silence / inaudible). Emit a
+        // throttled "silence beat" so the user knows the engine is
+        // alive — without it, a stuck mic looks identical to a
+        // working mic listening to a quiet room.
+        silentStreak++
+        if (silentStreak >= SILENCE_BEAT_EVERY) {
+          silentStreak = 0
+          onHeard?.('', false)
+        }
+        return
+      }
+      silentStreak = 0
       const match = matchWakePhrase(result.text)
       // v1.7.1 — surface EVERY transcription to the diagnostic ticker
       // (whether matched or not). Lets users see "Hey Boyd" mishearings
@@ -143,17 +172,12 @@ export function createWhisperWakeEngine(
         onDetect(match.persona, match.label)
       }
     } catch (err) {
-      // Transcription failed (model download issue, worker crash, partial
-      // hf-cache). Log at warn level so users with wake-word that mysteriously
-      // never fires have something to find in the activity log — silent
-      // swallow meant a permanently-broken wake-word looked identical to
-      // "user isn't speaking".
-      void vs.logs.write(
-        'warn',
-        'system',
-        'Wake-word scan transcribe failed',
-        err instanceof Error ? err.message : String(err)
-      )
+      // Transcription threw — IPC bridge crashed, structured-clone error,
+      // etc. Log to the activity log AND surface to the diagnostic ticker
+      // so the user has visibility from inside Settings.
+      const msg = err instanceof Error ? err.message : String(err)
+      onHeard?.('', false, msg)
+      void vs.logs.write('warn', 'system', 'Wake-word scan transcribe failed', msg)
     } finally {
       scanLock.release()
     }

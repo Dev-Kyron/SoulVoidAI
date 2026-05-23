@@ -32,22 +32,25 @@ interface WidgetStore {
    */
   wakeArmed: boolean
   /**
-   * v1.7.1 diagnostic — the most recent few transcriptions the Whisper
-   * wake-word engine has produced, regardless of whether they matched a
-   * wake phrase. Surfaced in Settings → Voice → Wake word as a "Heard:"
-   * ticker so users can see when Whisper is mis-transcribing the wake
-   * phrase ("Hey Boyd" instead of "Hey Void", etc) instead of staring
-   * at silent failure. Capped at 5 entries; Porcupine doesn't populate
-   * this (keyword-based, no text).
+   * Diagnostic — the most recent few Whisper-wake-word events. Each
+   * entry is one of:
+   *   · matched=true       — green, phrase fired
+   *   · matched=false, text="…"  — grey, heard but didn't match
+   *   · matched=false, text=""   — periodic silence beat (engine alive)
+   *   · error set          — red, transcribe failed (see message)
+   * Surfaced in Settings → Voice → Wake word so users can diagnose
+   * "I said the phrase and nothing happened" instead of staring at
+   * silent failure. Capped at 8 entries; Porcupine doesn't populate
+   * this (keyword-based, no text). v1.7.2 added error + silence-beat.
    */
-  wakeHeard: Array<{ at: number; text: string; matched: boolean }>
+  wakeHeard: Array<{ at: number; text: string; matched: boolean; error?: string }>
   activeTab: PanelTab
 
   setTab: (tab: PanelTab) => void
   setOrbState: (state: WidgetState) => void
   setWakeListening: (listening: boolean) => void
   setWakeArmed: (armed: boolean) => void
-  pushWakeHeard: (text: string, matched: boolean) => void
+  pushWakeHeard: (text: string, matched: boolean, error?: string) => void
   clearWakeHeard: () => void
   expand: () => Promise<void>
   collapse: () => void
@@ -88,13 +91,25 @@ export const useWidgetStore = create<WidgetStore>((set, get) => ({
     set({ wakeArmed: armed })
   },
 
-  pushWakeHeard: (text, matched) => {
+  pushWakeHeard: (text, matched, error) => {
+    // v1.7.2 — accept silence beats (empty text, no error) and error
+    // events alongside real transcriptions. The UI distinguishes via
+    // the discriminated shape. Trim only the text field; an empty
+    // text with `error` still counts as a useful event.
     const trimmed = text.trim()
-    if (!trimmed) return
-    // Keep last 5; oldest drops off. Strict bound — the ticker UI only
-    // shows ~3 anyway, and unbounded growth on a chatty mic would leak
-    // memory over a long armed session.
-    const next = [{ at: Date.now(), text: trimmed, matched }, ...get().wakeHeard].slice(0, 5)
+    if (!trimmed && !error && !matched) {
+      // Silence beat — represented as empty text with no error.
+    } else if (!trimmed && !error) {
+      // Shouldn't happen (matched=true with empty text is invalid),
+      // but be defensive.
+      return
+    }
+    // Keep last 8 — slightly more than v1.7.1's 5 because silence beats
+    // + errors push useful entries off the list faster.
+    const next = [{ at: Date.now(), text: trimmed, matched, error }, ...get().wakeHeard].slice(
+      0,
+      8
+    )
     set({ wakeHeard: next })
   },
 

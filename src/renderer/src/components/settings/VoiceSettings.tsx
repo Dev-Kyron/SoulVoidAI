@@ -897,14 +897,32 @@ function WakeWordBody({ voice }: { voice: VoiceConfig }): JSX.Element {
 }
 
 /**
- * Shows the last few transcriptions the Whisper wake-word engine has
- * produced, regardless of whether they matched a wake phrase. Renders
- * nothing if Whisper hasn't heard anything yet (or if the wake-word
- * engine is using Porcupine, which doesn't produce text).
+ * Whisper diagnostic ticker — last 8 events. Each event is one of:
+ *   · matched=true        green row with "match" pill
+ *   · text="…"            grey row (heard but no match)
+ *   · text="" + no error  silence-beat (cyan dot, "(silence)")
+ *   · error set           red row with the error message
+ *
+ * Plus a one-line stats header counting each kind so the user can see
+ * "Whisper has heard X things but matched 0" at a glance.
+ *
+ * Empty state nudges the user to speak. Once any event has fired the
+ * ticker shows it instead of the empty hint.
  */
 function WakeHeardTicker(): JSX.Element {
   const heard = useWidgetStore((s) => s.wakeHeard)
   const clear = useWidgetStore((s) => s.clearWakeHeard)
+
+  const stats = heard.reduce(
+    (acc, h) => {
+      if (h.error) acc.errors++
+      else if (h.matched) acc.matched++
+      else if (h.text) acc.heard++
+      else acc.silence++
+      return acc
+    },
+    { matched: 0, heard: 0, silence: 0, errors: 0 }
+  )
 
   return (
     <div className="mt-2 rounded-md border border-white/5 bg-black/20 px-2 py-1.5">
@@ -922,41 +940,65 @@ function WakeHeardTicker(): JSX.Element {
           </button>
         )}
       </div>
+      {heard.length > 0 && (
+        <p className="mb-1 flex flex-wrap items-baseline gap-x-2 font-mono text-[9px] text-slate-500">
+          <span className="text-emerald-400">{stats.matched} matched</span>
+          <span>· {stats.heard} heard</span>
+          <span>· {stats.silence} silent</span>
+          {stats.errors > 0 && <span className="text-rose-300">· {stats.errors} errors</span>}
+        </p>
+      )}
       {heard.length === 0 ? (
         <p className="text-[10px] italic text-slate-500">
-          No transcriptions yet. Say something near your mic; entries appear here.
+          No events yet. The first silence-beat appears in ~9 seconds; transcriptions
+          and errors appear as they happen.
         </p>
       ) : (
         <ul className="space-y-0.5">
-          {heard.map((h) => (
-            <li
-              key={h.at}
-              className={cn(
-                'flex items-baseline gap-1.5 truncate font-mono text-[10px]',
-                h.matched ? 'text-emerald-300' : 'text-slate-400'
-              )}
-            >
-              <span className="shrink-0 text-[8px] text-slate-600">
-                {new Date(h.at).toLocaleTimeString([], {
-                  hour: '2-digit',
-                  minute: '2-digit',
-                  second: '2-digit'
-                })}
-              </span>
-              <span className="truncate">{h.text}</span>
-              {h.matched && (
-                <span className="ml-auto shrink-0 rounded bg-emerald-500/15 px-1 text-[8px] uppercase tracking-wide">
-                  match
+          {heard.map((h) => {
+            const isError = Boolean(h.error)
+            const isSilence = !h.error && !h.text && !h.matched
+            return (
+              <li
+                key={h.at}
+                className={cn(
+                  'flex items-baseline gap-1.5 truncate font-mono text-[10px]',
+                  isError
+                    ? 'text-rose-300'
+                    : h.matched
+                      ? 'text-emerald-300'
+                      : isSilence
+                        ? 'text-cyan-500/60'
+                        : 'text-slate-400'
+                )}
+              >
+                <span className="shrink-0 text-[8px] text-slate-600">
+                  {new Date(h.at).toLocaleTimeString([], {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit'
+                  })}
                 </span>
-              )}
-            </li>
-          ))}
+                <span className="truncate">
+                  {isError
+                    ? `error: ${h.error}`
+                    : isSilence
+                      ? '(silence — engine alive, mic quiet)'
+                      : h.text}
+                </span>
+                {h.matched && (
+                  <span className="ml-auto shrink-0 rounded bg-emerald-500/15 px-1 text-[8px] uppercase tracking-wide">
+                    match
+                  </span>
+                )}
+              </li>
+            )
+          })}
         </ul>
       )}
-      <p className="mt-1 text-[9px] text-slate-500">
-        Green = matched a wake phrase. Greyed = heard but didn't match. If Whisper
-        is consistently mis-transcribing your wake phrase, try speaking it more
-        clearly or closer to the mic.
+      <p className="mt-1 text-[9px] leading-relaxed text-slate-500">
+        Green = matched. Grey = heard but no match. Cyan = silence beat
+        (proves the engine is alive). Red = transcribe error — check the activity log.
       </p>
     </div>
   )

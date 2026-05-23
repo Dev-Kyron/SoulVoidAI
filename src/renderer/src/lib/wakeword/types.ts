@@ -22,15 +22,24 @@ export interface WakeEngine {
 export type WakeDetectCallback = (persona: VoicePersona, label: string) => void
 
 /**
- * v1.7.1 diagnostic surface — fired by transcription-based engines
- * (Whisper) for EVERY non-empty transcription, regardless of whether
- * it matched a wake phrase. Lets the Wake Word settings panel show a
- * "Heard:" ticker so users can see what the model is actually hearing
- * — "Hey Boyd" instead of "Hey Void", "Avoid" instead of "Hey Void",
- * etc. Without this, a failing wake word looks identical to "user
- * isn't talking" and is impossible to debug.
+ * Diagnostic surface — fired by transcription-based engines (Whisper)
+ * so the Wake Word settings panel can show what the engine is actually
+ * doing. Three event shapes (discriminated by which fields are set):
  *
- * Keyword-based engines (Porcupine) don't produce text, so this
- * callback is optional and never fired by Porcupine.
+ *   · text="hey void", matched=true            → green match row
+ *   · text="hey boyd", matched=false           → grey heard-but-no-match
+ *   · text="", matched=false, no error         → silence beat (engine alive,
+ *                                                 mic capturing, model silent)
+ *   · text="", matched=false, error set        → red error row
+ *
+ * Without ALL of these, a wake word that's "silently broken" looks
+ * identical to "user isn't talking" — impossible to diagnose. The
+ * panel renders distinct visuals for each shape so the user can tell
+ * "Whisper is mishearing me" from "the transcribe call is erroring"
+ * from "the mic isn't picking up anything".
+ *
+ * v1.7.1 introduced this with just (text, matched). v1.7.2 added the
+ * optional error field and the silence-beat protocol. Porcupine never
+ * fires this callback (keyword-based, no text).
  */
-export type WakeHeardCallback = (text: string, matched: boolean) => void
+export type WakeHeardCallback = (text: string, matched: boolean, error?: string) => void

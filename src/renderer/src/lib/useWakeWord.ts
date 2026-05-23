@@ -63,14 +63,14 @@ async function boot(): Promise<void> {
   const picovoiceKey = await vs.secrets.get('picovoice')
   if (generation !== bootGen) return
 
-  // v1.7.1 — pipe Whisper transcriptions to the widget store's
-  // wakeHeard ticker so the Wake Word settings panel can show what
-  // the model is actually hearing. Porcupine doesn't transcribe
+  // Pipe Whisper transcriptions + errors + silence beats to the widget
+  // store's wakeHeard ticker so the Wake Word settings panel can show
+  // exactly what the model is doing. Porcupine doesn't transcribe
   // (keyword-only) so it doesn't get this callback.
   const engine = picovoiceKey
     ? createPorcupineWakeEngine(picovoiceKey, onWakeDetected)
-    : createWhisperWakeEngine(onWakeDetected, (text, matched) => {
-        useWidgetStore.getState().pushWakeHeard(text, matched)
+    : createWhisperWakeEngine(onWakeDetected, (text, matched, error) => {
+        useWidgetStore.getState().pushWakeHeard(text, matched, error)
       })
 
   // Whisper-engine cold path: the first transcribe call has to download

@@ -132,7 +132,8 @@ describe('importClaudeDesktopServers', () => {
         enabled: true,
         connected: true,
         error: null,
-        tools: []
+        tools: [],
+        duplicateTools: []
       }
     ])
     detectMock.mockReturnValue(

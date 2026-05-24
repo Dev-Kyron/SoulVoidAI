@@ -84,6 +84,26 @@ function humanError(err: unknown, label: string): string {
   return 'Unexpected error during completion.'
 }
 
+/** v1.12.0 — short, stable category for the per-provider dashboard.
+ *  Surfaces patterns ("openai is mostly 429s, anthropic is mostly fine")
+ *  without leaking message detail or PII. Falls back to "error" so
+ *  unrecognised failures still get counted but don't pollute the
+ *  category distribution. */
+function categorizeError(err: unknown): string {
+  if (err instanceof Error) {
+    const msg = err.message.toLowerCase()
+    if (msg.includes('rate') || msg.includes('429')) return 'rate-limited'
+    if (msg.includes('401') || msg.includes('unauthor')) return 'unauthorized'
+    if (msg.includes('403') || msg.includes('forbidden')) return 'forbidden'
+    if (msg.includes('404')) return 'not-found'
+    if (msg.includes('timeout') || msg.includes('timed out')) return 'timeout'
+    if (msg.includes('5') && /\b5\d{2}\b/.test(msg)) return 'server-error'
+    if (/fetch failed|econnrefused|enotfound|network/i.test(err.message)) return 'network'
+    if (msg.includes('schema') || msg.includes('parse')) return 'schema'
+  }
+  return 'error'
+}
+
 /**
  * Resolve the model to use when falling back to a different provider.
  * Each provider has its own model namespace (Claude's "claude-sonnet-4-5"
@@ -157,6 +177,11 @@ async function runCompletionAttempt(
     if (delta.length > 0) streamed = true
     onDelta(delta)
   }
+  // v1.12.0 — wall-clock timing for the per-provider performance
+  // dashboard. Captured here (not inside the provider impl) so the
+  // measurement spans connect + handshake + first byte through last byte
+  // — the latency the user actually feels.
+  const startedAt = Date.now()
 
   try {
     const text = await provider.complete({
@@ -177,11 +202,32 @@ async function runCompletionAttempt(
       inputText: flat.text,
       outputText: text,
       imageCount: flat.imageCount,
-      estimated: true
+      estimated: true,
+      durationMs: Date.now() - startedAt,
+      success: true
     })
     return { text }
   } catch (err) {
     if (signal.aborted) return { text: '', error: 'aborted' }
+    // v1.12.0 — record the failure so success-rate / latency dashboards
+    // reflect the FULL provider story, not just the happy path. User-
+    // aborts don't get recorded (they're not provider failures).
+    if (!signal.aborted) {
+      const flat = flattenTurns(req.system, req.messages)
+      recordUsage({
+        provider: req.provider,
+        model: req.model,
+        kind: 'chat',
+        inputText: flat.text,
+        // No output on failure; explicit 0 keeps token math sane.
+        outputTokens: 0,
+        imageCount: flat.imageCount,
+        estimated: true,
+        durationMs: Date.now() - startedAt,
+        success: false,
+        errorKind: categorizeError(err)
+      })
+    }
     if (!streamed && isRetryableProviderError(err)) {
       const nextTried = new Set(tried).add(req.provider)
       const fallbackId = pickFallbackProvider(req.provider, nextTried)
@@ -280,6 +326,9 @@ async function invokeCompletionAttempt(
         `[ai] invoke via ${req.provider}/${req.model} — ${filteredTools.length} tools available, click_on_screen=${visualClickAvailable ? 'YES' : 'no'}`
       )
     }
+    // v1.12.0 — same timing capture as runCompletionAttempt; see the
+    // comment there for why we measure at this boundary.
+    const startedAt = Date.now()
     const result = await provider.invoke({
       apiKey,
       baseUrl,
@@ -297,11 +346,30 @@ async function invokeCompletionAttempt(
       inputText: flat.text,
       outputText: result.text,
       imageCount: flat.imageCount,
-      estimated: true
+      estimated: true,
+      durationMs: Date.now() - startedAt,
+      success: true
     })
     return { text: result.text, toolCalls: result.toolCalls }
   } catch (err) {
     if (signal.aborted) return { text: '', toolCalls: [], error: 'aborted' }
+    // v1.12.0 — failure path also recorded. No durationMs here because
+    // capturing it would require restructuring the try block; we accept
+    // that failed-invoke entries miss latency data (the success/failure
+    // counter is the more important signal). Future: hoist startedAt
+    // above the try so both paths can record it.
+    const flat = flattenTurns(req.system, req.messages)
+    recordUsage({
+      provider: req.provider,
+      model: req.model,
+      kind: 'invoke',
+      inputText: flat.text,
+      outputTokens: 0,
+      imageCount: flat.imageCount,
+      estimated: true,
+      success: false,
+      errorKind: categorizeError(err)
+    })
     if (isRetryableProviderError(err)) {
       const nextTried = new Set(tried).add(req.provider)
       const fallbackId = pickFallbackProvider(req.provider, nextTried)

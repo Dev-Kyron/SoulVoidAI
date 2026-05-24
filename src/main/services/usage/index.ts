@@ -16,6 +16,7 @@ import { pricingFor, estimateTokensFromText, TOKENS_PER_IMAGE } from '../pricing
 import { broadcast } from '../../events'
 import type {
   ProviderId,
+  ProviderPerformance,
   UsageBudget,
   UsageEntry,
   UsageKind,
@@ -33,6 +34,15 @@ interface RecordInput {
   imageCount?: number
   imageSize?: string
   estimated?: boolean
+  /** v1.12.0 — wall-clock time from request issue to response, in ms.
+   *  Optional so legacy callers without timing capture still work. */
+  durationMs?: number
+  /** v1.12.0 — false when the provider call errored. Default true keeps
+   *  the existing success-path callers no-op. */
+  success?: boolean
+  /** v1.12.0 — short error category (e.g. "401 unauthorized", "timeout").
+   *  Set when `success=false`; ignored on the success path. */
+  errorKind?: string
 }
 
 /** Records one billable call. Computes cost, persists, fires budget warnings. */
@@ -71,7 +81,10 @@ export function recordUsage(input: RecordInput): UsageEntry {
     outputTokens,
     cost,
     estimated: input.estimated ?? true,
-    ...(input.imageCount ? { imageCount: input.imageCount } : {})
+    ...(input.imageCount ? { imageCount: input.imageCount } : {}),
+    ...(input.durationMs != null ? { durationMs: input.durationMs } : {}),
+    ...(input.success != null ? { success: input.success } : {}),
+    ...(input.errorKind ? { errorKind: input.errorKind } : {})
   }
   appendEntry(entry)
   checkBudgetThresholds()
@@ -159,12 +172,100 @@ export function getBudgetState(): UsageBudget {
   return getBudget()
 }
 
-export function updateBudget(monthlyUsd: number | null): UsageBudget {
-  return setBudget(monthlyUsd)
+export function updateBudget(
+  monthlyUsd: number | null,
+  opts: { currency?: string; usdRate?: number } = {}
+): UsageBudget {
+  return setBudget(monthlyUsd, opts)
 }
 
 export function clearUsage(): void {
   clearEntries()
+}
+
+/**
+ * v1.12.0 — pure aggregator. Exported separately from the DB-reading
+ * `getProviderPerformance` so the rules below can be pinned by unit
+ * tests without needing better-sqlite3 (which is compiled for Electron's
+ * Node, not the host Node the tests run on).
+ *
+ * Aggregation rules:
+ *  - Window = entries with ts >= now() - days. Inclusive of partial day.
+ *  - successCount counts entries with explicit `success: true` OR legacy
+ *    entries with no success field (treated as success-by-omission so
+ *    upgrading the app doesn't make every historical call read as a
+ *    failure).
+ *  - failureCount counts only explicit `success: false`.
+ *  - successRate is null when callCount == 0 (avoids 0/0).
+ *  - Latency aggregates ignore entries without durationMs (legacy or
+ *    image-gen with no captured timing). avgLatencyMs is null when zero
+ *    timed entries; p95LatencyMs is null with fewer than 5 timed entries
+ *    (too few to be meaningful — surfacing it would mislead).
+ *  - Results sorted by callCount descending so the most-used providers
+ *    surface first ("of the providers I actually use, which performs
+ *    best").
+ */
+export function computeProviderPerformance(
+  entries: UsageEntry[],
+  days: number,
+  nowMs: number = Date.now()
+): ProviderPerformance[] {
+  const cutoffMs = nowMs - days * 24 * 60 * 60 * 1000
+  const recent = entries.filter((e) => new Date(e.ts).getTime() >= cutoffMs)
+
+  const grouped = new Map<ProviderId, UsageEntry[]>()
+  for (const e of recent) {
+    const bucket = grouped.get(e.provider)
+    if (bucket) bucket.push(e)
+    else grouped.set(e.provider, [e])
+  }
+
+  const results: ProviderPerformance[] = []
+  for (const [provider, providerEntries] of grouped) {
+    const failureCount = providerEntries.filter((e) => e.success === false).length
+    const successCount = providerEntries.length - failureCount
+    const totalCost = providerEntries.reduce((sum, e) => sum + (e.cost ?? 0), 0)
+
+    // Only timed entries contribute to latency math. Sort ascending once
+    // so both the mean and p95 read from the same sorted view (a single
+    // pass is cheaper than two sorts for the same window).
+    const latencies = providerEntries
+      .filter((e): e is UsageEntry & { durationMs: number } => typeof e.durationMs === 'number')
+      .map((e) => e.durationMs)
+      .sort((a, b) => a - b)
+
+    const avgLatencyMs =
+      latencies.length > 0
+        ? Math.round(latencies.reduce((sum, ms) => sum + ms, 0) / latencies.length)
+        : null
+    // p95 needs at least 5 samples to be meaningful — fewer and a single
+    // outlier swings the percentile wildly enough to mislead.
+    const p95LatencyMs =
+      latencies.length >= 5
+        ? latencies[Math.min(latencies.length - 1, Math.floor(latencies.length * 0.95))]
+        : null
+
+    results.push({
+      provider,
+      callCount: providerEntries.length,
+      successCount,
+      failureCount,
+      successRate:
+        providerEntries.length > 0 ? (successCount / providerEntries.length) * 100 : null,
+      avgLatencyMs,
+      p95LatencyMs,
+      totalCost
+    })
+  }
+
+  return results.sort((a, b) => b.callCount - a.callCount)
+}
+
+/** Thin DB-reading wrapper around the pure aggregator. The renderer
+ *  calls this via IPC; tests exercise `computeProviderPerformance`
+ *  directly. */
+export function getProviderPerformance(days: number): ProviderPerformance[] {
+  return computeProviderPerformance(getEntries(), days)
 }
 
 /** Fires a renderer toast when the configured budget threshold is first hit. */

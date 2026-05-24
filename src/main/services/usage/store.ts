@@ -133,7 +133,10 @@ export function getBudget(): UsageBudget {
   return budget
 }
 
-export function setBudget(monthlyUsd: number | null): UsageBudget {
+export function setBudget(
+  monthlyUsd: number | null,
+  opts: { currency?: string; usdRate?: number } = {}
+): UsageBudget {
   ensureMigrated()
   const current = getBudget()
   const next: UsageBudget = {
@@ -141,7 +144,12 @@ export function setBudget(monthlyUsd: number | null): UsageBudget {
     warned75: false,
     warned90: false,
     warned100: false,
-    month: current.month
+    month: current.month,
+    // v1.12.0 — preserve currency/rate across budget updates unless
+    // explicitly overridden. Falls back to USD identity when neither
+    // current nor incoming value is set.
+    currency: opts.currency ?? current.currency ?? 'USD',
+    usdRate: opts.usdRate ?? current.usdRate ?? 1
   }
   writeBudgetRow(next)
   return next

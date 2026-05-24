@@ -28,6 +28,7 @@ import { saveToFile, uploadGist } from '../services/share'
 import {
   clearUsage,
   getBudgetState,
+  getProviderPerformance,
   getSummary as getUsageSummary,
   updateBudget
 } from '../services/usage'
@@ -147,10 +148,12 @@ import { broadcast, resolvePendingFlush } from '../events'
 import {
   addServer as mcpAddServer,
   callTool as mcpCallTool,
+  getServerConfig as mcpGetServerConfig,
   listServers as mcpListServers,
   reconnectServer as mcpReconnectServer,
   removeServer as mcpRemoveServer,
-  setServerEnabled as mcpSetServerEnabled
+  setServerEnabled as mcpSetServerEnabled,
+  updateServer as mcpUpdateServer
 } from '../services/mcp/manager'
 import { runSetupDetection } from '../services/setup/detect'
 import {
@@ -474,8 +477,18 @@ export function registerIpc(): void {
   /* ------------------------------- usage ------------------------------- */
 
   ipcMain.handle('usage:summary', () => getUsageSummary())
+  // v1.12.0 — provider performance dashboard. Caller passes the window
+  // size; we don't fix it so a future "compare 7d vs 30d" toggle costs
+  // zero IPC churn.
+  ipcMain.handle('usage:provider-performance', (_e, days: number) =>
+    getProviderPerformance(days)
+  )
   ipcMain.handle('usage:get-budget', () => getBudgetState())
-  ipcMain.handle('usage:set-budget', (_e, monthlyUsd: number | null) => updateBudget(monthlyUsd))
+  ipcMain.handle(
+    'usage:set-budget',
+    (_e, monthlyUsd: number | null, opts?: { currency?: string; usdRate?: number }) =>
+      updateBudget(monthlyUsd, opts ?? {})
+  )
   ipcMain.handle('usage:clear', () => {
     clearUsage()
   })
@@ -925,6 +938,10 @@ export function registerIpc(): void {
 
   ipcMain.handle('mcp:list', () => mcpListServers())
   ipcMain.handle('mcp:add', (_e, input: McpServerInput) => mcpAddServer(input))
+  ipcMain.handle('mcp:update', (_e, id: string, input: McpServerInput) =>
+    mcpUpdateServer(id, input)
+  )
+  ipcMain.handle('mcp:get-config', (_e, id: string) => mcpGetServerConfig(id))
   ipcMain.handle('mcp:remove', (_e, id: string) => mcpRemoveServer(id))
   ipcMain.handle('mcp:set-enabled', (_e, id: string, enabled: boolean) =>
     mcpSetServerEnabled(id, enabled)
@@ -959,7 +976,9 @@ export function registerIpc(): void {
 
   // MCP marketplace — fetch the curated registry list and install a
   // selected entry with the user's filled-in args / env.
-  ipcMain.handle('mcp:browse-registry', () => fetchMcpRegistry())
+  ipcMain.handle('mcp:browse-registry', (_e, opts?: { force?: boolean }) =>
+    fetchMcpRegistry(opts ?? {})
+  )
   ipcMain.handle(
     'mcp:install-registry',
     (_e, entry: McpRegistryEntry, values: McpInstallValues) =>

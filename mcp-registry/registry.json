@@ -194,6 +194,495 @@
       "envPrompts": [],
       "author": "Anthropic",
       "docsUrl": "https://github.com/modelcontextprotocol/servers/tree/main/src/sequentialthinking"
+    },
+    {
+      "id": "git",
+      "name": "Git",
+      "description": "Read repo history, diffs, blame, file content at any commit. Run searches across the working tree without leaving the chat.",
+      "category": "dev",
+      "tags": ["dev", "git"],
+      "requires": "uv",
+      "command": "uvx",
+      "args": ["mcp-server-git", "--repository", "{REPO_PATH}"],
+      "env": {},
+      "argPrompts": [
+        {
+          "key": "REPO_PATH",
+          "label": "Repository folder",
+          "description": "Absolute path to a local git repository.",
+          "type": "folder",
+          "placeholder": "C:\\Users\\you\\code\\my-project"
+        }
+      ],
+      "envPrompts": [],
+      "author": "Anthropic",
+      "docsUrl": "https://github.com/modelcontextprotocol/servers/tree/main/src/git"
+    },
+    {
+      "id": "gitlab",
+      "name": "GitLab",
+      "description": "GitLab equivalent of the GitHub server — issues, MRs, repos, files, search. Works against gitlab.com or self-hosted.",
+      "category": "dev",
+      "tags": ["dev", "gitlab"],
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-gitlab"],
+      "env": {},
+      "argPrompts": [],
+      "envPrompts": [
+        {
+          "key": "GITLAB_PERSONAL_ACCESS_TOKEN",
+          "label": "GitLab token",
+          "description": "Create at gitlab.com/-/user_settings/personal_access_tokens — needs at minimum the `api` scope.",
+          "secret": true
+        },
+        {
+          "key": "GITLAB_API_URL",
+          "label": "GitLab API URL (optional)",
+          "description": "Leave blank for gitlab.com. For self-hosted, e.g. https://gitlab.company.com/api/v4.",
+          "secret": false
+        }
+      ],
+      "author": "Anthropic",
+      "docsUrl": "https://github.com/modelcontextprotocol/servers/tree/main/src/gitlab"
+    },
+    {
+      "id": "google-drive",
+      "name": "Google Drive",
+      "description": "Search and read files in your Google Drive — Docs, Sheets, Slides, PDFs, anything indexed by Drive search. Requires a Google Cloud OAuth setup (one-time, ~5 min).",
+      "category": "files",
+      "tags": ["files", "google"],
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-gdrive"],
+      "env": {},
+      "argPrompts": [],
+      "envPrompts": [
+        {
+          "key": "GDRIVE_CREDENTIALS_PATH",
+          "label": "Path to credentials.json",
+          "description": "Absolute path to the OAuth credentials file you generate by following the server's setup (Google Cloud project → Drive API → OAuth creds → run the auth script). See the docs link.",
+          "secret": false
+        }
+      ],
+      "author": "Anthropic",
+      "docsUrl": "https://github.com/modelcontextprotocol/servers/tree/main/src/gdrive"
+    },
+    {
+      "id": "google-maps",
+      "name": "Google Maps",
+      "description": "Place search, directions, geocoding, distance matrix. Anywhere the model needs real-world location data.",
+      "category": "web",
+      "tags": ["web", "maps"],
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-google-maps"],
+      "env": {},
+      "argPrompts": [],
+      "envPrompts": [
+        {
+          "key": "GOOGLE_MAPS_API_KEY",
+          "label": "Google Maps API key",
+          "description": "Create at console.cloud.google.com → APIs & Services → Credentials.",
+          "secret": true
+        }
+      ],
+      "author": "Anthropic",
+      "docsUrl": "https://github.com/modelcontextprotocol/servers/tree/main/src/google-maps"
+    },
+    {
+      "id": "redis",
+      "name": "Redis",
+      "description": "Read/write key-value access to a Redis instance. Useful for inspecting cached data or quickly stashing notes.",
+      "category": "data",
+      "tags": ["data", "cache"],
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-redis", "{REDIS_URL}"],
+      "env": {},
+      "argPrompts": [
+        {
+          "key": "REDIS_URL",
+          "label": "Redis URL",
+          "description": "Connection string — redis://localhost:6379 for a default local instance.",
+          "placeholder": "redis://localhost:6379"
+        }
+      ],
+      "envPrompts": [],
+      "author": "Anthropic",
+      "docsUrl": "https://github.com/modelcontextprotocol/servers/tree/main/src/redis"
+    },
+    {
+      "id": "sentry",
+      "name": "Sentry",
+      "description": "Pull issue + event details from Sentry. Lets the model triage exceptions and walk you through what crashed.",
+      "category": "dev",
+      "tags": ["dev", "errors"],
+      "requires": "uv",
+      "command": "uvx",
+      "args": ["mcp-server-sentry"],
+      "env": {},
+      "argPrompts": [],
+      "envPrompts": [
+        {
+          "key": "SENTRY_AUTH_TOKEN",
+          "label": "Sentry auth token",
+          "description": "Create at sentry.io/settings/account/api/auth-tokens — needs `event:read` and `project:read`.",
+          "secret": true
+        }
+      ],
+      "author": "Anthropic",
+      "docsUrl": "https://github.com/modelcontextprotocol/servers/tree/main/src/sentry"
+    },
+    {
+      "id": "time",
+      "name": "Time",
+      "description": "Timezone-aware time queries — convert between zones, parse 'now in Tokyo', schedule reminders. Tiny but surprisingly used.",
+      "category": "productivity",
+      "tags": ["time", "productivity"],
+      "requires": "uv",
+      "command": "uvx",
+      "args": ["mcp-server-time"],
+      "env": {},
+      "argPrompts": [],
+      "envPrompts": [],
+      "author": "Anthropic",
+      "docsUrl": "https://github.com/modelcontextprotocol/servers/tree/main/src/time"
+    },
+    {
+      "id": "everart",
+      "name": "EverArt",
+      "description": "Image generation via EverArt. Multiple models, prompt-to-image — useful when the user wants visuals during a chat.",
+      "category": "ai",
+      "tags": ["ai", "images"],
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-everart"],
+      "env": {},
+      "argPrompts": [],
+      "envPrompts": [
+        {
+          "key": "EVERART_API_KEY",
+          "label": "EverArt API key",
+          "description": "Sign up at everart.ai to get a key.",
+          "secret": true
+        }
+      ],
+      "author": "Anthropic",
+      "docsUrl": "https://github.com/modelcontextprotocol/servers/tree/main/src/everart"
+    },
+    {
+      "id": "aws-kb-retrieval",
+      "name": "AWS Knowledge Base",
+      "description": "Query an AWS Bedrock knowledge base — RAG-style retrieval against documents you've indexed. Good for company docs.",
+      "category": "data",
+      "tags": ["aws", "rag"],
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-aws-kb-retrieval"],
+      "env": {},
+      "argPrompts": [],
+      "envPrompts": [
+        {
+          "key": "AWS_ACCESS_KEY_ID",
+          "label": "AWS access key ID",
+          "secret": true
+        },
+        {
+          "key": "AWS_SECRET_ACCESS_KEY",
+          "label": "AWS secret access key",
+          "secret": true
+        },
+        {
+          "key": "AWS_REGION",
+          "label": "AWS region",
+          "description": "e.g. us-east-1",
+          "secret": false
+        }
+      ],
+      "author": "Anthropic",
+      "docsUrl": "https://github.com/modelcontextprotocol/servers/tree/main/src/aws-kb-retrieval"
+    },
+    {
+      "id": "everything",
+      "name": "Everything (demo)",
+      "description": "A reference server exposing every MCP feature — prompts, resources, tools, sampling. Great for testing the agent loop.",
+      "category": "dev",
+      "tags": ["dev", "testing", "demo"],
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-everything"],
+      "env": {},
+      "argPrompts": [],
+      "envPrompts": [],
+      "author": "Anthropic",
+      "docsUrl": "https://github.com/modelcontextprotocol/servers/tree/main/src/everything"
+    },
+    {
+      "id": "notion",
+      "name": "Notion",
+      "description": "Read + write Notion pages, databases, and blocks. Search across your workspace, append blocks, query databases. Maintained by Notion themselves.",
+      "category": "productivity",
+      "tags": ["notion", "docs"],
+      "command": "npx",
+      "args": ["-y", "@notionhq/notion-mcp-server"],
+      "env": {},
+      "argPrompts": [],
+      "envPrompts": [
+        {
+          "key": "OPENAPI_MCP_HEADERS",
+          "label": "Notion API headers (JSON)",
+          "description": "Paste: {\"Authorization\":\"Bearer YOUR_TOKEN\",\"Notion-Version\":\"2022-06-28\"} — get token at notion.so/profile/integrations.",
+          "secret": true
+        }
+      ],
+      "author": "Notion",
+      "docsUrl": "https://github.com/makenotion/notion-mcp-server"
+    },
+    {
+      "id": "supabase",
+      "name": "Supabase",
+      "description": "Inspect and query Supabase projects — list tables, run SQL, manage migrations, check logs. Maintained by Supabase.",
+      "category": "data",
+      "tags": ["supabase", "data"],
+      "command": "npx",
+      "args": ["-y", "@supabase/mcp-server-supabase"],
+      "env": {},
+      "argPrompts": [],
+      "envPrompts": [
+        {
+          "key": "SUPABASE_ACCESS_TOKEN",
+          "label": "Supabase access token",
+          "description": "Create at supabase.com/dashboard/account/tokens.",
+          "secret": true
+        }
+      ],
+      "author": "Supabase",
+      "docsUrl": "https://github.com/supabase-community/supabase-mcp"
+    },
+    {
+      "id": "cloudflare",
+      "name": "Cloudflare",
+      "description": "Manage Cloudflare resources — Workers, KV, R2, D1, observability. First connect opens your browser for one-time OAuth login; later restarts are instant.",
+      "category": "dev",
+      "tags": ["cloudflare", "cloud"],
+      "command": "npx",
+      "args": ["-y", "@cloudflare/mcp-server-cloudflare", "init"],
+      "env": {},
+      "argPrompts": [],
+      "envPrompts": [],
+      "author": "Cloudflare",
+      "docsUrl": "https://github.com/cloudflare/mcp-server-cloudflare"
+    },
+    {
+      "id": "stripe",
+      "name": "Stripe",
+      "description": "Stripe account ops — customers, products, payments, invoices, subscriptions. Maintained by Stripe.",
+      "category": "data",
+      "tags": ["stripe", "payments"],
+      "command": "npx",
+      "args": ["-y", "@stripe/mcp", "--tools=all"],
+      "env": {},
+      "argPrompts": [],
+      "envPrompts": [
+        {
+          "key": "STRIPE_SECRET_KEY",
+          "label": "Stripe secret key",
+          "description": "Restricted API key recommended — create at dashboard.stripe.com/apikeys.",
+          "secret": true
+        }
+      ],
+      "author": "Stripe",
+      "docsUrl": "https://github.com/stripe/agent-toolkit"
+    },
+    {
+      "id": "tavily",
+      "name": "Tavily Search",
+      "description": "AI-optimised web search with quick-answer summarisation. Alternative to Brave Search; better at research-style queries that need synthesised results.",
+      "category": "web",
+      "tags": ["search", "web"],
+      "command": "npx",
+      "args": ["-y", "tavily-mcp"],
+      "env": {},
+      "argPrompts": [],
+      "envPrompts": [
+        {
+          "key": "TAVILY_API_KEY",
+          "label": "Tavily API key",
+          "description": "Free tier: 1000 searches/month. Sign up at tavily.com.",
+          "secret": true
+        }
+      ],
+      "author": "Tavily",
+      "docsUrl": "https://github.com/tavily-ai/tavily-mcp"
+    },
+    {
+      "id": "perplexity",
+      "name": "Perplexity Ask",
+      "description": "Real-time web-aware Q&A via Perplexity's Sonar models. Good for research questions where you want a synthesised answer with citations.",
+      "category": "web",
+      "tags": ["search", "ai", "web"],
+      "command": "npx",
+      "args": ["-y", "server-perplexity-ask"],
+      "env": {},
+      "argPrompts": [],
+      "envPrompts": [
+        {
+          "key": "PERPLEXITY_API_KEY",
+          "label": "Perplexity API key",
+          "description": "Get one at perplexity.ai/settings/api.",
+          "secret": true
+        }
+      ],
+      "author": "Perplexity",
+      "docsUrl": "https://github.com/ppl-ai/modelcontextprotocol"
+    },
+    {
+      "id": "linear",
+      "name": "Linear",
+      "description": "Read + create Linear issues, projects, cycles. Search across your workspace, transition status, add comments.",
+      "category": "productivity",
+      "tags": ["linear", "issues"],
+      "command": "npx",
+      "args": ["-y", "@tacticlaunch/mcp-linear"],
+      "env": {},
+      "argPrompts": [],
+      "envPrompts": [
+        {
+          "key": "LINEAR_API_KEY",
+          "label": "Linear API key",
+          "description": "Create at linear.app/settings/api.",
+          "secret": true
+        }
+      ],
+      "author": "Community",
+      "docsUrl": "https://github.com/tacticlaunch/mcp-linear"
+    },
+    {
+      "id": "docker",
+      "name": "Docker",
+      "description": "Manage Docker containers, images, volumes, networks. List/inspect/start/stop/log without leaving chat.",
+      "category": "dev",
+      "tags": ["docker", "devops"],
+      "requires": "uv",
+      "command": "uvx",
+      "args": ["docker-mcp"],
+      "env": {},
+      "argPrompts": [],
+      "envPrompts": [],
+      "author": "Community",
+      "docsUrl": "https://github.com/QuantGeekDev/docker-mcp"
+    },
+    {
+      "id": "obsidian",
+      "name": "Obsidian",
+      "description": "Read + write Obsidian vault notes. Search across your vault, append to notes, follow backlinks. Uses the Local REST API plugin.",
+      "category": "productivity",
+      "tags": ["notes", "obsidian"],
+      "command": "npx",
+      "args": ["-y", "obsidian-mcp"],
+      "env": {},
+      "argPrompts": [],
+      "envPrompts": [
+        {
+          "key": "OBSIDIAN_API_KEY",
+          "label": "Obsidian Local REST API key",
+          "description": "Install the 'Local REST API' plugin in Obsidian → Settings → copy the API key.",
+          "secret": true
+        }
+      ],
+      "author": "Community",
+      "docsUrl": "https://github.com/StevenStavrakis/obsidian-mcp"
+    },
+    {
+      "id": "youtube",
+      "name": "YouTube transcripts",
+      "description": "Fetch YouTube video transcripts by URL or ID. Useful for summarising videos / pulling quotes for chat context.",
+      "category": "web",
+      "tags": ["youtube", "transcripts"],
+      "command": "npx",
+      "args": ["-y", "@kimtaeyoon83/mcp-server-youtube-transcript"],
+      "env": {},
+      "argPrompts": [],
+      "envPrompts": [],
+      "author": "Community",
+      "docsUrl": "https://github.com/kimtaeyoon83/mcp-server-youtube-transcript"
+    },
+    {
+      "id": "reddit",
+      "name": "Reddit",
+      "description": "Browse + search Reddit — read posts and comments, look up subreddit activity. Read-only; no auth needed for public content.",
+      "category": "web",
+      "tags": ["reddit", "social"],
+      "command": "npx",
+      "args": ["-y", "@adhikasp/mcp-server-reddit"],
+      "env": {},
+      "argPrompts": [],
+      "envPrompts": [],
+      "author": "Community",
+      "docsUrl": "https://github.com/adhikasp/mcp-reddit"
+    },
+    {
+      "id": "spotify",
+      "name": "Spotify",
+      "description": "Search tracks/artists/albums, control playback, manage playlists. Requires a Spotify developer app + your OAuth.",
+      "category": "productivity",
+      "tags": ["spotify", "music"],
+      "command": "npx",
+      "args": ["-y", "@hardonbystander/spotify-mcp"],
+      "env": {},
+      "argPrompts": [],
+      "envPrompts": [
+        {
+          "key": "SPOTIFY_CLIENT_ID",
+          "label": "Spotify client ID",
+          "description": "Create at developer.spotify.com/dashboard.",
+          "secret": false
+        },
+        {
+          "key": "SPOTIFY_CLIENT_SECRET",
+          "label": "Spotify client secret",
+          "secret": true
+        }
+      ],
+      "author": "Community",
+      "docsUrl": "https://github.com/hardonbystander/spotify-mcp"
+    },
+    {
+      "id": "mongodb",
+      "name": "MongoDB",
+      "description": "Read + write a MongoDB database. List collections, query documents, aggregate. Good for debugging app data live.",
+      "category": "data",
+      "tags": ["mongo", "data"],
+      "command": "npx",
+      "args": ["-y", "mongodb-mcp-server"],
+      "env": {},
+      "argPrompts": [],
+      "envPrompts": [
+        {
+          "key": "MDB_MCP_CONNECTION_STRING",
+          "label": "MongoDB connection string",
+          "description": "e.g. mongodb://localhost:27017 or your Atlas URI.",
+          "secret": true
+        }
+      ],
+      "author": "Community",
+      "docsUrl": "https://www.npmjs.com/package/mongodb-mcp-server"
+    },
+    {
+      "id": "elevenlabs",
+      "name": "ElevenLabs",
+      "description": "Text-to-speech via ElevenLabs voices. Useful when the AI wants to generate audio output for a chat reply or save a narration.",
+      "category": "ai",
+      "tags": ["tts", "audio"],
+      "requires": "uv",
+      "command": "uvx",
+      "args": ["elevenlabs-mcp"],
+      "env": {},
+      "argPrompts": [],
+      "envPrompts": [
+        {
+          "key": "ELEVENLABS_API_KEY",
+          "label": "ElevenLabs API key",
+          "description": "Free tier: 10k characters/month. Sign up at elevenlabs.io.",
+          "secret": true
+        }
+      ],
+      "author": "ElevenLabs",
+      "docsUrl": "https://github.com/elevenlabs/elevenlabs-mcp"
     }
   ]
 }

@@ -14,7 +14,10 @@ import {
   AlertTriangle,
   Sparkles,
   Store,
-  Wrench
+  Wrench,
+  Pencil,
+  AlertCircle,
+  Rocket
 } from 'lucide-react'
 import { useMcpStore } from '../../store/useMcpStore'
 import { useUiStore } from '../../store/useUiStore'
@@ -44,6 +47,7 @@ function ServerRow({ server }: { server: McpServerStatus }): JSX.Element {
   const pushToast = useUiStore((s) => s.pushToast)
   const [expanded, setExpanded] = useState(false)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
+  const [editing, setEditing] = useState(false)
   const [busy, setBusy] = useState(false)
 
   const handleReconnect = async (): Promise<void> => {
@@ -60,6 +64,17 @@ function ServerRow({ server }: { server: McpServerStatus }): JSX.Element {
       : server.error
         ? 'bg-rose-400'
         : 'bg-amber-400'
+  const hasDuplicates = server.duplicateTools && server.duplicateTools.length > 0
+
+  if (editing) {
+    return (
+      <ServerForm
+        mode="edit"
+        serverId={server.id}
+        onDone={() => setEditing(false)}
+      />
+    )
+  }
 
   if (confirmingDelete) {
     return (
@@ -131,6 +146,14 @@ function ServerRow({ server }: { server: McpServerStatus }): JSX.Element {
         />
         <button
           type="button"
+          onClick={() => setEditing(true)}
+          title="Edit server"
+          className="shrink-0 text-slate-500 transition hover:text-[var(--accent)]"
+        >
+          <Pencil size={12} />
+        </button>
+        <button
+          type="button"
           onClick={() => void handleReconnect()}
           disabled={busy}
           title="Reconnect"
@@ -147,6 +170,23 @@ function ServerRow({ server }: { server: McpServerStatus }): JSX.Element {
           <Trash2 size={12} />
         </button>
       </div>
+
+      {/* v1.11.0 — duplicate-tool warning. When this server's tools
+        * collide with another connected MCP server (or a built-in
+        * tool name), surface an amber strip naming the duplicates so
+        * the user knows the agent's pick between them is ambiguous.
+        * Fix is to rename one of the servers OR disable one. */}
+      {hasDuplicates && (
+        <div className="mt-1.5 flex items-start gap-1.5 rounded border border-amber-400/30 bg-amber-500/10 px-2 py-1 text-[10px] text-amber-200">
+          <AlertCircle size={11} className="mt-0.5 shrink-0" />
+          <span className="break-words">
+            <span className="font-semibold">Duplicate tool name{server.duplicateTools.length === 1 ? '' : 's'}:</span>{' '}
+            <span className="font-mono">{server.duplicateTools.join(', ')}</span>{' '}
+            — also exposed by another source. Rename this server or disable the
+            duplicate to make the agent's routing unambiguous.
+          </span>
+        </div>
+      )}
 
       {expanded && (
         <div className="mt-2 space-y-1.5 border-t border-white/5 pt-2 text-[10px]">
@@ -183,15 +223,67 @@ function ServerRow({ server }: { server: McpServerStatus }): JSX.Element {
   )
 }
 
-function AddServerForm({ onAdd }: { onAdd: () => void }): JSX.Element {
+/**
+ * v1.11.0 — dual-mode add/edit form. `mode="add"` shows a collapsed
+ * "+ Add MCP server" button that expands on click (legacy behaviour).
+ * `mode="edit"` renders the form inline ALWAYS (the row swaps itself
+ * into edit mode), prefills via mcp.getConfig(serverId), and on save
+ * calls update instead of add. Submitted args reuse the same parseArgs
+ * / parseEnv helpers so paste-from-other-app flows work identically.
+ */
+function ServerForm({
+  mode,
+  serverId,
+  onAdd,
+  onDone
+}: {
+  mode: 'add' | 'edit'
+  serverId?: string
+  onAdd?: () => void
+  onDone?: () => void
+}): JSX.Element {
   const add = useMcpStore((s) => s.add)
+  const update = useMcpStore((s) => s.update)
   const pushToast = useUiStore((s) => s.pushToast)
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(mode === 'edit')
   const [name, setName] = useState('')
   const [command, setCommand] = useState('')
   const [argsRaw, setArgsRaw] = useState('')
   const [envRaw, setEnvRaw] = useState('')
   const [busy, setBusy] = useState(false)
+  const [prefilling, setPrefilling] = useState(mode === 'edit')
+
+  // Prefill in edit mode — single round-trip to the new mcp:get-config
+  // IPC so the user sees the full current command/args/env, not an
+  // empty form they\'d have to retype.
+  useEffect(() => {
+    if (mode !== 'edit' || !serverId) return
+    let cancelled = false
+    void vs.mcp.getConfig(serverId).then((cfg) => {
+      if (cancelled || !cfg) {
+        setPrefilling(false)
+        return
+      }
+      setName(cfg.name)
+      setCommand(cfg.command)
+      // Args: keep whitespace-friendly. Quote any arg containing spaces
+      // so the round-trip through parseArgs preserves it.
+      setArgsRaw(
+        cfg.args
+          .map((a) => (/\s/.test(a) ? `"${a}"` : a))
+          .join(' ')
+      )
+      setEnvRaw(
+        Object.entries(cfg.env)
+          .map(([k, v]) => `${k}=${v}`)
+          .join('\n')
+      )
+      setPrefilling(false)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [mode, serverId])
 
   const submit = async (): Promise<void> => {
     if (!name.trim() || !command.trim() || busy) return
@@ -202,19 +294,37 @@ function AddServerForm({ onAdd }: { onAdd: () => void }): JSX.Element {
     // secrets (API tokens, bot tokens) load them without putting the value
     // in plain Args. Lines without `=` and blank lines are ignored.
     const env = parseEnv(envRaw)
-    const created = await add({
+    const payload = {
       name: name.trim(),
       command: command.trim(),
       args,
       ...(Object.keys(env).length ? { env } : {})
-    })
+    }
+    if (mode === 'edit' && serverId) {
+      const updated = await update(serverId, payload)
+      setBusy(false)
+      if (!updated) {
+        pushToast('error', 'Could not update — server may have been removed.')
+        onDone?.()
+        return
+      }
+      pushToast(
+        updated.connected ? 'success' : 'error',
+        updated.connected
+          ? `${updated.name} updated · ${updated.tools.length} tool(s).`
+          : `${updated.name} updated but couldn't start: ${updated.error ?? 'unknown error'}`
+      )
+      onDone?.()
+      return
+    }
+    const created = await add(payload)
     setBusy(false)
     setName('')
     setCommand('')
     setArgsRaw('')
     setEnvRaw('')
     setOpen(false)
-    onAdd()
+    onAdd?.()
     pushToast(
       created.connected ? 'success' : 'error',
       created.connected
@@ -223,7 +333,9 @@ function AddServerForm({ onAdd }: { onAdd: () => void }): JSX.Element {
     )
   }
 
-  if (!open) {
+  // Add-mode collapsed state: just the "+ Add" button. Edit mode skips
+  // this branch entirely (the row already replaced itself with the form).
+  if (mode === 'add' && !open) {
     return (
       <button
         type="button"
@@ -238,6 +350,9 @@ function AddServerForm({ onAdd }: { onAdd: () => void }): JSX.Element {
 
   return (
     <div className="space-y-1.5 rounded-lg border border-white/10 bg-black/20 p-2.5">
+      {prefilling && (
+        <p className="text-[10px] italic text-slate-500">Loading current config…</p>
+      )}
       <input
         value={name}
         onChange={(e) => setName(e.target.value)}
@@ -267,15 +382,21 @@ function AddServerForm({ onAdd }: { onAdd: () => void }): JSX.Element {
         <button
           type="button"
           onClick={() => void submit()}
-          disabled={!name.trim() || !command.trim() || busy}
+          disabled={!name.trim() || !command.trim() || busy || prefilling}
           className="flex flex-1 items-center justify-center gap-1 rounded-lg bg-[var(--accent)] py-1.5 text-[10px] font-semibold text-white transition hover:brightness-110 disabled:opacity-40"
         >
           <Power size={11} />
-          {busy ? 'Connecting…' : 'Add & start'}
+          {busy
+            ? mode === 'edit'
+              ? 'Saving…'
+              : 'Connecting…'
+            : mode === 'edit'
+              ? 'Save & restart'
+              : 'Add & start'}
         </button>
         <button
           type="button"
-          onClick={() => setOpen(false)}
+          onClick={() => (mode === 'edit' ? onDone?.() : setOpen(false))}
           className="rounded-lg border border-white/10 px-2.5 py-1.5 text-[10px] text-slate-400 transition hover:bg-white/5"
         >
           Cancel
@@ -329,6 +450,12 @@ export function McpSettings(): JSX.Element {
   const [report, setReport] = useState<SetupReport | null>(null)
   const [importSource, setImportSource] = useState<ImportSource | null>(null)
   const [marketplaceOpen, setMarketplaceOpen] = useState(false)
+  // v1.12.0 — when the user clicks the Quick Start CTA in the empty state,
+  // we open the marketplace AND ask it to auto-launch Quick Start once
+  // entries are loaded. One state for both flows keeps the dialog mount
+  // count to one.
+  const [marketplaceInitialView, setMarketplaceInitialView] =
+    useState<'quickStart' | undefined>(undefined)
 
   const refreshReport = (): void => {
     void vs.setup.detect().then(setReport)
@@ -382,22 +509,56 @@ export function McpSettings(): JSX.Element {
         report={report}
         onOpen={setImportSource}
         onBrowse={() => setMarketplaceOpen(true)}
+        onQuickStart={() => {
+          setMarketplaceInitialView('quickStart')
+          setMarketplaceOpen(true)
+        }}
       />
 
       <div className="space-y-1.5">
         {servers.length === 0 ? (
-          <EmptyState
-            icon={<Plug size={20} />}
-            title="No MCP servers yet"
-            hint="Add a Model Context Protocol server to give the agent more tools — file system access, GitHub, databases, anything that speaks MCP."
-          />
+          <>
+            {/* v1.12.0 — Quick Start CTA for first-time users. Opens the
+              * marketplace AND auto-launches Quick Start once entries are
+              * loaded, so a brand-new install can land 5 working tools in
+              * one click instead of staring at an empty list wondering
+              * which of the 100+ marketplace entries to pick. */}
+            <button
+              type="button"
+              onClick={() => {
+                setMarketplaceInitialView('quickStart')
+                setMarketplaceOpen(true)
+              }}
+              className="group flex w-full items-start gap-3 rounded-lg border border-[var(--accent-ring)] bg-[var(--accent-soft)] px-3.5 py-3 text-left transition hover:brightness-110"
+            >
+              <Rocket size={18} className="mt-0.5 shrink-0 text-[var(--accent)]" />
+              <div className="flex-1">
+                <p className="text-[12px] font-semibold text-white">
+                  Quick Start — bulk-install your first tools
+                </p>
+                <p className="mt-0.5 text-[10px] leading-snug text-slate-300">
+                  Pick a workflow (Essentials, Developer, Researcher, Everything) and
+                  install several MCP servers in one click. No API keys or paths
+                  required — just zero-config tools the AI can use right away.
+                </p>
+              </div>
+              <span className="self-center rounded-md bg-white/10 px-2 py-1 text-[10px] font-semibold text-white transition group-hover:bg-white/20">
+                Open →
+              </span>
+            </button>
+            <EmptyState
+              icon={<Plug size={20} />}
+              title="No MCP servers yet"
+              hint="…or add one by hand below — anything that speaks MCP can be wired up here."
+            />
+          </>
         ) : (
           servers.map((server) => <ServerRow key={server.id} server={server} />)
         )}
       </div>
 
       <div className="mt-2">
-        <AddServerForm onAdd={() => void load()} />
+        <ServerForm mode="add" onAdd={() => void load()} />
       </div>
 
       {/* Both dialogs are lazy-loaded; wrapping in a no-fallback Suspense
@@ -423,7 +584,14 @@ export function McpSettings(): JSX.Element {
         <Suspense fallback={null}>
           <McpMarketplaceDialog
             open={marketplaceOpen}
-            onClose={() => setMarketplaceOpen(false)}
+            initialView={marketplaceInitialView}
+            onClose={() => {
+              setMarketplaceOpen(false)
+              // Clear the initialView so the next open (e.g. via the
+              // Browse button in ImportStrip) doesn't auto-launch Quick
+              // Start again. Otherwise the flag persists across opens.
+              setMarketplaceInitialView(undefined)
+            }}
           />
         </Suspense>
       )}
@@ -442,11 +610,16 @@ export function McpSettings(): JSX.Element {
 function ImportStrip({
   report,
   onOpen,
-  onBrowse
+  onBrowse,
+  onQuickStart
 }: {
   report: SetupReport | null
   onOpen: (source: ImportSource) => void
   onBrowse: () => void
+  /** v1.12.0 — opens marketplace + auto-launches Quick Start. Kept in
+   *  this strip alongside "Browse marketplace" so users with some servers
+   *  already installed still see the one-click bulk-add path. */
+  onQuickStart: () => void
 }): JSX.Element {
   const claudeCount = report?.claudeDesktop.mcpServers.length ?? 0
   const cursorCount = report?.cursor.mcpServers.length ?? 0
@@ -456,8 +629,17 @@ function ImportStrip({
     <div className="mb-3 flex flex-wrap gap-1.5">
       <button
         type="button"
-        onClick={onBrowse}
+        onClick={onQuickStart}
+        title="Bulk-install several zero-config MCP servers via a workflow profile."
         className="flex items-center gap-1.5 rounded-lg border border-[var(--accent-ring)] bg-[var(--accent-soft)] px-2.5 py-1.5 text-[10px] font-semibold text-[var(--accent)] transition hover:brightness-110"
+      >
+        <Rocket size={11} />
+        Quick Start
+      </button>
+      <button
+        type="button"
+        onClick={onBrowse}
+        className="flex items-center gap-1.5 rounded-lg border border-white/15 bg-white/5 px-2.5 py-1.5 text-[10px] font-semibold text-slate-200 transition hover:bg-white/10"
       >
         <Store size={11} />
         Browse marketplace

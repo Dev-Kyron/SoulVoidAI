@@ -31,6 +31,7 @@ import type {
   ScanResult,
   ScheduledTask,
   ThreadSummary,
+  ProviderPerformance,
   UsageBudget,
   UsageSummary,
   ChatStreamChunk,
@@ -291,6 +292,14 @@ export interface VoidSoulBridge {
   mcp: {
     list(): Promise<McpServerStatus[]>
     add(input: McpServerInput): Promise<McpServerStatus>
+    /** v1.11.0 — edit an existing server. Preserves enabled state;
+     *  disconnects + restarts the connection so the new command / args
+     *  take effect immediately. */
+    update(id: string, input: McpServerInput): Promise<McpServerStatus | null>
+    /** v1.11.0 — fetch the full persisted config (incl. command / args /
+     *  env) for prefilling the Edit form. listServers() doesn't include
+     *  these because the status surface stays small for the bulk path. */
+    getConfig(id: string): Promise<import('./types').McpServerConfig | null>
     remove(id: string): Promise<McpServerStatus[]>
     setEnabled(id: string, enabled: boolean): Promise<McpServerStatus | null>
     reconnect(id: string): Promise<McpServerStatus | null>
@@ -321,8 +330,14 @@ export interface VoidSoulBridge {
   }
   usage: {
     summary(): Promise<UsageSummary>
+    /** v1.12.0 — per-provider performance aggregate over the last `days`.
+     *  Powers the Provider Performance dashboard in Settings → Usage. */
+    providerPerformance(days: number): Promise<ProviderPerformance[]>
     getBudget(): Promise<UsageBudget>
-    setBudget(monthlyUsd: number | null): Promise<UsageBudget>
+    setBudget(
+      monthlyUsd: number | null,
+      opts?: { currency?: string; usdRate?: number }
+    ): Promise<UsageBudget>
     clear(): Promise<void>
   }
   /**
@@ -513,8 +528,11 @@ export interface VoidSoulBridge {
     importEnvKey(providerId: ProviderId): Promise<SetupEnvKeyImportResult>
   }
   mcpMarketplace: {
-    /** Fetch the curated MCP server registry from the project repo. */
-    browse(): Promise<McpRegistryEntry[]>
+    /** Fetch the curated MCP server registry from the project repo.
+     *  Pass `{ force: true }` to bypass the in-process 30s cache — wired
+     *  to the in-dialog Refresh button so a manual refresh re-fetches
+     *  instead of silently returning cached data. */
+    browse(opts?: { force?: boolean }): Promise<McpRegistryEntry[]>
     /**
      * Install a registry entry. `values.args` fills the `{KEY}` tokens
      * in `entry.args`; `values.env` is merged on top of `entry.env`.

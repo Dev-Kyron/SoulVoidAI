@@ -135,6 +135,8 @@ const bridge: VoidSoulBridge = {
   mcp: {
     list: () => invoke('mcp:list'),
     add: (input) => invoke('mcp:add', input),
+    update: (id, input) => invoke('mcp:update', id, input),
+    getConfig: (id) => invoke('mcp:get-config', id),
     remove: (id) => invoke('mcp:remove', id),
     setEnabled: (id, enabled) => invoke('mcp:set-enabled', id, enabled),
     reconnect: (id) => invoke('mcp:reconnect', id),
@@ -153,8 +155,9 @@ const bridge: VoidSoulBridge = {
   },
   usage: {
     summary: () => invoke('usage:summary'),
+    providerPerformance: (days) => invoke('usage:provider-performance', days),
     getBudget: () => invoke('usage:get-budget'),
-    setBudget: (monthlyUsd) => invoke('usage:set-budget', monthlyUsd),
+    setBudget: (monthlyUsd, opts) => invoke('usage:set-budget', monthlyUsd, opts),
     clear: () => invoke('usage:clear')
   },
   agentCheckpoint: {
@@ -258,7 +261,7 @@ const bridge: VoidSoulBridge = {
     importEnvKey: (providerId) => invoke('setup:import-env-key', providerId)
   },
   mcpMarketplace: {
-    browse: () => invoke('mcp:browse-registry'),
+    browse: (opts) => invoke('mcp:browse-registry', opts),
     install: (entry, values) => invoke('mcp:install-registry', entry, values)
   },
   voice: {

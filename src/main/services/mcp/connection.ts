@@ -32,8 +32,15 @@ const FORWARDED_ENV_KEYS = [
   'LC_ALL'
 ]
 
-/** Cap on how long a single connect+handshake gets before we bail out. */
-const CONNECT_TIMEOUT_MS = 20_000
+/** Cap on how long a single connect+handshake gets before we bail out.
+ *  v1.12.0 — bumped 20s → 60s. Several legitimate MCP servers (Cloudflare's
+ *  `init` flow, mcp-remote with OAuth, anything that opens a browser tab
+ *  for first-run auth) need a human in the loop. 20s killed the process
+ *  before the user could finish the login. 60s gives a realistic budget
+ *  for a quick OAuth dance while still failing fast on genuinely broken
+ *  servers (the previous "feels broken" threshold was ~30s of staring,
+ *  so users notice and click reconnect well before the new cap fires). */
+const CONNECT_TIMEOUT_MS = 60_000
 
 function withTimeout<T>(work: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {

@@ -8,6 +8,7 @@ import { randomUUID } from 'node:crypto'
 import { McpConnection } from './connection'
 import { getServers, setServers } from './store'
 import { log } from '../logger'
+import { TOOL_SPECS } from '@shared/agent-tools'
 import type {
   McpServerConfig,
   McpServerInput,
@@ -25,14 +26,41 @@ const connections = new Map<string, McpConnection>()
 const bringUpInFlight = new Map<string, Promise<McpConnection>>()
 
 function statusFrom(config: McpServerConfig, conn?: McpConnection): McpServerStatus {
+  const tools = conn?.tools ?? []
   return {
     id: config.id,
     name: config.name,
     enabled: config.enabled,
     connected: conn?.connected ?? false,
     error: conn?.error ?? null,
-    tools: conn?.tools ?? []
+    tools,
+    duplicateTools: findDuplicateToolNames(config.id, tools)
   }
+}
+
+/**
+ * v1.11.0 — duplicate-tool scan. The agent sees a flat namespace of tool
+ * names; if two enabled MCP servers both expose `mcp_filesystem_read_file`
+ * (possible when two server NAMES slugify to the same 16-char prefix), OR
+ * an MCP tool collides with a built-in (`web_search`, `click_on_screen`,
+ * etc.), the model's routing between the collisions is undefined. This
+ * scan returns the names of THIS server's tools that collide with any
+ * other tool the model also sees, so the renderer can flag the row with
+ * an amber badge. User-fixable: rename one of the servers OR disable one.
+ *
+ * Built-in tool names are pulled from TOOL_SPECS — the shared source of
+ * truth for what the AI gateway hands to providers.
+ */
+function findDuplicateToolNames(serverId: string, tools: McpToolInfo[]): string[] {
+  if (tools.length === 0) return []
+  const seenElsewhere = new Set<string>()
+  for (const builtin of TOOL_SPECS) seenElsewhere.add(builtin.name)
+  for (const conn of connections.values()) {
+    if (!conn.connected) continue
+    if (conn.config.id === serverId) continue
+    for (const tool of conn.tools) seenElsewhere.add(tool.name)
+  }
+  return tools.map((t) => t.name).filter((n) => seenElsewhere.has(n))
 }
 
 async function bringUp(config: McpServerConfig): Promise<McpConnection> {
@@ -86,6 +114,13 @@ export function listServers(): McpServerStatus[] {
   return getServers().map((s) => statusFrom(s, connections.get(s.id)))
 }
 
+/** v1.11.0 — return the full persisted config for one server. Used by
+ *  the renderer's Edit form to prefill every field. Returns null when
+ *  the id doesn't exist (renderer should reload its list). */
+export function getServerConfig(id: string): McpServerConfig | null {
+  return getServers().find((s) => s.id === id) ?? null
+}
+
 export async function addServer(input: McpServerInput): Promise<McpServerStatus> {
   const config: McpServerConfig = {
     id: randomUUID(),
@@ -98,6 +133,41 @@ export async function addServer(input: McpServerInput): Promise<McpServerStatus>
   setServers([...getServers(), config])
   await bringUp(config)
   return statusFrom(config, connections.get(config.id))
+}
+
+/**
+ * v1.11.0 — edit an existing server. Same input shape as `addServer`
+ * but keyed by id; preserves the existing `enabled` flag (toggling is
+ * a separate action). Disconnects the old config, persists the new
+ * one, brings it back up — so a name / command / args / env change
+ * actually takes effect without forcing the user to delete + re-add.
+ *
+ * Returns null when the id doesn't exist (renderer should refresh its
+ * list to drop the stale row).
+ */
+export async function updateServer(
+  id: string,
+  input: McpServerInput
+): Promise<McpServerStatus | null> {
+  const servers = getServers()
+  const idx = servers.findIndex((s) => s.id === id)
+  if (idx < 0) return null
+  const updated: McpServerConfig = {
+    id,
+    name: (input.name || '').trim() || servers[idx].name,
+    command: (input.command || '').trim() || servers[idx].command,
+    args: Array.isArray(input.args) ? input.args.map((a) => String(a)) : [],
+    env: input.env && typeof input.env === 'object' ? input.env : {},
+    // Preserve enabled state — edit is orthogonal to enable/disable.
+    enabled: servers[idx].enabled
+  }
+  const next = [...servers]
+  next[idx] = updated
+  setServers(next)
+  // bringUp handles disconnecting any existing connection before
+  // starting the new one, so a single call covers the full restart.
+  await bringUp(updated)
+  return statusFrom(updated, connections.get(id))
 }
 
 export async function removeServer(id: string): Promise<McpServerStatus[]> {

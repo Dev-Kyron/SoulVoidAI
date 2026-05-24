@@ -527,6 +527,41 @@ export interface UsageEntry {
   cost: number | null
   /** True when the token counts are estimated client-side rather than reported by the API. */
   estimated: boolean
+  /** v1.12.0 — wall-clock time from request issue to response completion,
+   *  in milliseconds. Optional because legacy entries (pre-v1.12) didn't
+   *  capture it. Drives the per-provider latency aggregates. */
+  durationMs?: number
+  /** v1.12.0 — false when the provider call errored (HTTP non-2xx, schema
+   *  validation failure, timeout). Optional because legacy entries are
+   *  treated as success-by-omission. Drives the success-rate aggregate. */
+  success?: boolean
+  /** Brief error category for diagnostics — set alongside success=false.
+   *  E.g. "401 unauthorized", "rate-limited", "timeout". Never a stack
+   *  trace or PII; the UI shows recent failures grouped by this label. */
+  errorKind?: string
+}
+
+/** v1.12.0 — per-provider performance aggregate over a rolling window.
+ *  Surfaced in Settings → Usage so users can see which provider is
+ *  fastest / cheapest / most reliable and decide which to favour. */
+export interface ProviderPerformance {
+  provider: ProviderId
+  /** Total recorded calls (success + failure). */
+  callCount: number
+  successCount: number
+  failureCount: number
+  /** Percentage 0–100. `null` when callCount is 0 (avoids divide-by-zero
+   *  rendering). */
+  successRate: number | null
+  /** Mean latency across successful calls with `durationMs` recorded.
+   *  `null` when no recorded latencies exist (e.g. all entries are
+   *  legacy pre-v1.12 with no timing). */
+  avgLatencyMs: number | null
+  /** 95th percentile latency — captures tail performance better than the
+   *  mean. `null` when fewer than 5 timed calls. */
+  p95LatencyMs: number | null
+  /** Total USD cost across all calls in the window. */
+  totalCost: number
 }
 
 /** Aggregated cost summary for a window (current month by default). */
@@ -547,7 +582,9 @@ export interface UsageSummary {
   windowEnd: string
 }
 
-/** Monthly spending cap (USD). Null = no budget set. */
+/** Monthly spending cap. Stored canonically in USD (provider APIs bill
+ *  in USD); the renderer displays in the user's chosen `currency` at the
+ *  manual `usdRate` they set. Null monthlyUsd = no budget. */
 export interface UsageBudget {
   monthlyUsd: number | null
   /** True once a 75% / 90% / 100% warning has fired this month, so we don't repeat. */
@@ -556,6 +593,13 @@ export interface UsageBudget {
   warned100: boolean
   /** ISO month string (YYYY-MM) the warnings apply to — flipping months resets. */
   month: string
+  /** v1.12.0 — display currency for the Usage panel. Optional for back-
+   *  compat: legacy budgets without this field render as USD. */
+  currency?: string
+  /** v1.12.0 — exchange rate the user set, expressed as "1 USD = N units
+   *  of `currency`". Used both ways: input × rate → local display,
+   *  local input ÷ rate → stored USD. Defaults to 1 (USD identity). */
+  usdRate?: number
 }
 
 /* --------------------------- Model Context Protocol --------------------- */
@@ -593,9 +637,20 @@ export interface McpServerStatus {
   connected: boolean
   error: string | null
   tools: McpToolInfo[]
+  /**
+   * v1.11.0 — tool names from this server that collide with another
+   * source the model also sees (another MCP server OR a built-in tool).
+   * Populated post-connection by the manager's duplicate scan. Surfaces
+   * as an amber badge on the server row so the user knows the agent's
+   * pick between the duplicates is ambiguous (and can rename one server
+   * or disable the other to fix). Empty array = no collisions.
+   */
+  duplicateTools: string[]
 }
 
-/** Input payload when the user adds a new MCP server in Settings. */
+/** Input payload when the user adds OR edits an MCP server in Settings.
+ *  v1.11.0 — same shape covers both add and update paths; the dispatcher
+ *  decides based on whether an id is supplied alongside. */
 export interface McpServerInput {
   name: string
   command: string
@@ -736,6 +791,38 @@ export interface McpRegistryEntry {
   requires?: string
   author?: string
   docsUrl?: string
+  /**
+   * v1.11.0 / v1.11.1 — which registry surfaced this entry. Marketplace
+   * dialog colour-codes the badge so users can tell our curated picks
+   * from the broader community catalogues. Optional for back-compat
+   * with the bundled registry shape that predates this field.
+   */
+  source?: 'curated' | 'smithery' | 'glama' | 'pulsemcp'
+  /**
+   * v1.12.0 — cryptographic verification flag. Set true only for
+   * entries that came from a source whose detached Ed25519 signature
+   * verified against the bundled public key (see registry-signing.ts).
+   * Today only the curated registry is signed; community sources
+   * (Smithery, Glama, PulseMCP) are inherently unverifiable because
+   * we don\'t control their upstream signing keys. Surfaces as a
+   * "Verified" badge in the marketplace card so users can see the
+   * trust gap upfront — pre-empts the "malicious plugin owns your
+   * machine" failure mode the audit flagged.
+   */
+  verified?: boolean
+  /**
+   * v1.11.4 — discovery-only flag. Set true when the registry surfaced
+   * this entry but didn't include enough install info to one-click
+   * install (Glama in particular — their list endpoint omits the
+   * install command; per-entry details live on a separate page).
+   *
+   * Discovery-only cards render with a "View on X ↗" button that
+   * opens `docsUrl` in the user's browser instead of the install
+   * configure dialog. Honest: we can\'t install for you, but we can
+   * show you what\'s available and where to learn more — which is
+   * still useful for browse + discover.
+   */
+  discoveryOnly?: boolean
 }
 
 /**

@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "algorithm": "ed25519",
+  "registrySha256": "f82086fc4941ed3319489323af019b11675513c8af75cfbd4040dab9eb0daa01",
+  "signature": "fDmm1zaVc6KbZgLhagz9G6k73WPtCPlgwkjn/onLZ5rL7TAAiLlr6/UCE4OpTDDHeOgo5uaVu06NddEk+pV1Cg==",
+  "signedAt": "2026-05-24T13:40:27.187Z"
+}

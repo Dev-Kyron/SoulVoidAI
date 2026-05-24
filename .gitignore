@@ -23,6 +23,14 @@ desktop.ini
 .env
 .env.*
 
+# v1.12.0 — MCP registry signing private key. The public key is bundled
+# in the app (src/main/services/setup/registry-signing.ts); the private
+# key lives at mcp-registry/.private-key.b64 on the maintainer's machine
+# and is used by scripts/sign-mcp-registry.mjs to produce the signature
+# alongside registry.json. Never commit the private key.
+mcp-registry/.private-key.b64
+mcp-registry/.private-key.*
+
 # Editor / IDE
 .vscode/*
 !.vscode/extensions.json

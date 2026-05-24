@@ -1,0 +1,108 @@
+/**
+ * v1.12.0 — Quick Start profiles for the MCP marketplace.
+ *
+ * Why this exists: a first-time non-tech user opening the marketplace
+ * sees 100+ entries and bounces. The marketplace is a power-user feature
+ * pretending to be an onboarding flow. Quick Start collapses the choice
+ * down to "pick a workflow" → bulk-install every zero-config server that
+ * matches. They land with 5–8 working tools in one click.
+ *
+ * Eligibility rules for Quick Start (intentionally strict):
+ *   1. Source must be `curated` — we hand-reviewed these entries.
+ *      Community sources (PulseMCP, Smithery, Glama) aren't audited and
+ *      we won't bulk-install something we haven't read.
+ *   2. No argPrompts — needs no file paths.
+ *   3. No envPrompts — needs no API keys or tokens.
+ *   4. No `requires` system dep — `uv`/`docker`/etc would fail at first
+ *      use without that binary on the user's machine. Reserving those
+ *      for the individual-install path (where the badge warns about it).
+ *   5. Not discoveryOnly — those have no install command at all.
+ *
+ * Adding new profiles: profile entryIds reference registry entry IDs by
+ * string. Missing IDs are silently dropped at resolve-time so a profile
+ * authored against a renamed entry doesn't error — it just installs
+ * fewer servers than advertised. Re-author profiles when registry IDs
+ * stabilise.
+ */
+import type { McpRegistryEntry } from '@shared/types'
+
+export interface QuickStartProfile {
+  id: string
+  name: string
+  tagline: string
+  description: string
+  /** Entry IDs to install. The string literal 'all-zero-config' means
+   *  "every entry that passes the eligibility filter" — used by the
+   *  "Everything" profile so it stays in sync as the registry grows. */
+  entryIds: readonly string[] | 'all-zero-config'
+}
+
+export const QUICK_START_PROFILES: readonly QuickStartProfile[] = [
+  {
+    id: 'essentials',
+    name: 'Essentials',
+    tagline: 'Universal helpers',
+    description:
+      'Memory and sequential reasoning. Every AI workflow benefits — give the model durable cross-session memory and an explicit thinking-step tool.',
+    entryIds: ['memory', 'sequential-thinking']
+  },
+  {
+    id: 'developer',
+    name: 'Developer',
+    tagline: 'Code + infrastructure',
+    description:
+      'Adds the reference agent-loop server and Cloudflare (one-time browser OAuth on first use) for Workers / KV / R2 / D1. Plus Essentials.',
+    entryIds: ['memory', 'sequential-thinking', 'everything', 'cloudflare']
+  },
+  {
+    id: 'researcher',
+    name: 'Researcher',
+    tagline: 'Web + content extraction',
+    description:
+      'Adds Puppeteer for headless browsing, YouTube transcript fetching, and Reddit search. Plus Essentials.',
+    entryIds: ['memory', 'sequential-thinking', 'puppeteer', 'youtube', 'reddit']
+  },
+  {
+    id: 'everything',
+    name: 'Everything',
+    tagline: 'All zero-config servers',
+    description:
+      'Install every curated server in the marketplace that needs no keys, no paths, and no system dependencies. Maximum tools, zero friction.',
+    entryIds: 'all-zero-config'
+  }
+]
+
+/** Eligibility filter — see file header for the rules and why each rule
+ *  is strict. Exported so the marketplace UI can display the same count
+ *  the Quick Start dialog will actually install. */
+export function filterZeroConfigEntries(entries: McpRegistryEntry[]): McpRegistryEntry[] {
+  return entries.filter(
+    (e) =>
+      e.source === 'curated' &&
+      !e.discoveryOnly &&
+      e.argPrompts.length === 0 &&
+      e.envPrompts.length === 0 &&
+      !e.requires
+  )
+}
+
+/** Resolve a profile against the loaded marketplace entries. Missing IDs
+ *  drop out; only entries currently in the filtered zero-config set come
+ *  back. Use this BEFORE rendering the confirmation list so the count
+ *  matches what will actually be installed. */
+export function resolveProfileEntries(
+  profile: QuickStartProfile,
+  loaded: McpRegistryEntry[]
+): McpRegistryEntry[] {
+  const zeroConfig = filterZeroConfigEntries(loaded)
+  if (profile.entryIds === 'all-zero-config') return zeroConfig
+  // Preserve the profile's intended ordering when listing entries,
+  // so "Essentials" reads memory→sequential not in registry order.
+  const byId = new Map(zeroConfig.map((e) => [e.id, e] as const))
+  const ordered: McpRegistryEntry[] = []
+  for (const id of profile.entryIds) {
+    const entry = byId.get(id)
+    if (entry) ordered.push(entry)
+  }
+  return ordered
+}

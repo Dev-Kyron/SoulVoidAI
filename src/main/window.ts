@@ -7,6 +7,7 @@
 import { app, BrowserWindow, screen, shell } from 'electron'
 import { join } from 'node:path'
 import { setMainWindow, registerWindow } from './events'
+import { installContextMenu } from './contextMenu'
 import { isQuitting } from './lifecycle'
 import {
   getConfig,
@@ -156,6 +157,7 @@ export function createMainWindow(): BrowserWindow {
   win.setAlwaysOnTop(true, 'screen-saver')
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
   applySpellCheckerLanguages(win)
+  installContextMenu(win)
 
   win.once('ready-to-show', () => win?.show())
 
@@ -405,6 +407,7 @@ export function openSettingsWindow(): BrowserWindow {
   })
 
   applySpellCheckerLanguages(settingsWin)
+  installContextMenu(settingsWin)
   settingsWin.once('ready-to-show', () => settingsWin?.show())
   registerWindow(settingsWin)
 

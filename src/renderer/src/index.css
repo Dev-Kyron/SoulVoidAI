@@ -102,8 +102,45 @@ body {
   color: var(--text-strong);
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
+  /* Default: app-shell elements don't accidentally select text on click
+   * (the orb, drag regions, toolbar buttons). Semantic text content
+   * opts back in via the rules at the bottom of this file. */
   user-select: none;
   cursor: default;
+}
+
+/* v1.10.3 — text selection + right-click. The body rule above keeps
+ * the app feeling native on bare divs / interactive shell elements,
+ * but anywhere we render actual prose / labels / code, the user
+ * expects to be able to highlight + copy. These rules opt the
+ * common text containers back in, then explicitly re-disable inside
+ * buttons (where text inside a button is part of the button, not
+ * selectable content). Form fields are always selectable.
+ *
+ * Right-click context menu (Cut/Copy/Paste/Select All) is wired up
+ * in main/contextMenu.ts. */
+p,
+span,
+code,
+pre,
+h1, h2, h3, h4, h5, h6,
+li, td, th,
+blockquote, label,
+.markdown, .markdown *,
+.selectable,
+input, textarea, [contenteditable] {
+  user-select: text;
+}
+button, button *,
+[role='button'], [role='button'] *,
+[role='tab'], [role='tab'] *,
+[role='menuitem'], [role='menuitem'] * {
+  user-select: none;
+}
+/* SVG icons (Lucide) inside text containers shouldn't get a text
+ * cursor — they're decorative, not selectable content. */
+svg {
+  user-select: none;
 }
 
 #root {

@@ -143,7 +143,7 @@ export const TOOL_SPECS: ToolSpec[] = [
     name: 'see_screen',
     actionType: 'screenshot',
     description:
-      'Capture the screen as an image and look at it. Use this when you need to actually SEE what is on screen — UI layout, icons, charts, viewports, anything visual that OCR alone cannot describe. The image is attached to your next reasoning step.',
+      'Capture the screen as an image and look at it. Use this ONLY when you need to DESCRIBE on-screen content back to the user — explain what they\'re looking at, summarise a chart, read an error dialog, comment on a UI layout. Do NOT use this as a step before clicking — `click_on_screen` already screenshots internally and is dramatically more reliable than asking you to compute coordinates yourself. The image is attached to your next reasoning step.',
     parameters: { type: 'object', properties: {}, required: [] }
   },
   {
@@ -171,6 +171,41 @@ export const TOOL_SPECS: ToolSpec[] = [
         button: { type: 'string', description: '"left" (default) or "right".' }
       },
       required: []
+    }
+  },
+  {
+    name: 'click_on_screen',
+    actionType: 'visual-click',
+    description:
+      'YOUR TOOL for clicking anything visible in any app the user has open — sending messages, replying, posting, submitting, opening menus, closing dialogs. NEVER refuse with "I can\'t send messages on [app]" or "I can only help you prepare the message" — that was true before this tool existed; now your job is to click the Send button for them.\n\n' +
+      'When the user says X, you call Y:\n' +
+      '  · "Send the message to Kyron on Facebook" → click_on_screen({ what: "the Send button in the composer", in_window: "Messenger" })\n' +
+      '  · "Send this on Discord" → click_on_screen({ what: "the Send button at the bottom of the channel", in_window: "Discord" })\n' +
+      '  · "Reply on Slack" → click_on_screen({ what: "the Send button in the message composer", in_window: "Slack" })\n' +
+      '  · "Send the email" → click_on_screen({ what: "the Send button", in_window: "Gmail" })\n' +
+      '  · "Post this tweet" → click_on_screen({ what: "the Post button", in_window: "Twitter" })\n' +
+      '  · "Submit the form" → click_on_screen({ what: "the Submit button", in_window: "Chrome" })\n' +
+      '  · "Close this dialog" → click_on_screen({ what: "the X button to close the current dialog" })\n\n' +
+      'Mechanics: tries Windows accessibility tree first (exact for native apps), falls back to vision on a screenshot. User sees a 3-second cancellable cyan-ring preview before the click fires — wrong locates fail safe (Esc to cancel). Don\'t call see_screen first; this tool screenshots internally. Don\'t pre-narrate; just call the tool.',
+    parameters: {
+      type: 'object',
+      properties: {
+        what: {
+          type: 'string',
+          description:
+            'Specific description of the target element. Translate the user\'s natural phrasing into something a screen-reader would identify the element by. Include the surrounding context if multiple similar elements may be visible: "the blue Send button in the compose window at the bottom-right" beats "Send" when there could be more than one send-shaped thing on screen. Good descriptions are what locate accuracy depends on — name the visual distinguishing features (colour, position, surrounding text, icon shape).'
+        },
+        in_window: {
+          type: 'string',
+          description:
+            'Optional window hint (app name OR window title fragment). When set, the tool enumerates visible windows, fuzzy-matches this string, brings that window to the foreground, and scopes the search to ONLY that window\'s content. ALWAYS specify this when the user named an app — "Messenger", "Discord", "Chrome", "VS Code", "Outlook", etc. Eliminates cross-window false positives. Omit when the user said "this window" / didn\'t name an app, OR when you want to search across all visible windows.'
+        },
+        button: {
+          type: 'string',
+          description: '"left" (default) or "right" for a context-menu click.'
+        }
+      },
+      required: ['what']
     }
   },
   {

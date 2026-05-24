@@ -377,6 +377,21 @@ export function registerIpc(): void {
     }
   )
 
+  // v1.10.1 — experimental feature gates (visualClick etc). Off by
+  // default; user opts in from Settings → Experimental.
+  ipcMain.handle(
+    'config:set-experimental-features',
+    (e, patch: Partial<import('@shared/types').ExperimentalFeaturesConfig>) => {
+      updateConfig({
+        experimentalFeatures: {
+          ...getConfig().experimentalFeatures,
+          ...patch
+        }
+      })
+      return emitConfig(e.sender.id)
+    }
+  )
+
   ipcMain.handle(
     'config:set-embedding-provider',
     (e, provider: import('@shared/types').EmbeddingProvider) => {
@@ -729,6 +744,20 @@ export function registerIpc(): void {
       // exceptSenderId so the source window doesn't echo to itself —
       // it already updated its local store directly before calling this.
       broadcast('wake-diagnostic:update', snapshot, e.sender.id)
+      return { ok: true }
+    }
+  )
+  // v1.8.0 — click-preview HUD resolve. The renderer in the preview
+  // window calls this with the token it received in its query string
+  // and the user's decision (go = countdown elapsed, cancel = Esc or
+  // Cancel button). Main settles the awaiting Promise in clickPreview.ts
+  // and closes the window. Unknown tokens are silently dropped — they're
+  // usually stale resolves from a previously-cancelled preview.
+  ipcMain.handle(
+    'click-preview:resolve',
+    async (_e, token: string, decision: 'go' | 'cancel') => {
+      const { resolvePreview } = await import('../services/automation/clickPreview')
+      resolvePreview(token, decision)
       return { ok: true }
     }
   )

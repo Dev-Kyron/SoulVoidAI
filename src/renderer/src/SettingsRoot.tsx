@@ -76,6 +76,10 @@ const PermissionsManager = lazyNamed(
   () => import('./components/settings/PermissionsManager'),
   'PermissionsManager'
 )
+const ExperimentalSettings = lazyNamed(
+  () => import('./components/settings/ExperimentalSettings'),
+  'ExperimentalSettings'
+)
 const SyncSettings = lazyNamed(
   () => import('./components/settings/SyncSettings'),
   'SyncSettings'
@@ -153,11 +157,12 @@ const GROUPS: SectionGroup[] = [
   {
     id: 'advanced',
     label: 'Advanced',
-    description: 'Permissions, sync, system prompt, about.',
+    description: 'Permissions, sync, system prompt, experimental, about.',
     icon: Lock,
     render: () => (
       <>
         <PermissionsManager />
+        <ExperimentalSettings />
         <SyncSettings />
         <SystemPromptEditor />
         <About />

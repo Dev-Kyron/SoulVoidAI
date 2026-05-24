@@ -33,6 +33,7 @@ const bridge: VoidSoulBridge = {
     setMemory: (patch) => invoke('config:set-memory', patch),
     setProactiveVoice: (patch) => invoke('config:set-proactive-voice', patch),
     setScreenWatch: (patch) => invoke('config:set-screen-watch', patch),
+    setExperimentalFeatures: (patch) => invoke('config:set-experimental-features', patch),
     setEmbeddingProvider: (provider) =>
       invoke('config:set-embedding-provider', provider),
     setOnboarded: (value) => invoke('config:set-onboarded', value),
@@ -93,6 +94,12 @@ const bridge: VoidSoulBridge = {
   },
   wakeDiagnostic: {
     relay: (snapshot) => invoke('wake-diagnostic:relay', snapshot)
+  },
+  clickPreview: {
+    // v1.8.0 — preview HUD resolution. The preview-window renderer calls
+    // this with its token and the user's decision; main settles the
+    // awaiting Promise and closes the window.
+    resolve: (token, decision) => invoke('click-preview:resolve', token, decision)
   },
   screenWatch: {
     status: () => invoke('screen-watch:status'),
@@ -280,7 +287,8 @@ const bridge: VoidSoulBridge = {
     onTrayRunPrompt: (cb) => subscribe('tray:run-prompt', cb),
     onScheduledTaskRan: (cb) => subscribe('scheduler:task-ran', cb),
     onFlushPending: (cb) => subscribe('app:flush-pending', cb),
-    onQuickAiOpen: (cb) => subscribe('quick-ai:open', cb)
+    onQuickAiOpen: (cb) => subscribe('quick-ai:open', cb),
+    onVisualClickFailure: (cb) => subscribe('visual-click:failure', cb)
   }
 }
 

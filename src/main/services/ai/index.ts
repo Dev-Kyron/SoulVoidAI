@@ -21,6 +21,7 @@ import { broadcast } from '../../events'
 import { TOOL_SPECS } from '../automation/tools'
 import { getProviderTools as getMcpTools } from '../mcp/manager'
 import { recordUsage } from '../usage'
+import { log } from '../logger'
 import { isRetryableProviderError, pickFallbackProvider } from './fallback'
 import type { AgentRequest, AgentResult, ChatRequest, ChatTurn, ProviderId } from '@shared/types'
 
@@ -248,16 +249,44 @@ async function invokeCompletionAttempt(
   if (unreachable) return { text: '', toolCalls: [], error: unreachable }
 
   try {
+    // v1.10.1 — `click_on_screen` is filtered out unless the user has
+    // explicitly opted into experimentalFeatures.visualClick. The tool's
+    // accuracy depends on vision-model precision + browser accessibility
+    // exposure, neither of which is reliable enough yet for the default
+    // bundle. When off, the model literally doesn't see the tool exists.
+    // v1.10.2 — surface the filter outcome in the log so we can debug
+    // "is the model actually seeing click_on_screen?" without guessing.
+    const filteredTools =
+      options?.tools ?? [
+        ...TOOL_SPECS.filter((t) => {
+          if (t.actionType === 'visual-click') {
+            return getConfig().experimentalFeatures?.visualClick === true
+          }
+          return true
+        }),
+        ...getMcpTools()
+      ]
+    // Only log the toolbox composition for default (agent) invocations —
+    // internal callers that override `options.tools` (screen-watch
+    // passing [], vision-locate calls passing []) don't need a noise
+    // entry every tick.
+    if (!options?.tools) {
+      const visualClickAvailable = filteredTools.some(
+        (t) => t.name === 'click_on_screen'
+      )
+      log(
+        'info',
+        'ai',
+        `[ai] invoke via ${req.provider}/${req.model} — ${filteredTools.length} tools available, click_on_screen=${visualClickAvailable ? 'YES' : 'no'}`
+      )
+    }
     const result = await provider.invoke({
       apiKey,
       baseUrl,
       model: req.model,
       system: req.system,
       messages: req.messages,
-      // Built-in automation tools plus whatever MCP servers are connected,
-      // unless the caller explicitly overrode (e.g. screen-watch passing
-      // an empty array to suppress all tools for a clean JSON one-shot).
-      tools: options?.tools ?? [...TOOL_SPECS, ...getMcpTools()],
+      tools: filteredTools,
       signal
     })
     const flat = flattenTurns(req.system, req.messages)

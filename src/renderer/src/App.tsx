@@ -263,6 +263,29 @@ export default function App(): JSX.Element {
     []
   )
 
+  // v1.9.0/1.9.1 — visual-click failure + progress toasts. Without this,
+  // a failed click_on_screen returns ok:false but the chat surface just
+  // renders a green checkmark for "tool dispatched" and the user sees
+  // no visible indication that nothing happened. Two toast shapes:
+  //   · progress=true   → info toast with a status message ("Looking
+  //                       for X…", "Asking the model…") so the user
+  //                       knows the pipeline is running during the
+  //                       2-8s before the preview HUD appears
+  //   · progress absent → error toast with description + reason
+  useEffect(
+    () =>
+      vs.events.onVisualClickFailure(({ description, reason, progress }) => {
+        if (progress) {
+          useUiStore.getState().pushToast('info', reason)
+        } else {
+          useUiStore
+            .getState()
+            .pushToast('error', `Couldn't click "${description}" — ${reason}`)
+        }
+      }),
+    []
+  )
+
   // Tray "Open chat" / "Open logs" → expand the panel and jump to the tab.
   useEffect(
     () =>

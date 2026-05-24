@@ -117,6 +117,12 @@ export interface VoidSoulBridge {
     /** v1.7 — patch the screen-watch config. Main re-arms the timer
      *  after applying the patch so cadence changes take effect now. */
     setScreenWatch(patch: Partial<ScreenWatchConfig>): Promise<ClientConfig>
+    /** v1.10.1 — patch experimental feature gates (visualClick etc).
+     *  Off by default — opt-in for capabilities that work but aren't
+     *  yet reliable enough to recommend universally. */
+    setExperimentalFeatures(
+      patch: Partial<import('./types').ExperimentalFeaturesConfig>
+    ): Promise<ClientConfig>
     setEmbeddingProvider(provider: EmbeddingProvider): Promise<ClientConfig>
     setOnboarded(value: boolean): Promise<ClientConfig>
     setApiKey(provider: ProviderId, key: string): Promise<ClientConfig>
@@ -216,6 +222,13 @@ export interface VoidSoulBridge {
       blockedReason: string | null
       heard: Array<{ at: number; text: string; matched: boolean; error?: string }>
     }): Promise<{ ok: boolean }>
+  }
+  /** v1.8.0 — vision-guided click preview HUD. The preview-window
+   *  renderer calls `resolve(token, decision)` when the user cancels or
+   *  the countdown elapses; main settles the awaiting Promise and
+   *  closes the window. */
+  clickPreview: {
+    resolve(token: string, decision: 'go' | 'cancel'): Promise<{ ok: boolean }>
   }
   /** v1.7 screen-watch loop — periodic vision observation that may
    *  proactively speak when the model decides there's something
@@ -643,5 +656,20 @@ export interface VoidSoulBridge {
      * and the chat IPC.
      */
     onQuickAiOpen(cb: () => void): Unsubscribe
+    /**
+     * v1.9.0 — vision-click locate failed (either UIA + vision both
+     * missed, screenshot failed, or the click itself errored). Payload
+     * carries the user's description + a short reason. The renderer
+     * pushes a toast so the user SEES the failure rather than staring
+     * at a "✓ tool dispatched" with no visible action.
+     *
+     * v1.9.1 — also doubles as a progress channel. When `progress: true`
+     * the reason is a status message ("Looking for X…", "Asking the
+     * model…") and the renderer surfaces it as an info toast instead
+     * of an error toast.
+     */
+    onVisualClickFailure(
+      cb: (info: { description: string; reason: string; progress?: boolean }) => void
+    ): Unsubscribe
   }
 }

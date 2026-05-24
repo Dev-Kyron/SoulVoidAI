@@ -15,6 +15,7 @@ import { log } from '../logger'
 import { captureScreen } from '../screen/screenshot'
 import { extractText } from '../screen/ocr'
 import { moveMouse, mouseClick, sendHotkey } from './input'
+import { performVisualClick } from './visualClick'
 import { rememberProject } from '../storage/memory'
 import { getApiKey, getSecret } from '../storage/keys'
 import { resolveBaseUrl } from '../storage/config'
@@ -114,6 +115,20 @@ export const ACTION_DESCRIPTORS: ActionDescriptor[] = [
     type: 'mouse-click',
     label: 'Mouse Click',
     description: 'Perform a left or right mouse click.',
+    requires: 'inputAccess',
+    reversible: false
+  },
+  {
+    type: 'visual-click',
+    label: 'Click on Screen',
+    // Permission gate is `inputAccess` (the actual click); the visual-click
+    // dispatcher also calls screen capture but we surface that as a friendly
+    // sub-check inside the orchestrator with its own error instead of
+    // requiring TWO permission prompts up front. That keeps the descriptor
+    // honest (one permission per action) and gives the user a clearer error
+    // path if only screenCapture is missing.
+    description:
+      'Click a UI element described in plain English. Vision model finds it; a 3s preview HUD lets the user cancel.',
     requires: 'inputAccess',
     reversible: false
   },
@@ -588,6 +603,24 @@ async function dispatch(req: ActionRequest, signal?: AbortSignal): Promise<Actio
       const button = optParam(p, 'button') === 'right' ? 'right' : 'left'
       await mouseClick(button)
       return { ok: true, type: req.type, output: `${button === 'right' ? 'Right' : 'Left'} mouse click.` }
+    }
+
+    case 'visual-click': {
+      // visual-click handles its own permission feedback for screenCapture
+      // and threads the request-wide abort signal into the vision call so
+      // Stop in chat halts the LLM mid-locate. Returns a full ActionResult.
+      // v1.10.0 — passes in_window through when supplied; the orchestrator
+      // enumerates windows, focuses the matched one, and scopes UIA +
+      // screenshot to it.
+      const button = optParam(p, 'button') === 'right' ? 'right' : 'left'
+      const rawInWindow = optParam(p, 'in_window')
+      const inWindow = rawInWindow.trim() || null
+      return performVisualClick({
+        what: param(p, 'what'),
+        button,
+        inWindow,
+        signal
+      })
     }
 
     case 'screenshot': {

@@ -195,11 +195,12 @@ export async function classifySentiment(
     }
     const parsed = parseClassifierOutput(result.text)
     if (!parsed) {
-      log(
-        'warn',
-        'system',
-        `[sentiment] classifier returned unparseable output: ${result.text.slice(0, 200)}`
-      )
+      // v1.9.2 — quietly skip when the classifier returned
+      // conversational text instead of its JSON envelope. This was
+      // firing as a `warn` after every chat turn the classifier
+      // sampled, flooding the Logs tab. Returning null is already
+      // the correct behaviour (caller treats it as "no sentiment
+      // signal this turn") — no need to surface as a warning.
       return null
     }
     return parsed

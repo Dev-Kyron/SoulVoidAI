@@ -14,6 +14,7 @@ import type {
   AppearanceConfig,
   ChatBehaviourConfig,
   ClientConfig,
+  ExperimentalFeaturesConfig,
   MemoryConfig,
   ModeId,
   ProactiveVoiceConfig,
@@ -45,6 +46,8 @@ export interface AppConfigFile {
   /** v1.7+ screen-watch loop config — Soul periodically looks at the
    *  screen and may speak proactively if she sees something useful. */
   screenWatch: ScreenWatchConfig
+  /** v1.10.1+ experimental feature gates (visualClick, etc.). */
+  experimentalFeatures: ExperimentalFeaturesConfig
   /** When each model id was first observed from a `listModels` call, per provider. */
   seenModels: SeenModels
   syncFolder: string
@@ -73,9 +76,24 @@ const DEFAULT_SYSTEM_PROMPT =
   "user's mode, recent emotional state, and time of day are all in your context. " +
   "Let them shape your tone without narrating them. Your replies may be heard aloud " +
   "via Piper TTS; mark genuine tone shifts with <voice tone=\"casual\"> style markers " +
-  "when a different delivery would land better. When the user asks you to act on " +
-  "their machine, describe what you're about to do — the app will request the " +
-  "matching permission before anything runs."
+  "when a different delivery would land better. " +
+  // v1.9.2 — flipped the "describe what you're about to do" guidance.
+  // The old wording told the model to NARRATE its actions, which on
+  // every model we tested caused it to say "I'll click the Send
+  // button now!" without ever calling the tool. For tools that have
+  // their own user-facing safety preview (notably click_on_screen,
+  // which shows a 3-second cancellable cyan-ring HUD before firing),
+  // narrating first is pure friction. New rule: ACT first for
+  // visible/cancellable tools; describe first only for irreversible
+  // ones (file delete, send a payment, post publicly).
+  "When the user asks you to do something on their screen — click, " +
+  "press, send, submit, open, close, select, tap — CALL THE MATCHING " +
+  "TOOL IMMEDIATELY. Don't announce 'I'll click that' and stop; just " +
+  "call click_on_screen (or the equivalent tool). click_on_screen " +
+  "itself shows the user a 3-second cancellable preview before " +
+  "anything actually happens, so there is no risk in acting at once. " +
+  "Only describe-then-act when the action is irreversible (deleting " +
+  "files, sending payments, posting publicly)."
 
 const DEFAULT_PROVIDERS = (Object.keys(PROVIDER_META) as ProviderId[]).reduce(
   (acc, id) => {
@@ -161,6 +179,12 @@ const DEFAULT_CONFIG: AppConfigFile = {
     dailyCap: 48
   },
   seenModels: {},
+  // v1.10.1 — experimental feature gates. All OFF by default; user
+  // opts in explicitly from Settings → Experimental with copy that
+  // sets honest expectations about reliability.
+  experimentalFeatures: {
+    visualClick: false
+  },
   syncFolder: '',
   onboarded: false,
   panel: { width: 472, height: 0 },
@@ -245,6 +269,10 @@ function normalize(c: AppConfigFile): AppConfigFile {
     memory: { ...DEFAULT_CONFIG.memory, ...c.memory },
     proactiveVoice: { ...DEFAULT_CONFIG.proactiveVoice, ...c.proactiveVoice },
     screenWatch: { ...DEFAULT_CONFIG.screenWatch, ...c.screenWatch },
+    experimentalFeatures: {
+      ...DEFAULT_CONFIG.experimentalFeatures,
+      ...c.experimentalFeatures
+    },
     seenModels: c.seenModels ?? DEFAULT_CONFIG.seenModels,
     panel: { ...DEFAULT_CONFIG.panel, ...c.panel },
     permissions: { ...DEFAULT_CONFIG.permissions, ...c.permissions }
@@ -352,6 +380,7 @@ export function getClientConfig(): ClientConfig {
     memory: c.memory,
     proactiveVoice: c.proactiveVoice,
     screenWatch: c.screenWatch,
+    experimentalFeatures: c.experimentalFeatures,
     seenModels: c.seenModels,
     syncFolder: c.syncFolder,
     onboarded: c.onboarded,

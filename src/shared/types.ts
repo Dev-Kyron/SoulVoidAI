@@ -189,6 +189,7 @@ export type ActionType =
   | 'hotkey'
   | 'move-mouse'
   | 'mouse-click'
+  | 'visual-click'
   | 'screenshot'
   | 'read-screen'
   | 'web-search'
@@ -1169,6 +1170,30 @@ export interface MemoryConfig {
 }
 
 /** The configuration shape delivered to the renderer (never contains keys). */
+/**
+ * v1.10.1 — experimental / beta-flagged features.
+ *
+ * Soft gates for capabilities that are functional but not reliable enough
+ * to recommend for everyone yet. Off by default; user opts in from
+ * Settings → Experimental with an explicit "we know this is rough" copy.
+ * When a flag is off, the corresponding tool is NOT exposed to the AI
+ * (filtered out of TOOL_SPECS at compose time) so the model can't even
+ * call it. Honest preview > polished promise.
+ */
+export interface ExperimentalFeaturesConfig {
+  /**
+   * click_on_screen (the vision-guided + UIA click tool) shipped in v1.8.0
+   * and has been iterated on heavily, but the underlying accuracy is a
+   * function of vision-model precision (gpt-4o-mini etc. struggle on
+   * small icon-only buttons in busy UIs) and accessibility-tree exposure
+   * (browser web content often hides its content from UIA). Works great
+   * for native desktop apps with proper accessibility labels; best-effort
+   * for browser content. Opt-in until we ship browser DevTools integration
+   * (or until model precision reaches the bar without it).
+   */
+  visualClick: boolean
+}
+
 export interface ClientConfig {
   activeProvider: ProviderId
   providers: ProviderRuntime[]
@@ -1186,6 +1211,8 @@ export interface ClientConfig {
   proactiveVoice: ProactiveVoiceConfig
   /** v1.7+ screen-watch loop config. */
   screenWatch: ScreenWatchConfig
+  /** v1.10.1+ experimental feature gates. */
+  experimentalFeatures: ExperimentalFeaturesConfig
   /** Folder used for backup sync (e.g. a Dropbox/Drive folder). Empty = unset. */
   syncFolder: string
   /** True once the user has seen (or skipped) the first-boot tour. */

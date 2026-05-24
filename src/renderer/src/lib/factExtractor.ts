@@ -124,12 +124,12 @@ export async function extractFacts(
     }
     const match = result.text.match(/\{[\s\S]*\}/)
     if (!match) {
-      void vs.logs.write(
-        'warn',
-        'memory',
-        'Fact extractor reply lacked JSON',
-        result.text.slice(0, 200)
-      )
+      // v1.9.2 — quietly skip when the model returned conversational
+      // text instead of JSON. This was firing as a `warn` after every
+      // chat turn the extractor ran on, flooding the Logs tab with
+      // noise that obscured real problems (visual-click traces, etc).
+      // The extractor returning 0 facts is already the correct
+      // outcome here — no need to surface it as a warning.
       return 0
     }
     let parsed: { facts?: unknown }

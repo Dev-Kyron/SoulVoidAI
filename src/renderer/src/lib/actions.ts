@@ -123,6 +123,29 @@ export async function runAgentTool(
   }
   const actionType = spec.actionType
 
+  // v1.12.3 — per-command approval gate for `run_shell`. The blanket
+  // `terminal` permission is too coarse: once granted, an agent can run
+  // anything. This modal fires for EVERY shell command (regardless of
+  // whether terminal is granted) so the user sees the exact command +
+  // cwd and can cancel anything unexpected. User-facing security gain;
+  // small UX cost (one extra confirm per shell call).
+  if (call.name === 'run_shell') {
+    const command = String(call.args?.['command'] ?? '').trim()
+    if (!command) {
+      return { ...call, ok: false, result: 'run_shell: command was empty.' }
+    }
+    const cwdArg = call.args?.['cwd']
+    const cwd = typeof cwdArg === 'string' && cwdArg.trim() ? cwdArg.trim() : null
+    const approved = await useUiStore.getState().promptShellApproval(command, cwd)
+    if (!approved) {
+      return {
+        ...call,
+        ok: false,
+        result: 'The user cancelled this shell command.'
+      }
+    }
+  }
+
   const request: ActionRequest = { type: actionType, params: call.args, requestId }
   let result = await vs.automation.execute(request)
 

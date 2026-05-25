@@ -5,8 +5,41 @@
  */
 import { exec } from 'node:child_process'
 import { promisify } from 'node:util'
+import { screen } from 'electron'
 
 const execAsync = promisify(exec)
+
+/**
+ * v1.12.3 — virtual desktop bounds for clamping mouse coords. Pulled
+ * lazily on each move because the OS can hot-add/remove displays at
+ * runtime (laptop docking, second monitor unplugged) and we'd rather
+ * pay the ~0.1ms lookup than show the user an off-screen click.
+ *
+ * Returns the union rect of every connected display. SetCursorPos
+ * outside this rect either no-ops (Windows clamps internally) or
+ * lands on the nearest display edge in unpredictable ways — we'd
+ * rather clip explicitly + log so a runaway agent's (-99999, -50)
+ * doesn't fire mouse events into the void.
+ */
+function virtualDesktopRect(): { minX: number; minY: number; maxX: number; maxY: number } {
+  const displays = screen.getAllDisplays()
+  let minX = Infinity
+  let minY = Infinity
+  let maxX = -Infinity
+  let maxY = -Infinity
+  for (const d of displays) {
+    const b = d.bounds
+    if (b.x < minX) minX = b.x
+    if (b.y < minY) minY = b.y
+    if (b.x + b.width > maxX) maxX = b.x + b.width
+    if (b.y + b.height > maxY) maxY = b.y + b.height
+  }
+  // Fall back to a sane single-monitor rect if `getAllDisplays` ever returns
+  // an empty array (shouldn't happen with a display attached, but defensive
+  // code is cheap here).
+  if (!isFinite(minX)) return { minX: 0, minY: 0, maxX: 1920, maxY: 1080 }
+  return { minX, minY, maxX, maxY }
+}
 
 function psEncoded(script: string): string {
   return Buffer.from(script, 'utf16le').toString('base64')
@@ -26,9 +59,17 @@ function assertWindows(feature: string): void {
 
 export async function moveMouse(x: number, y: number): Promise<void> {
   assertWindows('Cursor control')
+  // v1.12.3 — clamp to the virtual desktop rect. Without this, an agent
+  // passing nonsense coordinates like (-99999, -50) or (99999, 99999)
+  // would silently fire mouse events into limbo OR onto unintended
+  // displays. Clamping at the boundary turns "off-screen" into "at the
+  // edge of the nearest display" which is harmless + visible.
+  const rect = virtualDesktopRect()
+  const clampedX = Math.min(Math.max(Math.round(x), rect.minX), rect.maxX - 1)
+  const clampedY = Math.min(Math.max(Math.round(y), rect.minY), rect.maxY - 1)
   await runPowerShell(
     'Add-Type -AssemblyName System.Windows.Forms; ' +
-      `[System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point(${Math.round(x)}, ${Math.round(y)})`
+      `[System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point(${clampedX}, ${clampedY})`
   )
 }
 

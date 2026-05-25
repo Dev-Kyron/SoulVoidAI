@@ -368,18 +368,63 @@ function psEncoded(script: string): string {
   return Buffer.from(script, 'utf16le').toString('base64')
 }
 
+/**
+ * v1.12.3 — cap on a single `type-text` invocation. SendKeys runs on the
+ * UI thread of whatever window has focus; pushing megabytes of text
+ * through it would block that app's input loop for tens of seconds and
+ * also include any errant Enter / Tab keystrokes the model may have
+ * accidentally generated. 4096 chars is plenty for any legitimate paste
+ * (≈800 words) and small enough to fail fast on a hostile or runaway
+ * agent.
+ */
+const TYPE_TEXT_MAX_CHARS = 4096
+
+/**
+ * v1.12.3 — serialise typeText calls so two parallel invocations don't
+ * spawn two PowerShell processes that interleave keystrokes into the
+ * focused window. Each PS spawn is ~150-300ms; without a mutex, a tight
+ * agent loop calling type-text twice in close succession would produce
+ * scrambled output (chunk A's first half + chunk B's first half + chunk
+ * A's tail + ...). Tools are sequential in the agent loop today (see
+ * useChatStore), but defensive code is cheap.
+ */
+let typeTextChain: Promise<void> = Promise.resolve()
+
 async function typeText(text: string): Promise<void> {
   if (process.platform !== 'win32') {
     throw new Error('Keystroke automation is currently implemented for Windows only.')
   }
-  const escaped = text.replace(/[+^%~(){}[\]]/g, '{$&}').replace(/'/g, "''")
-  const script =
-    'Add-Type -AssemblyName System.Windows.Forms; ' +
-    'Start-Sleep -Milliseconds 400; ' +
-    `[System.Windows.Forms.SendKeys]::SendWait('${escaped}')`
-  await execAsync(`powershell -NoProfile -NonInteractive -EncodedCommand ${psEncoded(script)}`, {
-    windowsHide: true
+  if (text.length > TYPE_TEXT_MAX_CHARS) {
+    throw new Error(
+      `type-text input exceeds the ${TYPE_TEXT_MAX_CHARS}-character cap (got ${text.length}). ` +
+        `Split into smaller chunks or write to a file and open it instead.`
+    )
+  }
+  // Wait for any prior typeText to finish before spawning a new PS process.
+  // .catch on the chain so one failure doesn't poison subsequent calls.
+  const prior = typeTextChain
+  let resolveNext: () => void = () => {}
+  typeTextChain = new Promise<void>((res) => {
+    resolveNext = res
   })
+  try {
+    await prior.catch(() => {
+      /* swallow — prior call's error already reached its own caller */
+    })
+    const escaped = text.replace(/[+^%~(){}[\]]/g, '{$&}').replace(/'/g, "''")
+    const script =
+      'Add-Type -AssemblyName System.Windows.Forms; ' +
+      'Start-Sleep -Milliseconds 400; ' +
+      `[System.Windows.Forms.SendKeys]::SendWait('${escaped}')`
+    await execAsync(
+      `powershell -NoProfile -NonInteractive -EncodedCommand ${psEncoded(script)}`,
+      {
+        windowsHide: true
+      }
+    )
+  } finally {
+    resolveNext()
+  }
 }
 
 /* --------------------------- folder organising -------------------------- */

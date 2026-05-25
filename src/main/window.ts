@@ -53,15 +53,19 @@ function applySpellCheckerLanguages(win: BrowserWindow): void {
  */
 const PANEL_STYLE = {
   simple: { minWidth: 340, minHeight: 420, width: 440, height: 560 },
-  // v1.6.4 — advanced.minHeight = 800. HudCore was compressed in the
-  // same pass (HUD_H 260→240, AVATAR_SIZE 195→180) so the spirit avatar
-  // + chip cluster + gauges + composer all fit at this minimum with
-  // ~25px of breathing room for variable bottom-region content (e.g.
-  // NexusResponse appearing when there's an inline chat reply).
+  // v1.12.2 — advanced.minHeight = 920 (was 800). The original 800
+  // assumed a fixed 295px bottom region; NexusResponse adds ~95px of
+  // stacked content (prompt quote + tool count + reply line +
+  // "Full conversation" button + padding) whenever an assistant reply
+  // is present. Without the budget bump, the readback+gauges row got
+  // pushed under the composer block — visible as "the reply bubble
+  // overlaps the gauges" in beta screenshots. Default `height` raised
+  // to 940 so a fresh-install user lands at a roomy size, not the
+  // minimum.
   //
   // ⚠ Main-process changes (this file) require restarting `npm run dev`
   // to take effect — Electron-vite hot-reloads the renderer only.
-  advanced: { minWidth: 380, minHeight: 800, width: 472, height: 820 }
+  advanced: { minWidth: 380, minHeight: 920, width: 472, height: 940 }
 } as const
 
 let win: BrowserWindow | null = null

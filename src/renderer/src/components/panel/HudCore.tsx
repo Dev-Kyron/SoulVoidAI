@@ -18,14 +18,15 @@ import { runAction } from '../../lib/actions'
 import { SpiritAvatar } from '../widget/SpiritAvatar'
 import { useDndActive } from '../../lib/useDndActive'
 
-// v1.6.4 — HUD container compressed to fit comfortably inside the
-// advanced-mode panel's minHeight (800) without ever clipping. Math:
-//   panel minHeight 800 - (header 70 + tabs 40 + cards 75
-//     + bottom region 295) = 320 column available
+// v1.12.2 — HUD container budget reframed against the bumped minHeight.
+//   panel minHeight 920 - (header 70 + tabs 40 + cards 75
+//     + bottom region 295 base + NexusResponse 95 worst-case) = 345
 //   inner stack needed = OrbIdentity 50 + HUD_H 240 + padding 24 = 314
-//   → 6px breathing room
+//   → 31px breathing room with reply visible, ~120px when no reply
 // Below these numbers the avatar's lower body or the side chips start
-// to overlap the gauges.
+// to overlap the gauges. The HUD wrapper's `flex-1 min-h-0` absorbs
+// any further variance so the bottom row stays anchored when the panel
+// is resized within its minimum.
 const HUD_W = 280
 const HUD_H = 240
 const AVATAR_SIZE = 180

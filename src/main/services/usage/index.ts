@@ -222,8 +222,18 @@ export function computeProviderPerformance(
 
   const results: ProviderPerformance[] = []
   for (const [provider, providerEntries] of grouped) {
-    const failureCount = providerEntries.filter((e) => e.success === false).length
-    const successCount = providerEntries.length - failureCount
+    // v1.12.4 — success rate computed ONLY from entries with an explicit
+    // `success` field (the v1.12.0+ era). Previously legacy entries (no
+    // field) were counted as successes by omission, which inflated the
+    // rolling rate during the upgrade transition — a user with months
+    // of pre-v1.12 entries would see a near-100% success rate that
+    // didn't reflect any actual provider reliability. callCount stays
+    // total (so the headline number matches "how many calls did I make")
+    // but successRate is null if no entries in the window have explicit
+    // success data, making the missing signal honest instead of fake-good.
+    const tracked = providerEntries.filter((e) => typeof e.success === 'boolean')
+    const successCount = tracked.filter((e) => e.success === true).length
+    const failureCount = tracked.filter((e) => e.success === false).length
     const totalCost = providerEntries.reduce((sum, e) => sum + (e.cost ?? 0), 0)
 
     // Only timed entries contribute to latency math. Sort ascending once
@@ -250,8 +260,7 @@ export function computeProviderPerformance(
       callCount: providerEntries.length,
       successCount,
       failureCount,
-      successRate:
-        providerEntries.length > 0 ? (successCount / providerEntries.length) * 100 : null,
+      successRate: tracked.length > 0 ? (successCount / tracked.length) * 100 : null,
       avgLatencyMs,
       p95LatencyMs,
       totalCost

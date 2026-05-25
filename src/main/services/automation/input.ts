@@ -73,8 +73,38 @@ export async function moveMouse(x: number, y: number): Promise<void> {
   )
 }
 
+/**
+ * v1.12.4 — mouse-click rate limit. A runaway agent in a tight loop
+ * could click hundreds of times before the user notices. 10 clicks per
+ * second is well above any plausible legitimate burst (the fastest UI
+ * automation case is ~3-5 clicks for a drag-and-drop sequence) while
+ * being low enough that a runaway loop hits the limit and surfaces a
+ * clear error to the user before any real damage.
+ *
+ * Sliding window: we keep timestamps of clicks within the last 1000ms
+ * and refuse the next click when the window is already full. Shift the
+ * oldest entries out as time advances so a burst doesn't get
+ * permanently penalised.
+ */
+const MAX_CLICKS_PER_SEC = 10
+const clickWindow: number[] = []
+
+function enforceClickRateLimit(): void {
+  const now = Date.now()
+  while (clickWindow.length > 0 && clickWindow[0] < now - 1000) {
+    clickWindow.shift()
+  }
+  if (clickWindow.length >= MAX_CLICKS_PER_SEC) {
+    throw new Error(
+      `Mouse click rate limit hit (${MAX_CLICKS_PER_SEC}/sec). This is usually a sign of a runaway agent loop — review the conversation and stop the run if needed.`
+    )
+  }
+  clickWindow.push(now)
+}
+
 export async function mouseClick(button: 'left' | 'right'): Promise<void> {
   assertWindows('Mouse clicks')
+  enforceClickRateLimit()
   const down = button === 'right' ? '0x0008' : '0x0002'
   const up = button === 'right' ? '0x0010' : '0x0004'
   await runPowerShell(

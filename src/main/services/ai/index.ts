@@ -88,19 +88,33 @@ function humanError(err: unknown, label: string): string {
  *  Surfaces patterns ("openai is mostly 429s, anthropic is mostly fine")
  *  without leaking message detail or PII. Falls back to "error" so
  *  unrecognised failures still get counted but don't pollute the
- *  category distribution. */
+ *  category distribution.
+ *
+ *  v1.12.4 — tightened the 5xx detector. The previous version was
+ *  `msg.includes('5') && /\b5\d{2}\b/.test(msg)` which false-positived
+ *  on any error message mentioning a 3-digit number in the 500-599 range
+ *  for unrelated reasons — e.g., model id `gpt-4-512k`, token counts
+ *  ("512 tokens"), latency mentions ("500ms"). Now requires the number
+ *  to follow an HTTP status hint word (status / http / code / response)
+ *  OR appear as a quoted/parenthesised standalone code. Also reordered
+ *  so the more-specific checks (401/403/404/429) run before the broad
+ *  5xx check, even though they already did — the comment clarifies
+ *  it's load-bearing. */
 function categorizeError(err: unknown): string {
-  if (err instanceof Error) {
-    const msg = err.message.toLowerCase()
-    if (msg.includes('rate') || msg.includes('429')) return 'rate-limited'
-    if (msg.includes('401') || msg.includes('unauthor')) return 'unauthorized'
-    if (msg.includes('403') || msg.includes('forbidden')) return 'forbidden'
-    if (msg.includes('404')) return 'not-found'
-    if (msg.includes('timeout') || msg.includes('timed out')) return 'timeout'
-    if (msg.includes('5') && /\b5\d{2}\b/.test(msg)) return 'server-error'
-    if (/fetch failed|econnrefused|enotfound|network/i.test(err.message)) return 'network'
-    if (msg.includes('schema') || msg.includes('parse')) return 'schema'
-  }
+  if (!(err instanceof Error)) return 'error'
+  const msg = err.message.toLowerCase()
+  if (msg.includes('rate') || msg.includes('429')) return 'rate-limited'
+  if (msg.includes('401') || msg.includes('unauthor')) return 'unauthorized'
+  if (msg.includes('403') || msg.includes('forbidden')) return 'forbidden'
+  if (msg.includes('404')) return 'not-found'
+  if (msg.includes('timeout') || msg.includes('timed out')) return 'timeout'
+  // 5xx HTTP status. Anchors: word like "status"/"http"/"code"/"response"
+  // nearby, OR the code is bracketed/quoted/parenthesised as a standalone
+  // token. Avoids matching gpt-4-512k or "took 512ms".
+  if (/(?:status|http|code|response|server)\D{0,5}5\d{2}\b/.test(msg)) return 'server-error'
+  if (/(?:^|[\s"'(\[])5\d{2}(?:[\s"')\]:.,!?]|$)/.test(msg)) return 'server-error'
+  if (/fetch failed|econnrefused|enotfound|network/i.test(err.message)) return 'network'
+  if (msg.includes('schema') || msg.includes('parse')) return 'schema'
   return 'error'
 }
 
@@ -211,23 +225,22 @@ async function runCompletionAttempt(
     if (signal.aborted) return { text: '', error: 'aborted' }
     // v1.12.0 — record the failure so success-rate / latency dashboards
     // reflect the FULL provider story, not just the happy path. User-
-    // aborts don't get recorded (they're not provider failures).
-    if (!signal.aborted) {
-      const flat = flattenTurns(req.system, req.messages)
-      recordUsage({
-        provider: req.provider,
-        model: req.model,
-        kind: 'chat',
-        inputText: flat.text,
-        // No output on failure; explicit 0 keeps token math sane.
-        outputTokens: 0,
-        imageCount: flat.imageCount,
-        estimated: true,
-        durationMs: Date.now() - startedAt,
-        success: false,
-        errorKind: categorizeError(err)
-      })
-    }
+    // aborts don't get recorded (they're not provider failures) —
+    // already short-circuited above, no second check needed (v1.12.4).
+    const flat = flattenTurns(req.system, req.messages)
+    recordUsage({
+      provider: req.provider,
+      model: req.model,
+      kind: 'chat',
+      inputText: flat.text,
+      // No output on failure; explicit 0 keeps token math sane.
+      outputTokens: 0,
+      imageCount: flat.imageCount,
+      estimated: true,
+      durationMs: Date.now() - startedAt,
+      success: false,
+      errorKind: categorizeError(err)
+    })
     if (!streamed && isRetryableProviderError(err)) {
       const nextTried = new Set(tried).add(req.provider)
       const fallbackId = pickFallbackProvider(req.provider, nextTried)
@@ -294,6 +307,14 @@ async function invokeCompletionAttempt(
   const unreachable = localUnavailableError(req.provider, meta)
   if (unreachable) return { text: '', toolCalls: [], error: unreachable }
 
+  // v1.12.0 — same timing capture as runCompletionAttempt; see the
+  // comment there for why we measure at this boundary.
+  // v1.12.4 — hoisted ABOVE the try block so the failure path can also
+  // record `durationMs`. Previously the catch couldn't see `startedAt`
+  // (declared inside try) so invoke failures missed latency data, which
+  // under-represented timeouts in the Provider Performance dashboard.
+  const startedAt = Date.now()
+
   try {
     // v1.10.1 — `click_on_screen` is filtered out unless the user has
     // explicitly opted into experimentalFeatures.visualClick. The tool's
@@ -326,9 +347,6 @@ async function invokeCompletionAttempt(
         `[ai] invoke via ${req.provider}/${req.model} — ${filteredTools.length} tools available, click_on_screen=${visualClickAvailable ? 'YES' : 'no'}`
       )
     }
-    // v1.12.0 — same timing capture as runCompletionAttempt; see the
-    // comment there for why we measure at this boundary.
-    const startedAt = Date.now()
     const result = await provider.invoke({
       apiKey,
       baseUrl,
@@ -353,11 +371,9 @@ async function invokeCompletionAttempt(
     return { text: result.text, toolCalls: result.toolCalls }
   } catch (err) {
     if (signal.aborted) return { text: '', toolCalls: [], error: 'aborted' }
-    // v1.12.0 — failure path also recorded. No durationMs here because
-    // capturing it would require restructuring the try block; we accept
-    // that failed-invoke entries miss latency data (the success/failure
-    // counter is the more important signal). Future: hoist startedAt
-    // above the try so both paths can record it.
+    // v1.12.0 — failure path also recorded. v1.12.4 — now includes
+    // durationMs (startedAt hoisted above the try block) so the dashboard
+    // reflects how slow failures actually felt, not just the count.
     const flat = flattenTurns(req.system, req.messages)
     recordUsage({
       provider: req.provider,
@@ -367,6 +383,7 @@ async function invokeCompletionAttempt(
       outputTokens: 0,
       imageCount: flat.imageCount,
       estimated: true,
+      durationMs: Date.now() - startedAt,
       success: false,
       errorKind: categorizeError(err)
     })

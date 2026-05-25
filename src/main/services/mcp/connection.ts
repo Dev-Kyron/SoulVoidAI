@@ -134,16 +134,24 @@ export class McpConnection {
         }
       }
       client = new Client(APP_INFO, { capabilities: {} })
+      // v1.12.4 — share a single deadline across connect + listTools.
+      // Previously each step got its own CONNECT_TIMEOUT_MS budget, so
+      // a slow server could legitimately hang for 2× the documented cap
+      // (60s + 60s = 120s worst case) before we surfaced the failure.
+      // Now: if connect ate most of the budget, listTools fails fast
+      // with the remainder, and the user sees one honest "60s" timeout
+      // instead of "60s? 120s? who knows" surprise.
+      const deadline = Date.now() + CONNECT_TIMEOUT_MS
       await withTimeout(
         client.connect(transport),
-        CONNECT_TIMEOUT_MS,
+        Math.max(1, deadline - Date.now()),
         `MCP "${this.config.name}" connect`
       )
       this.client = client
 
       const listResult = await withTimeout(
         client.listTools(),
-        CONNECT_TIMEOUT_MS,
+        Math.max(1, deadline - Date.now()),
         `MCP "${this.config.name}" listTools`
       )
       const prefix = slugify(this.config.name)

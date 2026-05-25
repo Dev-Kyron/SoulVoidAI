@@ -74,17 +74,37 @@ describe('computeProviderPerformance', () => {
     expect(perf[0].callCount).toBe(1)
   })
 
-  it('treats legacy entries with no success field as successes (back-compat)', () => {
+  it('v1.12.4 — counts ONLY entries with explicit success field toward the rate', () => {
+    // Legacy entries (no success field) used to count as successes by
+    // omission, which inflated the rate during the v1.12 upgrade
+    // transition. Now they're excluded from the rate calculation so the
+    // dashboard reflects honest v1.12+ telemetry only. callCount still
+    // counts everything so the headline number stays accurate.
     const perf = computeProviderPerformance(
       [
-        makeEntry({ provider: 'openai' /* success omitted */ }),
+        makeEntry({ provider: 'openai' /* legacy: success omitted */ }),
         makeEntry({ provider: 'openai', success: true })
       ],
       30
     )
-    expect(perf[0].successCount).toBe(2)
+    expect(perf[0].callCount).toBe(2)
+    expect(perf[0].successCount).toBe(1)
     expect(perf[0].failureCount).toBe(0)
     expect(perf[0].successRate).toBe(100)
+  })
+
+  it('successRate is null when no entry in the window has explicit success data', () => {
+    const perf = computeProviderPerformance(
+      [
+        makeEntry({ provider: 'openai' /* no success field */ }),
+        makeEntry({ provider: 'openai' /* no success field */ })
+      ],
+      30
+    )
+    expect(perf[0].callCount).toBe(2)
+    expect(perf[0].successCount).toBe(0)
+    expect(perf[0].failureCount).toBe(0)
+    expect(perf[0].successRate).toBe(null)
   })
 
   it('counts explicit success: false as a failure', () => {

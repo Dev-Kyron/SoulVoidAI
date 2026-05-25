@@ -201,9 +201,22 @@ async function onWakeDetected(persona: VoicePersona, label: string): Promise<voi
 export function useWakeWord(): void {
   const enabled = useConfigStore((s) => s.config?.voice.wakeWord.enabled ?? false)
   const armed = useWidgetStore((s) => s.wakeArmed)
+  // v1.12.1 — also subscribe to voice input status. When voice input owns
+  // the mic (recording or transcribing), tear down the wake engine so the
+  // two getUserMedia streams don't fight at the OS level (Windows/WASAPI
+  // attaches each call its own AEC pipeline; running two against the same
+  // device degrades both). When voice input goes back to idle, boot the
+  // wake engine again — second boots are silent (no warmup toast) and
+  // cost ~500ms which lands invisibly during the user's post-message lull.
+  const voiceStatus = useVoiceInputStore((s) => s.status)
 
   useEffect(() => {
     if (!enabled || !armed) {
+      void shutdown()
+      return
+    }
+    if (voiceStatus !== 'idle') {
+      // Release the wake mic while voice input owns it.
       void shutdown()
       return
     }
@@ -211,5 +224,5 @@ export function useWakeWord(): void {
     return () => {
       void shutdown()
     }
-  }, [enabled, armed])
+  }, [enabled, armed, voiceStatus])
 }

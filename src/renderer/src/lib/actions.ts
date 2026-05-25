@@ -127,9 +127,17 @@ export async function runAgentTool(
   let result = await vs.automation.execute(request)
 
   if (result.needsPermission) {
+    // v1.12.1 — title-case the underscored tool name so the permission
+    // modal reads "Click On Screen" instead of the raw "click on screen".
+    // ToolSpec doesn't carry a label field (kept minimal for provider
+    // schema compactness), so we format from the name here at the call
+    // site rather than threading a label through every spec.
+    const actionLabel = call.name
+      .replace(/_/g, ' ')
+      .replace(/\b\w/g, (c) => c.toUpperCase())
     const granted = await useUiStore
       .getState()
-      .promptPermission(result.needsPermission, call.name.replace(/_/g, ' '))
+      .promptPermission(result.needsPermission, actionLabel)
     if (!granted) {
       return {
         ...call,

@@ -499,14 +499,23 @@ async function followRedirects(
   let next = initial.headers.get('location')
   let hops = 0
   let current: Response = initial
+  // v1.12.1 — single shared deadline across all redirect hops. Previously
+  // each hop got its own 15s timer, so a chain of 5 redirects could block
+  // for up to 75s before the caller's signal could fire. Now the budget
+  // is capped at 30s for the whole chain regardless of hop count.
+  const chainDeadline = Date.now() + 30_000
   while (next && hops < 5) {
     const nextUrl = new URL(next, current.url || originalUrl)
     const safety = checkUrlSafe(nextUrl)
     if (!safety.ok) {
       return { blocked: `Redirect blocked: ${safety.reason}` }
     }
+    const remaining = chainDeadline - Date.now()
+    if (remaining <= 0) {
+      return { blocked: 'Redirect chain exceeded 30s total budget' }
+    }
     const hopCtrl = new AbortController()
-    const hopTimer = setTimeout(() => hopCtrl.abort(), 15_000)
+    const hopTimer = setTimeout(() => hopCtrl.abort(), remaining)
     const hopAbort = (): void => hopCtrl.abort()
     signal?.addEventListener('abort', hopAbort)
     current = await fetch(nextUrl.toString(), {

@@ -63,12 +63,23 @@ describe('matchWakePhrase', () => {
     expect(matchWakePhrase('hey sole')?.persona).toBe('soul')
     expect(matchWakePhrase('hey sol')?.persona).toBe('soul')
     expect(matchWakePhrase('hey saul')?.persona).toBe('soul')
-    // Rhyming-word substitutions
-    expect(matchWakePhrase('hey bowl')?.persona).toBe('soul')
-    expect(matchWakePhrase('hey hole')?.persona).toBe('soul')
-    expect(matchWakePhrase('hey pole')?.persona).toBe('soul')
-    expect(matchWakePhrase('hey role')?.persona).toBe('soul')
-    expect(matchWakePhrase('hey goal')?.persona).toBe('soul')
+    // Rare phonetic alternates kept after v1.12.1 trim
+    expect(matchWakePhrase('hey sault')?.persona).toBe('soul')
+    expect(matchWakePhrase('hey cole')?.persona).toBe('soul')
+  })
+
+  it('v1.12.1 — does NOT false-wake on common English words that rhyme with Soul', () => {
+    // These were firing wakes in normal conversation. Dropped from the
+    // pattern in v1.12.1 to favour fewer false wakes over a few extra
+    // recovered mis-transcriptions.
+    expect(matchWakePhrase('hey bowl')).toBeNull()
+    expect(matchWakePhrase('hey hole')).toBeNull()
+    expect(matchWakePhrase('hey pole')).toBeNull()
+    expect(matchWakePhrase('hey role')).toBeNull()
+    expect(matchWakePhrase('hey mole')).toBeNull()
+    expect(matchWakePhrase('hey whole')).toBeNull()
+    expect(matchWakePhrase('hey coal')).toBeNull()
+    expect(matchWakePhrase('hey goal')).toBeNull()
   })
 
   it('tolerates the comma + punctuation Whisper inserts after the greeting', () => {

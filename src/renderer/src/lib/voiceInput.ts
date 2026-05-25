@@ -11,6 +11,15 @@
 let recorder: MediaRecorder | null = null
 let stream: MediaStream | null = null
 let chunks: Blob[] = []
+/**
+ * v1.12.1 — in-flight stop promise. Without this, a silence-detector stop
+ * fires `stopRecording()`, which awaits `recorder.onstop`; if the user
+ * manual-taps mic in the same tick, the second `stopRecording()` sees the
+ * recorder already in 'inactive' state and returns null silently, dropping
+ * the captured audio. Sharing the in-flight promise means both callers get
+ * the same resolved clip.
+ */
+let stoppingPromise: Promise<RecordedAudioClip | null> | null = null
 
 /** Silence-monitor handles — torn down on every stop/cancel. */
 let silenceTimer: number | undefined
@@ -116,7 +125,14 @@ export async function startRecording(options?: RecordingOptions): Promise<void> 
   recorder = null
   chunks = []
 
-  stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+  // v1.12.1 — request echo cancellation, noise suppression, and auto-gain
+  // control so the recording doesn't pick up trailing TTS bleed or room
+  // reverb. Without these, Whisper's transcript drifts on noisy mics and
+  // "smooth when reading what people are saying" suffers. Matches the
+  // constraints the wake engine already uses for its own stream.
+  stream = await navigator.mediaDevices.getUserMedia({
+    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+  })
   recorder = new MediaRecorder(stream, { mimeType: pickMimeType() })
   recorder.ondataavailable = (event) => {
     if (event.data.size > 0) chunks.push(event.data)
@@ -212,10 +228,14 @@ function stopSilenceMonitor(): void {
   silenceAudioCtx = null
 }
 
-/** Stops recording, decodes to PCM, resolves with the clip (or null if empty). */
+/** Stops recording, decodes to PCM, resolves with the clip (or null if empty).
+ *  v1.12.1 — idempotent: a second call while the first is still resolving
+ *  returns the same in-flight promise, so silence-auto-stop + user manual-
+ *  tap landing in the same tick both receive the captured clip. */
 export function stopRecording(): Promise<RecordedAudioClip | null> {
+  if (stoppingPromise) return stoppingPromise
   stopSilenceMonitor()
-  return new Promise((resolve, reject) => {
+  const promise = new Promise<RecordedAudioClip | null>((resolve, reject) => {
     const active = recorder
     if (!active || active.state === 'inactive') {
       releaseStream()
@@ -241,6 +261,15 @@ export function stopRecording(): Promise<RecordedAudioClip | null> {
     }
     active.stop()
   })
+  // Clear the slot when the promise settles, in either direction. Done
+  // via a detached .then chain (not assigning back to stoppingPromise)
+  // so the typed Promise<RecordedAudioClip | null> stays intact and TS
+  // doesn't widen the return type to unknown via .finally().
+  void promise.finally(() => {
+    stoppingPromise = null
+  })
+  stoppingPromise = promise
+  return promise
 }
 
 export function cancelRecording(): void {

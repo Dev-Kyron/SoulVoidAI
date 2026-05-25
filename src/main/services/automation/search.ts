@@ -142,6 +142,11 @@ function stripTags(html: string): string {
   return decodeEntities(html.replace(/<[^>]+>/g, '')).replace(/\s+/g, ' ').trim()
 }
 
+/** v1.12.1 — default fetch budget for the DDG endpoint. The caller's
+ *  `signal` (if any) wins on shorter deadlines; this protects against a
+ *  hanging response from blocking the agent indefinitely. */
+const DDG_TIMEOUT_MS = 15_000
+
 async function duckduckgoSearch(
   query: string,
   maxResults: number,
@@ -150,51 +155,58 @@ async function duckduckgoSearch(
   // The HTML-only endpoint returns server-rendered results with stable class
   // names — much easier to scrape than the JS-driven main page.
   const url = `${ENDPOINTS.duckduckgoHtml}?q=${encodeURIComponent(query)}`
-  const res = await fetch(url, {
-    signal,
-    headers: {
-      // DDG returns an empty page to clients without a real UA. A common
-      // desktop Firefox UA gets the full HTML reliably.
-      'User-Agent':
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:124.0) Gecko/20100101 Firefox/124.0',
-      Accept: 'text/html'
-    }
-  })
+  // v1.12.1 — wrap the caller's signal in a timeout-bounded controller so
+  // a hanging DDG response can't block the agent forever. AbortSignal.any
+  // (Node 20+) merges multiple signals; aborts on whichever fires first.
+  const timeoutCtl = new AbortController()
+  const timer = setTimeout(() => timeoutCtl.abort(new Error('DuckDuckGo timed out')), DDG_TIMEOUT_MS)
+  const merged: AbortSignal = signal ? AbortSignal.any([signal, timeoutCtl.signal]) : timeoutCtl.signal
+  let res: Response
+  try {
+    res = await fetch(url, {
+      signal: merged,
+      headers: {
+        // DDG returns an empty page to clients without a real UA. A common
+        // desktop Firefox UA gets the full HTML reliably.
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:124.0) Gecko/20100101 Firefox/124.0',
+        Accept: 'text/html'
+      }
+    })
+  } finally {
+    clearTimeout(timer)
+  }
   if (!res.ok) {
     throw new Error(`DuckDuckGo ${res.status}`)
   }
   const html = await res.text()
 
-  // Each result block has the shape:
-  //   <a class="result__a" href="...">TITLE</a>
-  //   ...
-  //   <a class="result__snippet" ...>SNIPPET</a>
-  // We extract title+url+snippet in one regex pass per pair.
-  const titleRe = /<a\s+[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g
-  const snippetRe = /<a\s+[^>]*class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g
+  // v1.12.1 — parse per-result block so title/url/snippet stay paired even
+  // when DDG omits the snippet for ads / news cards (the old positional
+  // zip would desync in that case). Strategy: split the HTML on each
+  // `<div class="result"` opener; each chunk is one result's content.
+  // Nesting-depth-agnostic, immune to whatever wrapper tags DDG ships.
+  const titleRe = /<a\s+[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/
+  const snippetRe = /<a\s+[^>]*class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)<\/a>/
 
-  const titles: Array<{ url: string; title: string }> = []
-  let m: RegExpExecArray | null
-  while ((m = titleRe.exec(html))) {
-    const unwrapped = unwrapDdgUrl(m[1])
-    if (!unwrapped) continue // skip non-http(s) targets entirely
-    titles.push({ url: unwrapped, title: stripTags(m[2]) })
-  }
-  const snippets: string[] = []
-  while ((m = snippetRe.exec(html))) {
-    snippets.push(stripTags(m[1]))
-  }
-
-  // The two streams are emitted in document order, so zip them positionally —
-  // any missing snippet just becomes empty (no fake correlation).
   const results: SearchHit[] = []
-  for (let i = 0; i < titles.length && results.length < maxResults; i++) {
-    const t = titles[i]
-    if (!t.title || !t.url) continue
+  // The leading chunk (before the first result div) is header markup —
+  // skip it with the [1..] slice. Each remaining chunk holds exactly
+  // one result (everything up to the next result-div opener).
+  const chunks = html.split(/<div\s+[^>]*class="[^"]*\bresult\b[^"]*"[^>]*>/i).slice(1)
+  for (const chunk of chunks) {
+    if (results.length >= maxResults) break
+    const titleMatch = titleRe.exec(chunk)
+    if (!titleMatch) continue
+    const unwrapped = unwrapDdgUrl(titleMatch[1])
+    if (!unwrapped) continue
+    const title = stripTags(titleMatch[2])
+    if (!title) continue
+    const snippetMatch = snippetRe.exec(chunk)
     results.push({
-      title: t.title,
-      url: t.url,
-      snippet: snippets[i] ?? ''
+      title,
+      url: unwrapped,
+      snippet: snippetMatch ? stripTags(snippetMatch[1]) : ''
     })
   }
 

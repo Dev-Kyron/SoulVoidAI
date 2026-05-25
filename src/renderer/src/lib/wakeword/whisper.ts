@@ -30,7 +30,7 @@
 import { vs } from '../bridge'
 import { createLock } from '../utils'
 import { useVoiceInputStore } from '../../store/useVoiceInputStore'
-import { stopSpeaking } from '../voice'
+import { stopSpeaking, getCurrentSpoken } from '../voice'
 import { matchWakePhrase } from './match'
 import { useConfigStore } from '../../store/useConfigStore'
 import { isQuietNow } from '@shared/types'
@@ -297,7 +297,12 @@ export function createWhisperWakeEngine(
       // Only pay for VAD energy accumulation when TTS is actually playing
       // — the common case is "user isn't being talked at," and the
       // sample-multiply per frame adds up at ~10 Hz x 4096 samples.
-      const ttsActive = window.speechSynthesis?.speaking ?? false
+      // v1.12.1 — was `window.speechSynthesis?.speaking` which is
+      // permanently false because the app uses Piper TTS via Web Audio,
+      // not Web Speech. That made the entire barge-in block dead code.
+      // Now gates on `getCurrentSpoken()` which the AudioQueue updates
+      // around every active source.
+      const ttsActive = getCurrentSpoken() !== null
       let sumSq = 0
       for (let i = 0; i < input.length; i++) {
         const sample = input[i]

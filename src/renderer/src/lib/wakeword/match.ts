@@ -66,11 +66,18 @@ const WAKE_PATTERNS: WakePattern[] = [
     label: 'Hey Void'
   },
   // SOUL rhymes & mistranscriptions —
-  //   soul, sole, sol, souls/soles (plural), sould (typo), saul (proper
-  //   noun, rhymes), bowl/hole/pole/role/mole/whole/coal/cole/goal
-  //   (rhyming words Whisper substitutes when audio is unclear)
+  //   soul, sole, sol, souls/soles (plural), sould (typo), saul/sault
+  //   (rare proper nouns rhyming with Soul), cole (less common as a
+  //   standalone word).
+  //
+  // v1.12.1 — dropped bowl/hole/pole/role/mole/whole/coal/goal and their
+  //   plurals. They're common standalone English nouns ("in a bowl", "my
+  //   role", "the whole thing", "go for the goal"), so a "hey role…" in
+  //   normal conversation was firing a false wake. Trade-off: slightly
+  //   more missed wakes on accent-heavy mis-transcriptions, no more
+  //   accidental wakes mid-conversation.
   {
-    rx: /\b(?:hey|ok|hi|hello|okay)[\s,.\-—–]+(?:soul|souls|sole|soles|sol|sould|saul|sault|bowl|bowls|hole|holes|pole|poles|role|roles|mole|moles|whole|coal|cole|goal|goals)\b/i,
+    rx: /\b(?:hey|ok|hi|hello|okay)[\s,.\-—–]+(?:soul|souls|sole|soles|sol|sould|saul|sault|cole)\b/i,
     persona: 'soul',
     label: 'Hey Soul'
   },

@@ -41,11 +41,36 @@ const TOOL_LABELS: Record<string, string> = {
   run_command: 'Run command',
   open_app: 'Open app',
   open_url: 'Open URL',
+  open_folder: 'Open folder',
+  organize_folder: 'Organise folder',
   move_mouse: 'Move mouse',
   click_mouse: 'Click mouse',
+  click_on_screen: 'Click on screen',
   type_text: 'Type text',
-  send_keys: 'Send hotkey'
+  send_keys: 'Send hotkey',
+  hotkey: 'Send hotkey',
+  save_document: 'Save document',
+  visual_click: 'Click on screen'
 }
+
+/**
+ * v1.12.7 — tools whose `result` field carries substantive multi-line
+ * output the user will want to actually READ, not a one-line "ok" status.
+ * For these, we render the body in a scrollable code-style panel instead
+ * of the default `truncate` paragraph. Compared to the previous render,
+ * a `run_python` script that printed 8000 chars used to be a single
+ * "Read 3 files…" snippet — now the full stdout/stderr is visible.
+ */
+const EXPANDABLE_OUTPUT_TOOLS = new Set([
+  'run_python',
+  'run_shell',
+  'run_command',
+  'read_file',
+  'list_files',
+  'web_fetch',
+  'web_search',
+  'read_screen'
+])
 
 function toolLabel(name: string): string {
   return TOOL_LABELS[name] ?? name.replace(/_/g, ' ')
@@ -69,7 +94,21 @@ function ToolCalls({ calls }: { calls: ToolInvocation[] }): JSX.Element {
               {Object.keys(call.args).length > 0 && (
                 <span className="text-slate-500"> · {argsSummary(call.args)}</span>
               )}
-              <p className="truncate text-slate-500">{call.result}</p>
+              {/* v1.12.7 — render multi-line result tools in a scrollable
+                * code panel instead of the default one-line truncate.
+                * Previously run_python's stdout (up to 8000 chars per the
+                * tool impl) showed as a single "Read 3 files..." crumb;
+                * the user couldn't see what the script actually printed.
+                * Failed calls always get the expanded view too so error
+                * stack traces aren't lost to truncation. */}
+              {call.result &&
+              (EXPANDABLE_OUTPUT_TOOLS.has(call.name) || !call.ok) ? (
+                <pre className="scrollbar-void mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-md bg-black/40 px-2 py-1.5 font-mono text-[10px] leading-snug text-slate-300">
+                  {call.result}
+                </pre>
+              ) : (
+                <p className="truncate text-slate-500">{call.result}</p>
+              )}
             </div>
             {call.ok ? (
               <Check size={12} className="shrink-0 text-emerald-400" />

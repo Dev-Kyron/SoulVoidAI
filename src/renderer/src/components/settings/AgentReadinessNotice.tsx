@@ -33,7 +33,12 @@ export function AgentReadinessNotice(): JSX.Element | null {
   const activeProviderId = config.activeProvider
   const activeProvider = config.providers.find((p) => p.id === activeProviderId)
   const activeModel = activeProvider?.model ?? ''
-  const isLocal = ['ollama', 'lm-studio', 'llama-cpp', 'custom'].includes(activeProviderId)
+  // v1.12.7 hotfix — earlier v1.12.6 ship used hyphenated ids
+  // ('lm-studio' / 'llama-cpp') that don't exist in the ProviderId
+  // union; real ids are 'lmstudio' and 'llamacpp'. Result: every LM
+  // Studio + llama.cpp user saw a bogus "model can't call tools"
+  // warning regardless of model capability.
+  const isLocal = ['ollama', 'lmstudio', 'llamacpp', 'custom'].includes(activeProviderId)
   const caps = capabilitiesOf(activeModel, isLocal)
   // Tool-use detection is regex-based on the model id (see modelCapabilities.ts).
   // For models we can't pattern-match (a fresh Ollama model, custom endpoint),

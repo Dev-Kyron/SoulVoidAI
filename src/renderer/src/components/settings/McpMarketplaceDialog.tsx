@@ -899,18 +899,42 @@ function PromptField({
   value: string
   onChange: (v: string) => void
 }): JSX.Element {
+  // v1.12.7 — when the registry entry declares `type: 'folder'` (most
+  // notably the filesystem MCP server's "Folder to expose" prompt),
+  // surface a Browse… button that opens an OS folder picker. Previously
+  // we ignored `prompt.type` entirely and rendered a bare text input;
+  // users typing the path were vulnerable to typos that quietly broke
+  // path matching ("can't access" failures the user blamed on perms,
+  // not on a typo in their `C:\Users\Kyron\...` string).
+  const isFolder = prompt.type === 'folder'
+  const handleBrowse = async (): Promise<void> => {
+    const picked = await vs.system.pickFolder()
+    if (picked) onChange(picked)
+  }
   return (
     <div>
       <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-slate-500">
         {prompt.label}
       </label>
-      <input
-        type={prompt.secret ? 'password' : 'text'}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={prompt.placeholder}
-        className="w-full rounded-lg border border-white/10 bg-black/30 px-2.5 py-2 text-[12px] text-slate-100 outline-none placeholder:text-slate-600 focus:border-[var(--accent-ring)]"
-      />
+      <div className="flex items-center gap-1.5">
+        <input
+          type={prompt.secret ? 'password' : 'text'}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={prompt.placeholder}
+          className="flex-1 rounded-lg border border-white/10 bg-black/30 px-2.5 py-2 text-[12px] text-slate-100 outline-none placeholder:text-slate-600 focus:border-[var(--accent-ring)]"
+        />
+        {isFolder && (
+          <button
+            type="button"
+            onClick={() => void handleBrowse()}
+            title="Pick a folder"
+            className="rounded-lg border border-[var(--accent-ring)] bg-[var(--accent-soft)] px-2.5 py-2 text-[11px] font-semibold text-[var(--accent)] transition hover:brightness-110"
+          >
+            Browse…
+          </button>
+        )}
+      </div>
       {prompt.description && (
         <p className="mt-1 text-[10px] leading-snug text-slate-500">{prompt.description}</p>
       )}

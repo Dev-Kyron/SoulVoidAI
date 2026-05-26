@@ -147,6 +147,14 @@ function activeThreadSummary(): ThreadSummary | undefined {
  * omitted from the prompt entirely.
  */
 let cachedSentimentBlock = ''
+/**
+ * v1.12.7 — gate for the "Router: usage IPC failed" warning. Previously
+ * fired on EVERY send when the usage IPC hiccuped, flooding the Logs
+ * tab on long sessions where main was momentarily busy. We log it once
+ * per session — pattern of failures is still visible (one row,
+ * timestamped) without the spam.
+ */
+let usageIpcFailureLogged = false
 export async function refreshSentimentBlock(): Promise<void> {
   try {
     cachedSentimentBlock = await vs.memory.sentimentPromptBlock()
@@ -681,12 +689,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
         ])
         budget = deriveBudgetState(summary.totalCost, budgetCfg.monthlyUsd)
       } catch (err) {
-        void vs.logs.write(
-          'warn',
-          'ai',
-          'Router: usage IPC failed, routing without cost bias',
-          err instanceof Error ? err.message : String(err)
-        )
+        if (!usageIpcFailureLogged) {
+          usageIpcFailureLogged = true
+          void vs.logs.write(
+            'warn',
+            'ai',
+            'Router: usage IPC failed, routing without cost bias (further failures suppressed this session)',
+            err instanceof Error ? err.message : String(err)
+          )
+        }
       }
       const pick = pickProvider({
         prompt: content,

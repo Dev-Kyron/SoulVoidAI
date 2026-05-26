@@ -15,6 +15,7 @@ import {
   ChevronUp,
   Trash2,
   PanelLeft,
+  Pin,
   Share2
 } from 'lucide-react'
 import { MessageBubble } from './MessageBubble'
@@ -210,7 +211,11 @@ export function ChatView(): JSX.Element {
             )}
           >
             {effectiveModeName}
-            {pinnedOverride ? ' ·  📌' : ''}
+            {/* v1.12.7 — was emoji `📌`; swapped for the Pin lucide icon
+              * to match the rest of the codebase's icon language. */}
+            {pinnedOverride && (
+              <Pin size={9} className="ml-1 inline align-text-bottom" />
+            )}
           </button>
         )}
         <div className="ml-auto flex items-center gap-2">

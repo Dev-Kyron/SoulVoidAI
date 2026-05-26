@@ -7,7 +7,6 @@
  * changes a different setting in the panel window) can't snap the textarea
  * back to the persisted value while they're mid-typing.
  */
-import { useState } from 'react'
 import { CollapsibleSection } from './CollapsibleSection'
 import { useConfigStore } from '../../store/useConfigStore'
 import { useDraftField } from '../../lib/useDraftField'
@@ -15,10 +14,6 @@ import { useDraftField } from '../../lib/useDraftField'
 export function SystemPromptEditor(): JSX.Element | null {
   const config = useConfigStore((s) => s.config)
   const setSystemPrompt = useConfigStore((s) => s.setSystemPrompt)
-  // `dirty` mirror in component state so the Save/Reset buttons appear at
-  // the right moments. The hook owns the actual dirty bookkeeping; we just
-  // observe value-divergence here for the UI affordance.
-  const [showActions, setShowActions] = useState(false)
 
   const prompt = useDraftField<string>({
     source: config?.systemPrompt ?? '',
@@ -26,7 +21,6 @@ export function SystemPromptEditor(): JSX.Element | null {
     // The button onClicks below already trim; this debounce path mirrors them.
     commit: async (next) => {
       await setSystemPrompt(next.trim())
-      setShowActions(false)
     },
     // System prompt edits are intentional, not character-by-character — give
     // the user a moment to settle before auto-saving so multi-paragraph
@@ -36,10 +30,12 @@ export function SystemPromptEditor(): JSX.Element | null {
 
   if (!config) return null
 
+  // v1.12.7 — derived directly from value divergence instead of
+  // mirrored to local state. Previous version did `setShowActions(true)`
+  // during render which was a React rule-of-hooks violation (setState in
+  // render path → React warning, double render).
   const isDirty = prompt.value !== config.systemPrompt
-  // Show actions the moment the draft diverges from the persisted value, and
-  // keep them visible while the user might still want to Reset.
-  if (isDirty && !showActions) setShowActions(true)
+  const showActions = isDirty
 
   return (
     <CollapsibleSection
@@ -65,8 +61,10 @@ export function SystemPromptEditor(): JSX.Element | null {
           <button
             type="button"
             onClick={() => {
+              // Reverting the draft to the source value makes isDirty
+              // false, which derives showActions back to false next
+              // render — no setShowActions needed (v1.12.7 cleanup).
               prompt.onChange(config.systemPrompt)
-              setShowActions(false)
             }}
             className="rounded-lg border border-white/10 px-3 py-1.5 text-[11px] text-slate-300 transition hover:bg-white/5"
           >

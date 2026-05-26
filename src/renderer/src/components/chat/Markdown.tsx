@@ -32,6 +32,7 @@ import rehypeKatex from 'rehype-katex'
 import { Check, Copy, Maximize2 } from 'lucide-react'
 import { useUiStore } from '../../store/useUiStore'
 import { AskUserCard } from './AskUserCard'
+import { vs } from '../../lib/bridge'
 import 'katex/dist/katex.min.css'
 
 /** Code blocks longer than this open the Canvas dialog when expanded. */
@@ -314,12 +315,33 @@ export function Markdown({ children }: { children: string }): JSX.Element {
       rehypePlugins={[rehypeKatex]}
       components={{
         pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
+        // v1.12.7 — fix unclickable links in chat. Three changes from the
+        // old anchor:
+        //   1) `target="_blank"` + `rel="noopener noreferrer"` so the
+        //      browser's window-open handler is a fallback when the JS
+        //      onClick is eaten by text-selection (the parent bubble has
+        //      `selectable` → `user-select: text`, which routes mousedown
+        //      → mouseup with even 1px drift to selection, not click).
+        //   2) `cursor-pointer` + `underline` so the link visually reads
+        //      as clickable instead of inheriting the text cursor from
+        //      `.selectable`.
+        //   3) Route the actual open through `vs.automation.execute` so
+        //      the browser permission gate runs and the action lands in
+        //      Logs — matches the rest of the app's external-link path
+        //      (ShareDialog, About, plugin/MCP docs links).
         a: ({ href, children }) => (
           <a
             href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="cursor-pointer text-[var(--accent)] underline underline-offset-2 hover:brightness-110"
             onClick={(event) => {
+              if (!href) return
               event.preventDefault()
-              if (href) window.open(href, '_blank')
+              void vs.automation.execute({
+                type: 'open-url',
+                params: { url: href }
+              })
             }}
           >
             {children}

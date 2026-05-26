@@ -12,8 +12,8 @@ import { useChatStore } from '../../store/useChatStore'
 import { usePluginStore } from '../../store/usePluginStore'
 import { MODES, getMode } from '@shared/modes'
 import { runAction } from '../../lib/actions'
-import { cn } from '../../lib/utils'
 import { vs } from '../../lib/bridge'
+import { cn } from '../../lib/utils'
 
 interface Command {
   id: string
@@ -41,7 +41,11 @@ export function CommandPalette(): JSX.Element {
     const chat = useChatStore.getState()
     const list: Command[] = []
 
-    for (const tab of ['nexus', 'chat', 'logs', 'settings'] as PanelTab[]) {
+    // v1.12.7 — drop 'settings' from the in-panel tab list; PanelTab is
+    // only `nexus | chat | notebook | logs` (see useWidgetStore.ts), so
+    // setTab('settings') silently no-ops. Settings is its own window;
+    // wire it through the dedicated `window:open-settings` IPC instead.
+    for (const tab of ['nexus', 'chat', 'notebook', 'logs'] as PanelTab[]) {
       list.push({
         id: `nav-${tab}`,
         group: 'Navigate',
@@ -52,6 +56,15 @@ export function CommandPalette(): JSX.Element {
         }
       })
     }
+    list.push({
+      id: 'nav-settings',
+      group: 'Navigate',
+      label: 'Open Settings',
+      run: () => {
+        void vs.window.openSettings()
+        close()
+      }
+    })
 
     for (const mode of MODES) {
       list.push({

@@ -9,6 +9,7 @@ import { useUiStore } from '../store/useUiStore'
 import { useConfigStore } from '../store/useConfigStore'
 import { useChatStore } from '../store/useChatStore'
 import { useWidgetStore } from '../store/useWidgetStore'
+import { createPatch } from 'diff'
 import type {
   ActionRequest,
   ActionResult,
@@ -16,6 +17,56 @@ import type {
   ToolCall,
   ToolInvocation
 } from '@shared/types'
+
+/**
+ * v1.13.0 — propose-then-apply gate for `write_file`. Reads the existing
+ * file contents, computes a unified diff against the proposed new
+ * content, and pops the WriteApprovalDialog. Returns true on Apply,
+ * false on Cancel. New files (read fails) get a "create" preview with
+ * the full new content as additions.
+ *
+ * Pure renderer-side — no IPC changes to the file-write tool itself,
+ * which keeps the main-process undo-snapshot path intact as a backstop.
+ * The earlier file-read IPC handles permission gating itself, so if
+ * the user denies filesystem we fall through gracefully.
+ */
+async function gateWriteFile(args: Record<string, unknown>): Promise<boolean> {
+  const path = typeof args['path'] === 'string' ? args['path'] : ''
+  const newContent = typeof args['content'] === 'string' ? args['content'] : ''
+  if (!path) return false
+
+  // Read the current file. ENOENT / permission errors → treat as new file.
+  // We don't surface the read error to the user; if it's a permission
+  // issue, the subsequent file-write will trigger the same prompt anyway.
+  let previousContent: string | null = null
+  try {
+    const readResult = await vs.automation.execute({
+      type: 'file-read',
+      params: { path }
+    })
+    if (readResult.ok) {
+      const data = readResult.data as { text?: string } | undefined
+      previousContent = data?.text ?? ''
+    }
+  } catch {
+    previousContent = null
+  }
+
+  // createPatch returns a unified diff with file headers. For new files
+  // pass '' as the old content; the diff renders as all-additions which
+  // the dialog highlights green.
+  const oldText = previousContent ?? ''
+  const unifiedDiff = createPatch(path, oldText, newContent, '', '', {
+    context: 3
+  })
+
+  return useUiStore.getState().promptWriteApproval({
+    path,
+    previousContent,
+    newContent,
+    unifiedDiff
+  })
+}
 
 export async function runAction(
   req: ActionRequest,
@@ -142,6 +193,23 @@ export async function runAgentTool(
         ...call,
         ok: false,
         result: 'The user cancelled this shell command.'
+      }
+    }
+  }
+
+  // v1.13.0 — propose-then-apply gate for `write_file`. Mirrors the
+  // shell-approval pattern above: the user sees the path + a unified
+  // diff (or full new-content preview for new files) and approves or
+  // cancels each individual write. The biggest "feels like Claude"
+  // upgrade — agent edits land as proposed changes, not silent
+  // overwrites.
+  if (call.name === 'write_file') {
+    const approved = await gateWriteFile(call.args ?? {})
+    if (!approved) {
+      return {
+        ...call,
+        ok: false,
+        result: 'The user cancelled this file write.'
       }
     }
   }

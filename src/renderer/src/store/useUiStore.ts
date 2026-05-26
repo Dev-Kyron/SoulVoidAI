@@ -37,6 +37,29 @@ interface ShellApprovalPrompt {
   resolve: (approved: boolean) => void
 }
 
+/**
+ * v1.13.0 — per-write approval for `write_file`. Same shape as shell
+ * approval: fires BEFORE the write so the user sees the path + a unified
+ * diff (or full-content preview for new files) and can cancel. This is
+ * the "feels like Claude / Cursor" piece — agent edits land as proposed
+ * changes the user reviews, not as silent overwrites. The undo system
+ * inside writeTextFile still works as a backstop, but propose-then-apply
+ * is the primary safety surface now.
+ */
+interface WriteApprovalPrompt {
+  path: string
+  /** Existing file contents, or null when the file doesn't exist yet
+   *  (new-file create). Drives whether the dialog renders a diff or a
+   *  full new-content preview. */
+  previousContent: string | null
+  newContent: string
+  /** Pre-computed unified diff text (created in the renderer via the
+   *  `diff` package). For new files this is the full content prefixed
+   *  with `+` markers. Held here so the dialog stays a dumb renderer. */
+  unifiedDiff: string
+  resolve: (approved: boolean) => void
+}
+
 interface UiState {
   toasts: ToastItem[]
   /** The currently-displayed permission prompt — head of the FIFO queue. */
@@ -52,6 +75,10 @@ interface UiState {
   shellApproval: ShellApprovalPrompt | null
   /** FIFO queue of pending shell approvals (parallel-call defense). */
   shellApprovalQueue: ShellApprovalPrompt[]
+  /** v1.13.0 — currently-displayed write_file approval prompt. */
+  writeApproval: WriteApprovalPrompt | null
+  /** FIFO queue of pending write approvals. */
+  writeApprovalQueue: WriteApprovalPrompt[]
   activeWindow: ActiveWindowInfo | null
   paletteOpen: boolean
   addActionOpen: boolean
@@ -84,6 +111,14 @@ interface UiState {
   /** v1.12.3 — pop the shell approval modal and await the user's decision. */
   promptShellApproval: (command: string, cwd: string | null) => Promise<boolean>
   resolveShellApproval: (approved: boolean) => void
+  /** v1.13.0 — pop the write_file approval modal and await user's decision. */
+  promptWriteApproval: (input: {
+    path: string
+    previousContent: string | null
+    newContent: string
+    unifiedDiff: string
+  }) => Promise<boolean>
+  resolveWriteApproval: (approved: boolean) => void
   /**
    * v1.12.5 — deny every pending and active prompt (permission + shell
    * approval) and clear the queues. Called on window close / renderer
@@ -111,6 +146,8 @@ export const useUiStore = create<UiState>((set, get) => ({
   permissionQueue: [],
   shellApproval: null,
   shellApprovalQueue: [],
+  writeApproval: null,
+  writeApprovalQueue: [],
   activeWindow: null,
   paletteOpen: false,
   addActionOpen: false,
@@ -178,6 +215,28 @@ export const useUiStore = create<UiState>((set, get) => ({
     })
   },
 
+  promptWriteApproval: (input) =>
+    new Promise<boolean>((resolve) => {
+      const next: WriteApprovalPrompt = { ...input, resolve }
+      set((state) =>
+        state.writeApproval
+          ? { writeApprovalQueue: [...state.writeApprovalQueue, next] }
+          : { writeApproval: next }
+      )
+    }),
+
+  resolveWriteApproval: (approved) => {
+    const prompt = get().writeApproval
+    if (!prompt) return
+    prompt.resolve(approved)
+    set((state) => {
+      const [head, ...rest] = state.writeApprovalQueue
+      return head
+        ? { writeApproval: head, writeApprovalQueue: rest }
+        : { writeApproval: null }
+    })
+  },
+
   cancelAllPrompts: () => {
     const state = get()
     // Resolve everything to false / cancelled so awaiting callers can
@@ -186,11 +245,15 @@ export const useUiStore = create<UiState>((set, get) => ({
     for (const p of state.permissionQueue) p.resolve(false)
     state.shellApproval?.resolve(false)
     for (const p of state.shellApprovalQueue) p.resolve(false)
+    state.writeApproval?.resolve(false)
+    for (const p of state.writeApprovalQueue) p.resolve(false)
     set({
       permissionPrompt: null,
       permissionQueue: [],
       shellApproval: null,
-      shellApprovalQueue: []
+      shellApprovalQueue: [],
+      writeApproval: null,
+      writeApprovalQueue: []
     })
   },
 

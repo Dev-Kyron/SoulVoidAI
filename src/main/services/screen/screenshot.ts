@@ -15,6 +15,7 @@ import { desktopCapturer, screen } from 'electron'
 import { writeFile, mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { dataPath } from '../storage/store'
+import { log } from '../logger'
 import type { ScreenshotResult } from '@shared/types'
 
 /** Cap thumbnails at 2400 wide. Vision-model input limits + IPC payload
@@ -40,8 +41,16 @@ export async function captureScreen(): Promise<ScreenshotResult> {
 
   // Find the source for THIS display. Electron's desktopCapturer returns
   // every screen source; the order is platform-dependent so we match by
-  // display id, falling back to source[0] when matching fails (older
-  // Electron versions don't always populate `display_id`).
+  // display id, falling back to source[0] when matching fails.
+  //
+  // v1.12.5 — explicitly handle the case where `display_id` is undefined
+  // on ALL sources (older Electron versions, Wayland, some Linux X11
+  // configs). Previously `String(undefined) === '${id}'` always evaluated
+  // false, so the find quietly returned the first source AND silently
+  // captured the primary display regardless of cursor location —
+  // defeating the multi-monitor rewrite's purpose without any signal.
+  // Now we log a warning so users on affected platforms can see why
+  // captures aren't following the cursor.
   const sources = await desktopCapturer.getSources({
     types: ['screen'],
     thumbnailSize: { width: thumbWidth, height: thumbHeight }
@@ -49,8 +58,26 @@ export async function captureScreen(): Promise<ScreenshotResult> {
   if (sources.length === 0) {
     throw new Error('No screen source is available to capture.')
   }
-  const source =
-    sources.find((s) => String(s.display_id) === String(display.id)) ?? sources[0]
+  const hasIds = sources.some((s) => s.display_id != null && s.display_id !== '')
+  let source = sources[0]
+  if (hasIds) {
+    const matched = sources.find((s) => String(s.display_id) === String(display.id))
+    if (matched) {
+      source = matched
+    } else if (sources.length > 1) {
+      log(
+        'warn',
+        'system',
+        `screenshot: no source matched display ${display.id}; falling back to sources[0] (might capture wrong monitor).`
+      )
+    }
+  } else if (sources.length > 1) {
+    log(
+      'warn',
+      'system',
+      'screenshot: desktopCapturer sources lack display_id on this platform; multi-monitor capture falls back to primary display.'
+    )
+  }
 
   const image = source.thumbnail
   const png = image.toPNG()

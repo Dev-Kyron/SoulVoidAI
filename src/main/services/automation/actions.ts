@@ -416,10 +416,18 @@ async function typeText(text: string): Promise<void> {
       'Add-Type -AssemblyName System.Windows.Forms; ' +
       'Start-Sleep -Milliseconds 400; ' +
       `[System.Windows.Forms.SendKeys]::SendWait('${escaped}')`
+    // v1.12.5 — 30s timeout. Previously a hung PowerShell process (OS
+    // resource starvation, a focused window that swallows input
+    // forever, etc.) would block the type-text mutex indefinitely; every
+    // subsequent type-text call would queue behind it with no escape.
+    // 30s is generous for typing 4096 chars (~40 chars/sec is human-
+    // slow) and short enough that a genuinely stuck call surfaces
+    // before the user gives up.
     await execAsync(
       `powershell -NoProfile -NonInteractive -EncodedCommand ${psEncoded(script)}`,
       {
-        windowsHide: true
+        windowsHide: true,
+        timeout: 30_000
       }
     )
   } finally {

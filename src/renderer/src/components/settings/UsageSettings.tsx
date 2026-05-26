@@ -547,11 +547,20 @@ function ProviderPerformanceDashboard({
                     'flex w-12 items-center justify-end gap-0.5 font-semibold tabular-nums',
                     successRateColor(row.successRate)
                   )}
-                  title={`${row.successCount} ok · ${row.failureCount} failed`}
+                  title={
+                    row.successRate == null
+                      ? 'No v1.12+ telemetry yet for this provider — send a few messages to populate the rate.'
+                      : `${row.successCount} ok · ${row.failureCount} failed`
+                  }
                 >
-                  {row.failureCount === 0 ? (
+                  {/* v1.12.5 — guard the green ✓ on actually having data.
+                    * Previously `failureCount === 0` triggered the check even
+                    * when successRate was null (all-legacy entries), so a
+                    * provider with zero v1.12+ samples rendered as
+                    * "✓ —" — misleading "perfectly healthy" next to no data. */}
+                  {row.successRate == null ? null : row.failureCount === 0 ? (
                     <Check size={9} />
-                  ) : row.successRate != null && row.successRate < 90 ? (
+                  ) : row.successRate < 90 ? (
                     <XIcon size={9} />
                   ) : (
                     <TrendingUp size={9} />

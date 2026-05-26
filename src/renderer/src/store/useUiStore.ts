@@ -84,6 +84,14 @@ interface UiState {
   /** v1.12.3 — pop the shell approval modal and await the user's decision. */
   promptShellApproval: (command: string, cwd: string | null) => Promise<boolean>
   resolveShellApproval: (approved: boolean) => void
+  /**
+   * v1.12.5 — deny every pending and active prompt (permission + shell
+   * approval) and clear the queues. Called on window close / renderer
+   * unload so the agent-side awaits don't hang forever, leaving tool
+   * calls dangling indefinitely. Each pending promise resolves to the
+   * SAFER outcome (false / denied / cancelled).
+   */
+  cancelAllPrompts: () => void
   setActiveWindow: (info: ActiveWindowInfo) => void
   setPalette: (open: boolean) => void
   setAddActionOpen: (open: boolean) => void
@@ -167,6 +175,22 @@ export const useUiStore = create<UiState>((set, get) => ({
       return head
         ? { shellApproval: head, shellApprovalQueue: rest }
         : { shellApproval: null }
+    })
+  },
+
+  cancelAllPrompts: () => {
+    const state = get()
+    // Resolve everything to false / cancelled so awaiting callers can
+    // unwind. Order doesn't matter since each resolver is independent.
+    state.permissionPrompt?.resolve(false)
+    for (const p of state.permissionQueue) p.resolve(false)
+    state.shellApproval?.resolve(false)
+    for (const p of state.shellApprovalQueue) p.resolve(false)
+    set({
+      permissionPrompt: null,
+      permissionQueue: [],
+      shellApproval: null,
+      shellApprovalQueue: []
     })
   },
 

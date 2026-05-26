@@ -113,6 +113,16 @@ export interface RecordingOptions {
 }
 
 export async function startRecording(options?: RecordingOptions): Promise<void> {
+  // v1.12.5 — if a stop is in flight, await it BEFORE clobbering the
+  // recorder. Previously the re-entrancy guard nulled the recorder's
+  // onstop handler synchronously, which left the awaiting stopRecording()
+  // hanging forever (its onstop callback never fires, the promise never
+  // resolves). Awaiting first lets the prior stop drain cleanly.
+  if (stoppingPromise) {
+    await stoppingPromise.catch(() => {
+      /* prior stop's error is its own caller's problem */
+    })
+  }
   // Re-entrancy guard: a rapid second call would otherwise orphan the prior
   // MediaStream's tracks without stopping them (mic stays hot until GC).
   // Tear down any leftover state first so the new recording owns the mic.
@@ -231,42 +241,47 @@ function stopSilenceMonitor(): void {
 /** Stops recording, decodes to PCM, resolves with the clip (or null if empty).
  *  v1.12.1 — idempotent: a second call while the first is still resolving
  *  returns the same in-flight promise, so silence-auto-stop + user manual-
- *  tap landing in the same tick both receive the captured clip. */
+ *  tap landing in the same tick both receive the captured clip.
+ *
+ *  v1.12.5 — `stoppingPromise` is cleared SYNCHRONOUSLY inside the
+ *  resolve/reject paths instead of in a detached `.finally`. The detached
+ *  version had a microtask race: the awaiting caller's continuation
+ *  (e.g. `await stopRecording(); await startRecording();`) could run
+ *  BEFORE the `.finally` cleared the slot, so a third call would receive
+ *  the OLD resolved promise (null or stale clip) instead of stopping the
+ *  freshly started recorder. Synchronous clear closes that window. */
 export function stopRecording(): Promise<RecordedAudioClip | null> {
   if (stoppingPromise) return stoppingPromise
   stopSilenceMonitor()
   const promise = new Promise<RecordedAudioClip | null>((resolve, reject) => {
+    const settle = <T,>(fn: (value: T) => void, value: T): void => {
+      stoppingPromise = null
+      fn(value)
+    }
     const active = recorder
     if (!active || active.state === 'inactive') {
       releaseStream()
       recorder = null
-      resolve(null)
+      settle(resolve, null)
       return
     }
     active.onstop = async () => {
       releaseStream()
       recorder = null
       if (chunks.length === 0) {
-        resolve(null)
+        settle(resolve, null)
         return
       }
       const blob = new Blob(chunks, { type: active.mimeType })
       chunks = []
       try {
         const pcm = await decodeBlobToPcm(blob)
-        resolve({ pcm, sampleRate: TARGET_SAMPLE_RATE })
+        settle(resolve, { pcm, sampleRate: TARGET_SAMPLE_RATE })
       } catch (err) {
-        reject(err instanceof Error ? err : new Error(String(err)))
+        settle(reject, err instanceof Error ? err : new Error(String(err)))
       }
     }
     active.stop()
-  })
-  // Clear the slot when the promise settles, in either direction. Done
-  // via a detached .then chain (not assigning back to stoppingPromise)
-  // so the typed Promise<RecordedAudioClip | null> stays intact and TS
-  // doesn't widen the return type to unknown via .finally().
-  void promise.finally(() => {
-    stoppingPromise = null
   })
   stoppingPromise = promise
   return promise

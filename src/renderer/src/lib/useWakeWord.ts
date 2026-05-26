@@ -205,18 +205,21 @@ export function useWakeWord(): void {
   // the mic (recording or transcribing), tear down the wake engine so the
   // two getUserMedia streams don't fight at the OS level (Windows/WASAPI
   // attaches each call its own AEC pipeline; running two against the same
-  // device degrades both). When voice input goes back to idle, boot the
-  // wake engine again — second boots are silent (no warmup toast) and
-  // cost ~500ms which lands invisibly during the user's post-message lull.
-  const voiceStatus = useVoiceInputStore((s) => s.status)
+  // device degrades both).
+  //
+  // v1.12.5 — subscribe to a DERIVED boolean ("voice busy?") instead of
+  // the raw status. The previous version re-ran the effect on every
+  // `idle → recording → transcribing → idle` transition (3 in a row per
+  // utterance), each one cycling shutdown→boot machinery even though the
+  // "busy or not" answer flipped only twice. Selecting `status !== 'idle'`
+  // and relying on Zustand's default reference equality means React only
+  // re-runs the effect when the boolean actually changes, so we get the
+  // single shutdown on entering recording + single boot on returning to
+  // idle that the original design intended.
+  const voiceBusy = useVoiceInputStore((s) => s.status !== 'idle')
 
   useEffect(() => {
-    if (!enabled || !armed) {
-      void shutdown()
-      return
-    }
-    if (voiceStatus !== 'idle') {
-      // Release the wake mic while voice input owns it.
+    if (!enabled || !armed || voiceBusy) {
       void shutdown()
       return
     }
@@ -224,5 +227,5 @@ export function useWakeWord(): void {
     return () => {
       void shutdown()
     }
-  }, [enabled, armed, voiceStatus])
+  }, [enabled, armed, voiceBusy])
 }

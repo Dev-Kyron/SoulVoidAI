@@ -272,6 +272,23 @@ export function Overlays(): JSX.Element {
   // Gate the lazy import on the open flag so the chunk only loads when the
   // user actually opens the dialog — not on every app launch.
   const reviewOpen = useUiStore((s) => s.reviewDialogOpen)
+
+  // v1.12.5 — on window close / renderer reload, deny + flush every
+  // pending prompt so awaiting agent code can unwind cleanly. Without
+  // this, a renderer reload during HMR could leave a stale promise
+  // referenced by the old agent loop. Beforeunload fires synchronously
+  // in Electron renderers before the JS context tears down, so we have
+  // time to walk the queues and resolve(false) on each. The cleanup
+  // runs once per Overlays mount — both panel and Settings host this
+  // component, so either window's close triggers the flush.
+  useEffect(() => {
+    const cancelAll = (): void => {
+      useUiStore.getState().cancelAllPrompts()
+    }
+    window.addEventListener('beforeunload', cancelAll)
+    return () => window.removeEventListener('beforeunload', cancelAll)
+  }, [])
+
   return (
     <>
       <ToastHost />

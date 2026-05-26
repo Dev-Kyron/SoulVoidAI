@@ -678,11 +678,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // fast tool-use for agent loops, strong reasoning for analysis,
     // etc.). The per-thread override is treated as the user's explicit
     // intent and always wins — the router stays silent in that case.
+    //
+    // v1.13.4 — the entire router pass is also gated on
+    // `config.chat.autoRoute`. When OFF, every send goes to the user's
+    // Active provider verbatim. Users who want full control over which
+    // model answers turn this off in Settings → Providers; this was
+    // added after reports of the router routing tool-heavy prompts to
+    // gpt-4o-mini (which refuses tool calls) even when Claude was the
+    // user's Active pick.
     const override = get().modelOverride
     const hasImage = attachments.some((a) => a.kind === 'image')
     let provider = activeProvider
     let effectiveModel = override || activeProvider.model
-    if (!override) {
+    if (!override && config.chat.autoRoute) {
       const available = config.providers.map<AvailableProvider>((p) => ({
         id: p.id,
         model: p.model,

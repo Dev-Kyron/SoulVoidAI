@@ -1169,6 +1169,22 @@ export interface ChatBehaviourConfig {
   rag: boolean
   /** Embedding engine for `rag` (and file-RAG indexing). Defaults to `auto`. */
   embeddingProvider: EmbeddingProvider
+  /**
+   * v1.13.4 — controls the auto-router that can switch providers mid-prompt.
+   * When ON (default), the router scores each send against capability /
+   * speed / cost signals and may pick a DIFFERENT provider than the one
+   * the user set as Active — e.g. routing tool-heavy prompts to gpt-4o-
+   * mini for speed even when Anthropic Claude is the active pick. That
+   * behaviour is what produced the v1.13.x "gpt-4o-mini refuses to call
+   * tools" failure mode reported by beta users.
+   *
+   * When OFF, every send goes to the user's Active provider verbatim
+   * (modulo error-retry fallback, which is a separate path). Optional
+   * because the routing is genuinely useful when configured providers
+   * span very different price/speed tiers, but the user needs control
+   * when the router picks a worse model for a given task.
+   */
+  autoRoute: boolean
 }
 
 export type ThemeMode = 'dark' | 'light' | 'system'

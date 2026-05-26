@@ -349,6 +349,10 @@ export function registerIpc(): void {
     setChatFlag('rag', enabled)
     return emitConfig(e.sender.id)
   })
+  ipcMain.handle('config:set-auto-route', (e, enabled: boolean) => {
+    setChatFlag('autoRoute', enabled)
+    return emitConfig(e.sender.id)
+  })
   ipcMain.handle(
     'config:set-memory',
     (e, patch: Partial<import('@shared/types').MemoryConfig>) => {

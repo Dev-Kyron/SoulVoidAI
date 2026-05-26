@@ -176,7 +176,8 @@ const DEFAULT_CONFIG: AppConfigFile = {
     autoMemory: true,
     private: false,
     rag: false,
-    embeddingProvider: 'auto'
+    embeddingProvider: 'auto',
+    autoRoute: true
   },
   memory: {
     // Emotional context on by default — Soul's wishlist item #1, beta
@@ -277,7 +278,12 @@ function normalize(c: AppConfigFile): AppConfigFile {
     private: c.chat?.private ?? legacy.privateChat ?? DEFAULT_CONFIG.chat.private,
     rag: c.chat?.rag ?? legacy.ragEnabled ?? DEFAULT_CONFIG.chat.rag,
     embeddingProvider:
-      c.chat?.embeddingProvider ?? DEFAULT_CONFIG.chat.embeddingProvider
+      c.chat?.embeddingProvider ?? DEFAULT_CONFIG.chat.embeddingProvider,
+    // v1.13.4 — back-compat: existing configs without `autoRoute` get
+    // `true` so the router stays on by default. New installs also start
+    // ON. User can flip it OFF in Settings → Providers when the router's
+    // mid-prompt switching produces worse results than their Active pick.
+    autoRoute: c.chat?.autoRoute ?? DEFAULT_CONFIG.chat.autoRoute
   }
   // Strip the legacy keys so they don't linger on disk forever after migration.
   const cleaned: Record<string, unknown> = { ...c }

@@ -30,6 +30,7 @@ const bridge: VoidSoulBridge = {
     setAutoMemory: (enabled) => invoke('config:set-auto-memory', enabled),
     setPrivateChat: (enabled) => invoke('config:set-private-chat', enabled),
     setRagEnabled: (enabled) => invoke('config:set-rag-enabled', enabled),
+    setAutoRoute: (enabled) => invoke('config:set-auto-route', enabled),
     setMemory: (patch) => invoke('config:set-memory', patch),
     setProactiveVoice: (patch) => invoke('config:set-proactive-voice', patch),
     setScreenWatch: (patch) => invoke('config:set-screen-watch', patch),

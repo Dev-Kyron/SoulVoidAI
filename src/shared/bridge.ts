@@ -109,6 +109,10 @@ export interface VoidSoulBridge {
     setAutoMemory(enabled: boolean): Promise<ClientConfig>
     setPrivateChat(enabled: boolean): Promise<ClientConfig>
     setRagEnabled(enabled: boolean): Promise<ClientConfig>
+    /** v1.13.4 — flip the auto-router on/off. When off, every send goes
+     *  to the active provider verbatim; when on, the router may route
+     *  to a different provider/model per task. */
+    setAutoRoute(enabled: boolean): Promise<ClientConfig>
     /** v1.4.0 — patch any subset of the MemoryConfig (emotionalContext
      *  toggle, sentimentModel pin, etc). Merges with existing values. */
     setMemory(patch: Partial<MemoryConfig>): Promise<ClientConfig>

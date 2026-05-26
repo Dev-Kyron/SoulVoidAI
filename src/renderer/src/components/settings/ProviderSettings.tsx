@@ -36,6 +36,7 @@ export function ProviderSettings(): JSX.Element | null {
   const setProviderModel = useConfigStore((s) => s.setProviderModel)
   const setProviderBaseUrl = useConfigStore((s) => s.setProviderBaseUrl)
   const setApiKey = useConfigStore((s) => s.setApiKey)
+  const setAutoRoute = useConfigStore((s) => s.setAutoRoute)
   const loadModels = useConfigStore((s) => s.loadModels)
 
   const [keyInput, setKeyInput] = useState('')
@@ -114,6 +115,33 @@ export function ProviderSettings(): JSX.Element | null {
           )
         })}
       </select>
+
+      {/* v1.13.4 — Auto-route toggle. When ON (default), the router can
+        * override the Active provider above based on per-prompt
+        * capability/cost/speed signals (e.g. push tool-heavy prompts to
+        * a fast/cheap model). When OFF, every send goes to the Active
+        * pick verbatim. Added after users reported the router routing
+        * tool-heavy prompts to gpt-4o-mini and that model refusing tool
+        * calls — locking Active = Claude is the workaround, but only
+        * works once the user can actually turn the router off. */}
+      <label className="mb-3 flex cursor-pointer items-start gap-2 rounded-lg border border-white/10 bg-black/20 px-2.5 py-2">
+        <input
+          type="checkbox"
+          checked={config.chat.autoRoute}
+          onChange={(e) => void setAutoRoute(e.target.checked)}
+          className="mt-0.5 h-4 w-4 cursor-pointer accent-[var(--accent)]"
+        />
+        <div className="min-w-0 flex-1">
+          <span className="text-[11px] font-semibold text-slate-200">
+            Auto-route providers per prompt
+          </span>
+          <p className="mt-0.5 text-[10px] leading-snug text-slate-500">
+            {config.chat.autoRoute
+              ? 'On: the router may pick a different provider/model than Active for any given send (e.g. fast model for short answers, vision-capable for images, tool-heavy for agent steps). Watch the Logs tab for routing decisions.'
+              : 'Off: every send goes to the Active provider above. Use this when the router is picking a worse model for your task — for example forcing Claude for filesystem work even when faster models exist.'}
+          </p>
+        </div>
+      </label>
 
       {/* API key row — paste + save. "Remove stored key" is collapsed into
           a tiny trash icon next to the "saved" badge so the destructive

@@ -28,6 +28,7 @@ import { vs } from '../../lib/bridge'
 import { cn } from '../../lib/utils'
 import { EmptyState, Toggle } from '../common/ui'
 import { CollapsibleSection } from './CollapsibleSection'
+import { AgentReadinessNotice } from './AgentReadinessNotice'
 import type { PluginInfo, PluginRegistryEntry, QuickAction } from '@shared/types'
 
 type Tab = 'installed' | 'browse'
@@ -47,6 +48,10 @@ export function PluginSettings(): JSX.Element {
       title="Plugins"
       hint="Declarative JSON workflow packs that add quick actions. No code runs — they only bundle the same permission-gated actions VoidSoul already has."
     >
+      {/* v1.12.6 — agent-readiness banner. Plugin actions are routed through
+        * the same permission/tool pipeline, so the "inert without agent mode"
+        * gap applies here too. */}
+      <AgentReadinessNotice />
       {/* Tab bar — Installed / Browse. Two-button radio group rather than
           a fancy tab strip; this is settings, not a primary nav. */}
       <div className="mb-3 flex gap-1 rounded-lg border border-white/10 p-0.5">

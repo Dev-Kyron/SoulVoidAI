@@ -23,6 +23,7 @@ import { useMcpStore } from '../../store/useMcpStore'
 import { useUiStore } from '../../store/useUiStore'
 import { EmptyState, Toggle } from '../common/ui'
 import { CollapsibleSection } from './CollapsibleSection'
+import { AgentReadinessNotice } from './AgentReadinessNotice'
 import { vs } from '../../lib/bridge'
 import { cn } from '../../lib/utils'
 import type { McpServerStatus, SetupReport } from '@shared/types'
@@ -491,6 +492,11 @@ export function McpSettings(): JSX.Element {
       title="MCP Servers"
       hint="Model Context Protocol servers — pluggable tool sources. Add a command (e.g. an npx-based server) and its tools become callable by the agent alongside the built-in ones. Stdio transport for now."
     >
+      {/* v1.12.6 — agent-readiness banner. Renders only when Agent mode is
+        * off OR the active model can't call tools, so a healthy setup sees
+        * nothing here. Surfaces the "you configured all this but it won't
+        * run without flipping one switch" UX gap. */}
+      <AgentReadinessNotice />
       <div className="mb-2 flex items-center justify-between text-[10px]">
         <div className="flex items-center gap-1.5 text-slate-400">
           <Plug size={11} className="text-[var(--accent)]" />

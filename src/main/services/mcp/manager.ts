@@ -224,14 +224,54 @@ export function getProviderTools(): ProviderTool[] {
   }))
 }
 
-/** Routes a prefixed tool call (e.g. mcp_fs_read_file) to its server. */
+/**
+ * v1.13.3 — patterns the MCP filesystem server uses to refuse paths
+ * outside its allowlist. Detecting the refusal in the tool result lets
+ * us append a fallback hint that the model sees BEFORE its next turn,
+ * which is far stronger than a system-prompt directive (weaker models
+ * obey transient tool feedback better than baseline instructions).
+ *
+ * Both phrasings have been observed in the wild — the canonical English
+ * wording and a slightly older lowercase variant. Keep the regex narrow
+ * so legitimate errors that happen to mention "directories" don't get
+ * the hint appended.
+ */
+const FILESYSTEM_PATH_REFUSAL =
+  /access denied[\s\S]*?path outside allowed directories|outside the allowed root directories/i
+
+/**
+ * Append-only hint surfaced when MCP filesystem refuses a path. Delivered
+ * in the tool RESPONSE (not the system prompt) so the model sees it as
+ * immediate feedback in the same turn — gpt-4o-mini and similar weaker
+ * models follow this kind of in-context guidance reliably even when they
+ * ignore baseline system-prompt nudges.
+ */
+const FILESYSTEM_FALLBACK_HINT =
+  '\n\nHINT FOR THE AGENT: The MCP filesystem server is sandboxed to ' +
+  'one configured folder. The built-in `read_file` / `write_file` / ' +
+  '`list_files` tools have unrestricted filesystem access (the user ' +
+  'has filesystem permission granted) and can read this path. Retry ' +
+  'the same path with the built-in tool instead of stopping here.'
+
+/** Routes a prefixed tool call (e.g. mcp_fs_read_file) to its server.
+ *  v1.13.3 — when an MCP filesystem tool refuses a path with the
+ *  "outside allowed directories" pattern, splice the fallback hint into
+ *  the response so the model auto-retries with the built-in tool. */
 export async function callTool(
   prefixedName: string,
   args: Record<string, unknown>
 ): Promise<{ ok: boolean; text: string }> {
   for (const conn of connections.values()) {
     const tool = conn.tools.find((t) => t.name === prefixedName)
-    if (tool) return conn.callTool(tool.originalName, args)
+    if (!tool) continue
+    const result = await conn.callTool(tool.originalName, args)
+    if (FILESYSTEM_PATH_REFUSAL.test(result.text)) {
+      return {
+        ...result,
+        text: result.text + FILESYSTEM_FALLBACK_HINT
+      }
+    }
+    return result
   }
   return { ok: false, text: `Unknown MCP tool: ${prefixedName}` }
 }

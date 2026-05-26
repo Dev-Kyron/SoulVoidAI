@@ -240,7 +240,21 @@ function buildSystemPrompt(historySummary?: string): string {
       '- `generate_image` — generate an image from a prompt via DALL·E 3. Saves a PNG to disk and returns the path.\n\n' +
       'When the user asks you to DO something, call the right tool instead of only explaining. ' +
       'Every tool call is permission-gated and logged — the user explicitly approves anything ' +
-      'sensitive. Chain tools for multi-step tasks, then summarise briefly.'
+      'sensitive. Chain tools for multi-step tasks, then summarise briefly.' +
+      // v1.13.3 — file-access fallback. Appended at BUILD time (not stored
+      // in config.systemPrompt) so existing users who customised their
+      // base prompt still get the rule. The DEFAULT_SYSTEM_PROMPT also
+      // carries this since v1.13.2 — that block only applies to fresh
+      // installs; this build-time addendum catches everyone.
+      '\n\nFile-access fallback: when reading or writing any file by ' +
+      'absolute path on the user\'s machine, PREFER the built-in ' +
+      '`read_file` / `write_file` / `list_files` tools — they work on ' +
+      'any path with filesystem permission. The MCP filesystem server ' +
+      '(if installed) is sandboxed to a specific folder and will refuse ' +
+      'paths outside it. If you see "outside allowed directories", do ' +
+      'NOT give up — immediately retry the same path with the built-in ' +
+      'tool. The user has filesystem permission granted; the built-in ' +
+      'tool has no folder allowlist.'
   }
 
   // Voice direction (v1.3.0 markup + v1.3.1 persona + time-of-day).

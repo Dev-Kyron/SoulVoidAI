@@ -12,6 +12,7 @@ import { X, Copy, Check, Save, Eye, Code } from 'lucide-react'
 import { useUiStore } from '../../store/useUiStore'
 import { useChatStore } from '../../store/useChatStore'
 import { vs } from '../../lib/bridge'
+import { copyToClipboard } from '../../lib/clipboard'
 import { cn } from '../../lib/utils'
 import { useDialog } from '../../lib/useDialog'
 
@@ -93,13 +94,13 @@ export function CanvasDialog(): JSX.Element {
   const charCount = content.code.length
 
   const copy = async (): Promise<void> => {
-    try {
-      await navigator.clipboard.writeText(content.code)
-      setCopied(true)
-      window.setTimeout(() => setCopied(false), 1500)
-    } catch {
+    const ok = await copyToClipboard(content.code)
+    if (!ok) {
       pushToast('error', 'Clipboard access denied.')
+      return
     }
+    setCopied(true)
+    window.setTimeout(() => setCopied(false), 1500)
   }
 
   const save = async (): Promise<void> => {

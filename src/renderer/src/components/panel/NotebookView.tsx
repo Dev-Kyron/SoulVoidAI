@@ -25,6 +25,7 @@ import {
 } from 'lucide-react'
 import { useNotebookStore } from '../../store/useNotebookStore'
 import { useUiStore } from '../../store/useUiStore'
+import { copyToClipboard } from '../../lib/clipboard'
 import { cn, formatTime, relativeTime } from '../../lib/utils'
 import type { NotebookCell, NotebookCellKind } from '@shared/types'
 
@@ -162,9 +163,12 @@ function CellOutput({ cell }: { cell: NotebookCell }): JSX.Element | null {
         <button
           type="button"
           onClick={() => {
-            void navigator.clipboard.writeText(cell.output)
-            setCopied(true)
-            window.setTimeout(() => setCopied(false), 1200)
+            void copyToClipboard(cell.output).then((ok) => {
+              if (ok) {
+                setCopied(true)
+                window.setTimeout(() => setCopied(false), 1200)
+              }
+            })
           }}
           className="flex items-center gap-1 text-slate-500 transition hover:text-slate-200"
         >

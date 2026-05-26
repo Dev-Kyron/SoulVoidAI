@@ -28,6 +28,7 @@ import {
 } from 'lucide-react'
 import { useUiStore } from '../../store/useUiStore'
 import { vs } from '../../lib/bridge'
+import { copyToClipboard } from '../../lib/clipboard'
 import {
   EXTENSION_FOR_FORMAT,
   renderThread,
@@ -85,18 +86,17 @@ export function ShareDialog({ thread, open, onClose }: ShareDialogProps): JSX.El
   const title = thread?.title || 'Conversation'
   const empty = !thread || thread.messages.length === 0
 
-  const copyToClipboard = async (): Promise<void> => {
+  const copyAndClose = async (): Promise<void> => {
     if (empty || busy) return
     setBusy('copy')
-    try {
-      await navigator.clipboard.writeText(content)
-      pushToast('success', `${formatLabel} copied to clipboard.`)
-      onClose()
-    } catch {
+    const ok = await copyToClipboard(content)
+    setBusy(null)
+    if (!ok) {
       pushToast('error', 'Clipboard access denied.')
-    } finally {
-      setBusy(null)
+      return
     }
+    pushToast('success', `${formatLabel} copied to clipboard.`)
+    onClose()
   }
 
   const saveToFile = async (): Promise<void> => {
@@ -130,11 +130,9 @@ export function ShareDialog({ thread, open, onClose }: ShareDialogProps): JSX.El
       return
     }
     setGistUrl(result.url)
-    try {
-      await navigator.clipboard.writeText(result.url)
-    } catch {
-      /* ignore — toast still shows the URL */
-    }
+    // Best-effort — toast still surfaces the URL even if the clipboard
+    // write was rejected (very unlikely via the IPC path, but defensive).
+    await copyToClipboard(result.url)
     pushToast(
       'success',
       `${isPublic ? 'Public' : 'Secret'} gist created · URL on your clipboard.`
@@ -188,7 +186,7 @@ export function ShareDialog({ thread, open, onClose }: ShareDialogProps): JSX.El
                     icon={<Copy size={13} />}
                     label={`Copy as ${formatLabel}`}
                     hint="Straight to the clipboard."
-                    onClick={() => void copyToClipboard()}
+                    onClick={() => void copyAndClose()}
                     busy={busy === 'copy'}
                   />
                   <ShareAction
@@ -282,8 +280,12 @@ export function ShareDialog({ thread, open, onClose }: ShareDialogProps): JSX.El
                         <button
                           type="button"
                           onClick={() => {
-                            void navigator.clipboard.writeText(gistUrl)
-                            pushToast('success', 'Link copied to clipboard.')
+                            void copyToClipboard(gistUrl).then((ok) => {
+                              pushToast(
+                                ok ? 'success' : 'error',
+                                ok ? 'Link copied to clipboard.' : 'Could not copy link.'
+                              )
+                            })
                           }}
                           title="Copy link"
                           aria-label="Copy share link"

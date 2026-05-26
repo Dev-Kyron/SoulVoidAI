@@ -23,7 +23,12 @@ import {
 } from '../lib/conversationSummarizer'
 import { canReuseSummary } from '../lib/summaryReuse'
 import { CHAT_STRINGS, formatErrorContent, formatPauseContent } from '../lib/chatStrings'
-import { pickProvider, deriveBudgetState, type AvailableProvider } from '../lib/router'
+import {
+  pickProvider,
+  deriveBudgetState,
+  looksLikeFilepath,
+  type AvailableProvider
+} from '../lib/router'
 import { getMode } from '@shared/modes'
 import { modelHasVision } from '@shared/modelCapabilities'
 import { buildVoiceDirection } from '@shared/voicePersona'
@@ -73,6 +78,59 @@ const SUMMARIZE_TRIGGER_TOKENS = 10_000
 const KEEP_RECENT_MIN = 8
 /** Default placeholder titles that get auto-replaced after the first user turn. */
 const PLACEHOLDER_TITLES = new Set(['New chat', 'Untitled', ''])
+
+/**
+ * v1.13.5 — patterns weaker models (notably gpt-4o-mini) emit when they
+ * refuse to call a filesystem tool that the user clearly invoked. The
+ * router-bias change in this same release pushes most filepath traffic to
+ * stronger models, but it can still happen when the user has only mini
+ * configured, or when auto-route is off and the user picked mini Active.
+ * The retry path injects a coaching turn and runs ONE more step — usually
+ * enough to flip the model into actually calling read_file/list_files.
+ *
+ * Patterns deliberately narrow: must mention an inability AND an
+ * access/read/open/browse verb. Catches "I can't access that folder",
+ * "I'm unable to read files on your machine", "I don't have permission to
+ * open that directory" — but not "I cannot recommend that approach" or
+ * other refusals that aren't about tool access.
+ */
+const REFUSAL_PATTERNS: RegExp[] = [
+  // "I can't / cannot / am unable to … access|read|open|see|view|browse|
+  //  list|reach|navigate" within an 80-char window. The `i ` prefix is
+  //  OPTIONAL — weaker models commonly emit "Cannot access that path."
+  //  with no leading subject, and we want to catch those too. The verb
+  //  list in the second half keeps this from firing on unrelated
+  //  refusals like "Cannot recommend that approach".
+  /\b(?:i )?(?:can'?t|cannot|am unable to|don'?t (?:have|seem to have))\b[^.\n]{0,80}\b(?:access|read|open|see|view|browse|list|reach|navigate)\b/i,
+  // "(I) don't have permission / the ability / access / the tools …"
+  /\b(?:i )?(?:don'?t|do not) have (?:permission|the ability|access|the tools?|the (?:ability|capability) to (?:access|read|open|view|browse))\b/i,
+  // "That folder is outside / not in / not accessible / cannot be accessed"
+  /\b(?:that|this|the) (?:folder|file|directory|path) (?:is (?:outside|not (?:in|within)|not accessible)|cannot be accessed)\b/i,
+  // "(I) don't have direct access to your filesystem/machine/computer"
+  /\b(?:i )?(?:do not|don'?t) have (?:direct )?access to (?:your|the) (?:filesystem|file system|local files?|computer|machine)\b/i
+]
+
+function looksLikeToolLessRefusal(text: string): boolean {
+  if (!text) return false
+  return REFUSAL_PATTERNS.some((re) => re.test(text))
+}
+
+/**
+ * In-context coaching pushed into the conversation when v1.13.5's
+ * tool-less-refusal detector trips. Delivered as a synthetic user turn
+ * (not a system prompt edit) because weaker models follow conversational
+ * pressure far better than baseline instructions — and the assistant's
+ * own refusal sits one turn above, so the rebuttal lands in the same
+ * thread of reasoning.
+ */
+const REFUSAL_COACHING_MESSAGE =
+  'Wait — you do have those tools. You have built-in `read_file`, ' +
+  '`write_file`, and `list_files` tools that work on ANY local file path ' +
+  'on my machine (no folder allowlist), and I have filesystem permission ' +
+  'granted in Settings. Don\'t describe what you would do — actually call ' +
+  'the tool now with the path I gave you. If you tried the MCP filesystem ' +
+  'server and it refused because the path was outside its sandbox, retry ' +
+  'with the built-in `read_file` / `list_files` instead.'
 
 /**
  * Strips image data-URLs out of a ChatTurn[] for checkpoint persistence.
@@ -882,6 +940,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // tools, and a clean completion all looked identical in the UI.
       let exitReason: 'completed' | 'step-cap' | 'aborted' | 'error' = 'completed'
       let step = 0
+      // v1.13.5 — one-shot guard for the tool-less-refusal auto-retry.
+      // Allowing more than one retry per send would defeat the model's
+      // genuine refusals (it could refuse for a real reason on turn 3 and
+      // we'd badger it forever). Flipped to true the first time we coach,
+      // never reset within the loop.
+      let refusalRetryUsed = false
+      const promptHasFilepath = looksLikeFilepath(content)
 
       // Persistent checkpoint of the agent run — survives panel close,
       // app restart, and process crash. Best-effort: a checkpoint write
@@ -958,6 +1023,40 @@ export const useChatStore = create<ChatState>((set, get) => ({
           }
           break
         }
+
+        // v1.13.5 — tool-less refusal auto-retry. Before this hook, gpt-4o-mini
+        // (and other weaker models) would respond to "read C:\foo\bar.ts" with
+        // "I can't access that folder directly" — no tool call, just a flat
+        // refusal — and the agent loop would dutifully treat the refusal as a
+        // completed answer. Here we detect the refusal pattern, push a
+        // coaching user turn into the conversation, and let the loop run one
+        // more step. Usually flips the model into actually calling the tool.
+        // Hard guard at one retry per send via refusalRetryUsed — a second
+        // refusal is treated as genuine and surfaced to the user.
+        if (
+          !refusalRetryUsed &&
+          result.toolCalls.length === 0 &&
+          promptHasFilepath &&
+          looksLikeToolLessRefusal(result.text)
+        ) {
+          refusalRetryUsed = true
+          // Push the refusal into `turns` (so the coaching turn lands in
+          // proper conversational order) BUT skip `finalText` / `patch()`
+          // updates: if the next step succeeds we don't want a flash of
+          // "I can't access that" appearing in the user-facing bubble
+          // before being overwritten by the actual answer. If the next
+          // step ALSO refuses, that second refusal will land normally
+          // through the regular append path on the following iteration.
+          turns.push({ role: 'assistant', content: result.text })
+          turns.push({ role: 'user', content: REFUSAL_COACHING_MESSAGE })
+          void vs.logs.write(
+            'info',
+            'ai',
+            `Tool-less refusal detected from ${effectiveModel} on filepath prompt — auto-retrying with coaching turn.`
+          )
+          continue
+        }
+
         if (result.text.trim()) {
           finalText = finalText ? `${finalText}\n\n${result.text}` : result.text
         }

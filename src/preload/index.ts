@@ -253,7 +253,9 @@ const bridge: VoidSoulBridge = {
     openDataFolder: () => invoke('system:open-data-folder'),
     parsePdf: (args) => invoke('system:parse-pdf', args),
     info: () => invoke('app:info'),
-    stats: () => invoke('system:stats')
+    stats: () => invoke('system:stats'),
+    smokeTest: () => invoke('system:smoke-test'),
+    copyText: (text) => invoke('system:copy-text', text)
   },
   setup: {
     detect: () => invoke('setup:detect'),

@@ -33,6 +33,7 @@ import { Check, Copy, Maximize2 } from 'lucide-react'
 import { useUiStore } from '../../store/useUiStore'
 import { AskUserCard } from './AskUserCard'
 import { vs } from '../../lib/bridge'
+import { copyToClipboard } from '../../lib/clipboard'
 import 'katex/dist/katex.min.css'
 
 /** Code blocks longer than this open the Canvas dialog when expanded. */
@@ -260,8 +261,12 @@ function CodeBlock({ children }: { children: ReactNode }): JSX.Element {
     return <AskUserCard source={text} />
   }
 
-  const copy = (): void => {
-    void navigator.clipboard.writeText(text)
+  const copy = async (): Promise<void> => {
+    const ok = await copyToClipboard(text)
+    if (!ok) {
+      useUiStore.getState().pushToast('error', 'Could not copy to clipboard.')
+      return
+    }
     setCopied(true)
     window.setTimeout(() => setCopied(false), 1500)
   }
@@ -293,7 +298,7 @@ function CodeBlock({ children }: { children: ReactNode }): JSX.Element {
           )}
           <button
             type="button"
-            onClick={copy}
+            onClick={() => void copy()}
             className="flex items-center gap-1 text-[9px] text-slate-400 transition hover:text-white"
           >
             {copied ? <Check size={11} /> : <Copy size={11} />}

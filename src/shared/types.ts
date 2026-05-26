@@ -1331,6 +1331,26 @@ export interface SyncResult {
 
 /* --------------------------- System telemetry --------------------------- */
 
+/**
+ * v1.13.5 — single row in the Settings → Permissions smoke-test panel.
+ * Each row corresponds to one capability the agent relies on (filesystem
+ * read/list/write, shell, MCP filesystem). The renderer renders these as
+ * pass/fail/skipped chips next to a short detail line.
+ */
+export type SmokeStatus = 'pass' | 'fail' | 'skipped'
+
+export interface SmokeCheck {
+  id: string
+  label: string
+  /** Short noun phrase explaining what this check actually does. */
+  what: string
+  status: SmokeStatus
+  /** One-line outcome (success summary, error message, or skip reason). */
+  detail: string
+  /** Permission this check depends on, or null if there's no gate. */
+  permissionId: import('./permissions').PermissionId | null
+}
+
 export interface SystemStats {
   /** Aggregate CPU utilisation, 0–100. */
   cpu: number

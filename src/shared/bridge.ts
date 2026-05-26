@@ -59,6 +59,7 @@ import type {
   SetupEnvKeyImportResult,
   SetupImportResult,
   SetupReport,
+  SmokeCheck,
   SyncResult,
   ChatTurn,
   EmotionalContextSnapshot,
@@ -511,6 +512,22 @@ export interface VoidSoulBridge {
     parsePdf(args: { bytes: ArrayBuffer; name: string }): Promise<string>
     info(): Promise<AppInfo>
     stats(): Promise<SystemStats>
+    /**
+     * v1.13.5 — runs the permission smoke-test. Each capability the agent
+     * relies on (filesystem read/list/write, shell, MCP filesystem) is
+     * actually exercised end-to-end so the Settings → Permissions panel
+     * can show whether the stack works without users having to debug
+     * inside chat. Returns one row per check.
+     */
+    smokeTest(): Promise<SmokeCheck[]>
+    /**
+     * v1.13.5 — writes text to the OS clipboard via Electron's native
+     * `clipboard` module. We don't use `navigator.clipboard.writeText`
+     * from the renderer because it silently rejects on focus / permissions-
+     * policy edge cases — and the previous fire-and-forget callers had no
+     * way to know the write failed. Returns `true` on success.
+     */
+    copyText(text: string): Promise<boolean>
   }
   setup: {
     /**

@@ -51,6 +51,15 @@ export interface TaskHint {
   /** Hard requirements that filter candidates out entirely. */
   requiresVision: boolean
   requiresToolUse: boolean
+  /**
+   * v1.13.5 — set when the prompt contains an absolute or clearly-rooted
+   * file path (e.g. `C:\Users\foo\bar.ts`, `/home/me/proj`, `~/Downloads`).
+   * Filepath prompts route the agent into tool calls, and weaker models
+   * (notably gpt-4o-mini) refuse those calls. Lifting strong-reasoning
+   * models on filepath prompts swings the tie-breaker back toward Claude /
+   * GPT-4o / Gemini Pro so the tools actually get called.
+   */
+  hasFilepath: boolean
   /** Human-readable description, used in the routing-reason text. */
   label: string
 }
@@ -128,6 +137,39 @@ const CONVERSATIONAL_REGEX =
 /** Long-prompt threshold — above this we suspect dense context / reasoning. */
 const LONG_PROMPT_CHARS = 2000
 
+/**
+ * Patterns for absolute / clearly-rooted file paths. The presence of any
+ * one of these strongly implies a filesystem tool call will follow, so we
+ * bias toward strong-reasoning models that actually pick the right tool
+ * instead of refusing.
+ *
+ *   - Windows drive paths: `C:\Users\…`, `D:/path/to/file.ts`
+ *   - POSIX absolute paths: `/home/me`, `/Users/foo/bar`
+ *   - Home-token paths: `~/Downloads`, `~\Documents`
+ *   - UNC paths: `\\server\share\file`
+ *
+ * Each pattern is anchored on a word boundary to avoid false positives
+ * in URLs (`http://example.com/foo`) or fenced code blocks containing
+ * unrelated slashes.
+ */
+const FILEPATH_PATTERNS: RegExp[] = [
+  /\b[a-zA-Z]:[\\/][^\s'"`<>|*?]+/, // Windows drive
+  /(^|\s)\/(?:home|Users|var|etc|opt|tmp|root|usr|mnt|srv)\/[^\s'"`<>|*?]+/, // POSIX root
+  /(^|\s)~[\\/][^\s'"`<>|*?]+/, // home shorthand
+  /\\\\[^\s\\]+\\[^\s'"`<>|*?]+/ // UNC
+]
+
+/**
+ * True when the prompt mentions an absolute / clearly-rooted filesystem
+ * path. Exported so the chat store can reuse the same signal for its
+ * tool-less refusal-retry heuristic (we only retry filepath prompts —
+ * refusals on prompts with no path are usually genuine policy limits,
+ * not the gpt-4o-mini "I can't reach that folder" pattern).
+ */
+export function looksLikeFilepath(prompt: string): boolean {
+  return FILEPATH_PATTERNS.some((re) => re.test(prompt))
+}
+
 /** Short-prompt threshold — below this conversational openers count strongly. */
 const SHORT_PROMPT_CHARS = 80
 
@@ -146,10 +188,23 @@ const SHORT_PROMPT_CHARS = 80
 export function classifyTask(input: { prompt: string; hasImages: boolean; agentMode: boolean }): TaskHint {
   const { prompt, hasImages, agentMode } = input
   const lower = lowercased(prompt)
+  const hasFilepath = looksLikeFilepath(prompt)
+
+  // Shared defaults so each return path describes only the dimensions it
+  // actually changes. Per-branch overrides spread on top — keeps the
+  // intent of each classification readable and dodges the bug class where
+  // a newly-added TaskHint field gets forgotten on one of the (otherwise
+  // many) return statements.
+  const base = {
+    requiresVision: false,
+    requiresToolUse: false,
+    hasFilepath
+  } as const
 
   // Hard signals first — these never lie.
   if (hasImages) {
     return {
+      ...base,
       kind: 'vision',
       requiresVision: true,
       requiresToolUse: agentMode,
@@ -158,10 +213,12 @@ export function classifyTask(input: { prompt: string; hasImages: boolean; agentM
   }
   if (agentMode) {
     return {
+      ...base,
       kind: 'tool-heavy',
-      requiresVision: false,
       requiresToolUse: true,
-      label: 'tool-heavy (agent mode)'
+      // Filepath surfacing in the label makes the routing-reason caption
+      // ("via Sonnet 4 — tool-heavy + filepath") read obvious in chat.
+      label: hasFilepath ? 'tool-heavy (agent + filepath)' : 'tool-heavy (agent mode)'
     }
   }
 
@@ -169,12 +226,7 @@ export function classifyTask(input: { prompt: string; hasImages: boolean; agentM
   // even when the surrounding prose has no keyword hits ("fix this" + 50
   // lines of TypeScript).
   if (FENCED_CODE_REGEX.test(prompt)) {
-    return {
-      kind: 'coding',
-      requiresVision: false,
-      requiresToolUse: false,
-      label: 'coding (code block detected)'
-    }
+    return { ...base, kind: 'coding', label: 'coding (code block detected)' }
   }
 
   // Soft keyword signals.
@@ -187,34 +239,37 @@ export function classifyTask(input: { prompt: string; hasImages: boolean; agentM
   // brief me on X" can still benefit from a fast cheap model even though
   // the user didn't write "TLDR".
   if (prompt.length < SHORT_PROMPT_CHARS && CONVERSATIONAL_REGEX.test(prompt.trim())) {
-    return { kind: 'fast', requiresVision: false, requiresToolUse: false, label: 'fast (short greeting)' }
+    return { ...base, kind: 'fast', label: 'fast (short greeting)' }
   }
 
   // Fast wins outright — user explicitly asked for short answer.
   if (fastHits >= 1 && prompt.length < 280) {
-    return { kind: 'fast', requiresVision: false, requiresToolUse: false, label: 'fast (short answer)' }
+    return { ...base, kind: 'fast', label: 'fast (short answer)' }
   }
 
   // Very long prompt → assume dense context / multi-part question →
   // reasoning model. Threshold deliberately high (~500 words) so a long
   // narrative description doesn't trip into the slow tier needlessly.
   if (prompt.length > LONG_PROMPT_CHARS) {
-    return {
-      kind: 'reasoning',
-      requiresVision: false,
-      requiresToolUse: false,
-      label: 'reasoning (long prompt)'
-    }
+    return { ...base, kind: 'reasoning', label: 'reasoning (long prompt)' }
   }
 
   if (reasoningHits >= 2 || (reasoningHits >= 1 && prompt.length > 400)) {
-    return { kind: 'reasoning', requiresVision: false, requiresToolUse: false, label: 'reasoning' }
+    return { ...base, kind: 'reasoning', label: 'reasoning' }
   }
   if (codingHits >= 1) {
-    return { kind: 'coding', requiresVision: false, requiresToolUse: false, label: 'coding' }
+    return { ...base, kind: 'coding', label: 'coding' }
   }
 
-  return { kind: 'general', requiresVision: false, requiresToolUse: false, label: 'general' }
+  // No keyword hits but the prompt names a filesystem path → still a
+  // coding-shaped task. Without this, "open D:\Project\src\foo.ts" would
+  // fall through to 'general' and the speed bias would happily route to
+  // gpt-4o-mini, which then refuses the resulting tool call.
+  if (hasFilepath) {
+    return { ...base, kind: 'coding', label: 'coding (filepath)' }
+  }
+
+  return { ...base, kind: 'general', label: 'general' }
 }
 
 /* --------------------------- scoring --------------------------------- */
@@ -270,6 +325,26 @@ function scoreCandidate(task: TaskHint, provider: AvailableProvider, activeId: P
       // Light bonus for strong reasoning — helps when individual tool
       // arguments need careful construction.
       if (caps.reasoning === 'strong') score += 2
+      // v1.13.5 — filepath bias. When the prompt names a real path the
+      // agent will almost certainly need to call a file tool. Weaker
+      // models (gpt-4o-mini in particular) refuse those calls with "I
+      // can't access that folder", wasting the round-trip. Pile a heavy
+      // reasoning bonus on top so the tie-breaker swings back to
+      // Sonnet/Opus/GPT-4o, which actually pick up the tool.
+      if (task.hasFilepath) {
+        if (caps.reasoning === 'extended') {
+          score += 8
+          reasonBits.push('filepath → extended reasoning')
+        } else if (caps.reasoning === 'strong') {
+          score += 6
+          reasonBits.push('filepath → strong reasoning')
+        } else {
+          // Penalty mirrors the bonus so the tier gap is visible to the
+          // ranker — a fast cheap model with basic reasoning loses ground
+          // to a balanced model with strong reasoning on filepath prompts.
+          score -= 4
+        }
+      }
       break
     case 'coding':
       // Coding benefits from strong reasoning + tool-use (running tests).

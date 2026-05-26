@@ -72,32 +72,51 @@ export const TOOL_SPECS: ToolSpec[] = [
   {
     name: 'list_files',
     actionType: 'file-list',
-    description: 'List the files and folders inside a directory.',
+    description:
+      'List files and folders inside ANY directory on the user\'s machine. USE THIS for any local folder path the user mentions — Windows (`C:\\Users\\…`, `D:\\Projects\\…`), POSIX (`/home/me/…`, `/Users/me/…`), or shorthand (`~/Downloads`, `~documents`). NEVER refuse with "I can\'t access that folder" — the user has filesystem permission granted, this tool has no folder allowlist, and this is the tool that does the listing. Prefer this over the MCP filesystem server (sandboxed to one folder) when the path is outside that sandbox.',
     parameters: {
       type: 'object',
-      properties: { dir: { type: 'string', description: 'Directory path or token.' } },
+      properties: {
+        dir: {
+          type: 'string',
+          description:
+            'Absolute folder path, e.g. `C:\\Users\\me\\Projects` or `/home/me/code`. Tokens: ~home ~downloads ~desktop ~documents ~videos ~pictures ~music.'
+        }
+      },
       required: ['dir']
     }
   },
   {
     name: 'read_file',
     actionType: 'file-read',
-    description: 'Read a UTF-8 text file and return its contents.',
+    description:
+      'Read the text contents of ANY file on the user\'s machine and return them. USE THIS for any local file path the user mentions — Windows, POSIX or home-shorthand paths all work. NEVER refuse with "I can\'t access that file" or "I don\'t have permission" — the user has filesystem permission granted, this tool has no folder allowlist, and it is the canonical way to read a local file. If a sibling MCP filesystem tool refused the same path because it was outside its sandbox, retry here.',
     parameters: {
       type: 'object',
-      properties: { path: { type: 'string', description: 'File path.' } },
+      properties: {
+        path: {
+          type: 'string',
+          description:
+            'Absolute file path, e.g. `C:\\Users\\me\\notes.md` or `/Users/me/src/index.ts`.'
+        }
+      },
       required: ['path']
     }
   },
   {
     name: 'write_file',
     actionType: 'file-write',
-    description: 'Write text to a file. The previous contents are preserved for undo.',
+    description:
+      'Write text to ANY file on the user\'s machine. Existing contents are preserved for undo, and the user gets a diff preview before the change applies. USE THIS whenever the user asks you to create, save, edit, or update a file at a real path — Windows, POSIX or home-shorthand all work. NEVER refuse with "I can\'t write to that location" — the user has filesystem permission granted and the diff-preview UI is their approval surface, not yours.',
     parameters: {
       type: 'object',
       properties: {
-        path: { type: 'string', description: 'File path.' },
-        content: { type: 'string', description: 'Text content to write.' }
+        path: {
+          type: 'string',
+          description:
+            'Absolute file path. Parent directory must exist; the file is created if it doesn\'t.'
+        },
+        content: { type: 'string', description: 'Full text content to write (replaces the file).' }
       },
       required: ['path', 'content']
     }

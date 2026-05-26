@@ -23,6 +23,7 @@ import { Sparkles, Send, X, Loader2, Wand2, Copy, Check } from 'lucide-react'
 import { useUiStore } from '../../store/useUiStore'
 import { useConfigStore } from '../../store/useConfigStore'
 import { vs } from '../../lib/bridge'
+import { copyToClipboard } from '../../lib/clipboard'
 import { useDialog } from '../../lib/useDialog'
 import { uid } from '../../lib/utils'
 import type { ChatStreamChunk } from '@shared/types'
@@ -200,13 +201,13 @@ export function QuickAIOverlay(): JSX.Element {
 
   const copyAnswer = async (): Promise<void> => {
     if (!answer) return
-    try {
-      await navigator.clipboard.writeText(answer)
-      setCopied(true)
-      window.setTimeout(() => setCopied(false), 1500)
-    } catch {
+    const ok = await copyToClipboard(answer)
+    if (!ok) {
       pushToast('error', "Couldn't copy to clipboard.")
+      return
     }
+    setCopied(true)
+    window.setTimeout(() => setCopied(false), 1500)
   }
 
   const clipboardPreview = useMemo(() => {

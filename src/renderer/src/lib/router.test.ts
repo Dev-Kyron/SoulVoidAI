@@ -107,6 +107,68 @@ describe('classifyTask', () => {
     expect(t.kind).toBe('reasoning')
     expect(t.label).toContain('long')
   })
+
+  // v1.13.5 — filepath detection. Any of these should set `hasFilepath`
+  // so the router can bias toward strong-reasoning models that actually
+  // call file tools instead of refusing.
+  it('detects Windows absolute paths', () => {
+    const t = classifyTask({
+      prompt: 'read C:\\Users\\foo\\bar.ts and summarise',
+      hasImages: false,
+      agentMode: false
+    })
+    expect(t.hasFilepath).toBe(true)
+  })
+
+  it('detects POSIX absolute paths', () => {
+    const t = classifyTask({
+      prompt: 'what is in /home/me/project/README.md',
+      hasImages: false,
+      agentMode: false
+    })
+    expect(t.hasFilepath).toBe(true)
+  })
+
+  it('detects home-shorthand paths', () => {
+    const t = classifyTask({
+      prompt: 'organise the files in ~/Downloads',
+      hasImages: false,
+      agentMode: false
+    })
+    expect(t.hasFilepath).toBe(true)
+  })
+
+  it('does not flag URLs as filepaths', () => {
+    const t = classifyTask({
+      prompt: 'fetch https://example.com/foo and tell me what it says',
+      hasImages: false,
+      agentMode: false
+    })
+    expect(t.hasFilepath).toBe(false)
+  })
+
+  it('agent + filepath labels both signals so the routing reason is obvious', () => {
+    const t = classifyTask({
+      prompt: 'list /Users/me/src',
+      hasImages: false,
+      agentMode: true
+    })
+    expect(t.kind).toBe('tool-heavy')
+    expect(t.hasFilepath).toBe(true)
+    expect(t.label).toContain('filepath')
+  })
+
+  it('routes lone-filepath prompts (no keywords, no agent) into coding', () => {
+    // Without the v1.13.5 bias this would fall to "general" and the
+    // speed-favouring scorer would happily pick gpt-4o-mini.
+    const t = classifyTask({
+      prompt: 'D:\\Projects\\app\\package.json',
+      hasImages: false,
+      agentMode: false
+    })
+    expect(t.kind).toBe('coding')
+    expect(t.hasFilepath).toBe(true)
+  })
 })
 
 /* ----------------------------- helpers ------------------------------- */
@@ -163,6 +225,26 @@ describe('pickProvider', () => {
     expect(result).not.toBeNull()
     expect(result!.providerId).toBe('ollama')
     expect(result!.reason).toContain('no')
+  })
+
+  // v1.13.5 — filepath bias regression. Before, an agent-mode prompt
+  // naming an absolute path scored gpt-4o-mini above Sonnet because the
+  // speed bonus (fast×3=6) dominated the strong-reasoning bonus (+2).
+  // gpt-4o-mini then refused the tool call. The bias swings it back.
+  it('tool-heavy + filepath prefers strong-reasoning over fast-but-weak', () => {
+    const result = pickProvider({
+      prompt: 'read C:\\Users\\Kyron\\VoidSoulAssistant\\package.json',
+      hasImages: false,
+      agentMode: true,
+      available: [
+        provider('openai', 'gpt-4o-mini'), // fast + basic reasoning
+        provider('anthropic', 'claude-sonnet-4-5') // balanced + strong reasoning
+      ],
+      activeProviderId: 'openai'
+    })
+    expect(result).not.toBeNull()
+    expect(result!.modelId).toBe('claude-sonnet-4-5')
+    expect(result!.reason).toContain('filepath')
   })
 
   it('tool-heavy task prefers fast tool-use models over slow premium', () => {

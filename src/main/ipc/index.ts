@@ -4,7 +4,7 @@
  * never touches Node, the filesystem or the network directly — it goes
  * through these handlers, which enforce permissions and write the audit log.
  */
-import { ipcMain, dialog, app, shell } from 'electron'
+import { ipcMain, dialog, app, shell, clipboard } from 'electron'
 import { readFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { basename, extname, join } from 'node:path'
@@ -182,6 +182,7 @@ import {
   type ScheduledTaskInput
 } from '../services/scheduler'
 import { importTaskbarApps } from '../services/system/taskbar'
+import { runSmokeTest } from '../services/system/smokeTest'
 import { getLogs, clearLogs, log } from '../services/logger'
 import { dataPath, ensureDataPath } from '../services/storage/store'
 import {
@@ -1277,6 +1278,33 @@ export function registerIpc(): void {
   )
 
   ipcMain.handle('system:stats', () => getSystemStats())
+
+  // v1.13.5 — Settings diagnostic panel. Runs the actual filesystem /
+  // shell / MCP probes (gated on the same permissions the agent uses) so
+  // the user can verify the stack from Settings instead of debugging by
+  // trial-and-error inside chat.
+  ipcMain.handle('system:smoke-test', () => runSmokeTest())
+
+  // v1.13.5 — clipboard write via Electron's native clipboard module.
+  // `navigator.clipboard.writeText` in the renderer can silently reject
+  // when the window has just lost OS focus or when Permissions Policy
+  // resolves it as blocked — and our call sites used `void` so the
+  // rejection was invisible while the UI still flashed "Copied". Native
+  // clipboard has no focus / permission gate; this is the reliable path.
+  ipcMain.handle('system:copy-text', (_e, text: string): boolean => {
+    try {
+      clipboard.writeText(text ?? '')
+      return true
+    } catch (err) {
+      log(
+        'warn',
+        'system',
+        'Clipboard write failed',
+        err instanceof Error ? err.message : String(err)
+      )
+      return false
+    }
+  })
 
   ipcMain.handle('app:info', () => ({
     version: app.getVersion(),

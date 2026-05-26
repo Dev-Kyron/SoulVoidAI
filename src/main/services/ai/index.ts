@@ -25,6 +25,38 @@ import { log } from '../logger'
 import { isRetryableProviderError, pickFallbackProvider } from './fallback'
 import type { AgentRequest, AgentResult, ChatRequest, ChatTurn, ProviderId } from '@shared/types'
 
+/**
+ * v1.13.1 — provider hard cap on tool count per request. OpenAI's
+ * `tools` array maxes at 128; sending more returns a 400 "array too
+ * long" rejection that's user-hostile and falls back to nothing useful.
+ * Other providers (Anthropic, Gemini) tolerate larger counts but 128 is
+ * a sensible ceiling: past it, model attention degrades and tool-routing
+ * gets unreliable regardless of provider limits. Cap once here at the
+ * tightest known limit; everyone is happier.
+ *
+ * Strategy when over: keep all built-in TOOL_SPECS (curated, small,
+ * load-bearing — see `tools.ts`), fill the remaining budget with MCP
+ * tools in their existing order (alphabetical by server name → tool
+ * name from `manager.ts`). Truncation gets logged once per truncated
+ * request so the user can see WHY tools are missing from the model.
+ */
+const MAX_TOOLS_PER_REQUEST = 128
+let truncationLoggedThisSession = false
+
+function applyToolCap<T>(tools: T[]): T[] {
+  if (tools.length <= MAX_TOOLS_PER_REQUEST) return tools
+  const dropped = tools.length - MAX_TOOLS_PER_REQUEST
+  if (!truncationLoggedThisSession) {
+    truncationLoggedThisSession = true
+    log(
+      'warn',
+      'ai',
+      `[ai] tool cap hit: ${tools.length} tools available, capped at ${MAX_TOOLS_PER_REQUEST} for OpenAI compatibility (${dropped} MCP tool${dropped === 1 ? '' : 's'} excluded this session). Disable an MCP server in Settings → MCP if you want the dropped tools available.`
+    )
+  }
+  return tools.slice(0, MAX_TOOLS_PER_REQUEST)
+}
+
 /** Joins a turn list into a single string for token estimation. */
 function flattenTurns(system: string, turns: ChatTurn[]): { text: string; imageCount: number } {
   let imageCount = 0
@@ -73,15 +105,41 @@ function localUnavailableError(provider: ProviderId, meta: ProviderMeta): string
 }
 
 function humanError(err: unknown, label: string): string {
-  if (err instanceof ProviderError) return err.message
+  if (err instanceof ProviderError) return translateKnownErrors(err.message, label)
   if (err instanceof Error) {
     if (err.name === 'AbortError') return 'aborted'
     if (/fetch failed|ECONNREFUSED|ENOTFOUND|network/i.test(err.message)) {
       return `${label} could not be reached. Check the server, network or base URL.`
     }
-    return err.message
+    return translateKnownErrors(err.message, label)
   }
   return 'Unexpected error during completion.'
+}
+
+/** v1.13.1 — translate known provider error wording into user-friendly
+ *  copy with actionable next steps. Returns the original message
+ *  unchanged when no rule matches, so we never accidentally hide
+ *  diagnostic detail for an unfamiliar error. */
+function translateKnownErrors(message: string, label: string): string {
+  // OpenAI: tool count exceeds 128. Shouldn't happen post-v1.13.1 (we
+  // cap at the merge point) but a future MCP server with bizarrely
+  // many tools, or a model with a stricter limit, could resurface it.
+  if (/array too long.*tools|tools.*array too long/i.test(message)) {
+    return (
+      `${label} rejected the request: too many tools enabled. ` +
+      'Open Settings → MCP and disable an MCP server (or toggle some plugins off) ' +
+      'to bring the tool count under 128.'
+    )
+  }
+  // OpenAI: context length exceeded. Surface a concrete suggestion rather
+  // than the raw token-count math.
+  if (/maximum context length|context_length_exceeded/i.test(message)) {
+    return (
+      `${label}: this conversation has grown past the model's context window. ` +
+      'Start a new thread or switch to a model with a larger context window in Settings → Providers.'
+    )
+  }
+  return message
 }
 
 /** v1.12.0 — short, stable category for the per-provider dashboard.
@@ -323,7 +381,7 @@ async function invokeCompletionAttempt(
     // bundle. When off, the model literally doesn't see the tool exists.
     // v1.10.2 — surface the filter outcome in the log so we can debug
     // "is the model actually seeing click_on_screen?" without guessing.
-    const filteredTools =
+    const assembled =
       options?.tools ?? [
         ...TOOL_SPECS.filter((t) => {
           if (t.actionType === 'visual-click') {
@@ -333,6 +391,10 @@ async function invokeCompletionAttempt(
         }),
         ...getMcpTools()
       ]
+    // v1.13.1 — apply the OpenAI-compatible cap of 128 tools. Built-ins
+    // get priority via insertion order (TOOL_SPECS spread first); MCP
+    // overflow truncates from the tail. See applyToolCap docstring.
+    const filteredTools = applyToolCap(assembled)
     // Only log the toolbox composition for default (agent) invocations —
     // internal callers that override `options.tools` (screen-watch
     // passing [], vision-locate calls passing []) don't need a noise

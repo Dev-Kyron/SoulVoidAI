@@ -334,6 +334,19 @@ export function MessageBubble({
             · {message.model}
           </span>
         )}
+        {!isUser && message.routingReason && (
+          // v1.13.6 — Auto-router decision badge. Only present when the
+          // router overrode the user's active provider for this turn;
+          // hovering the chip reveals the full reason (task label + the
+          // scoring bits that swung it). Lets users see WHY a different
+          // model answered without having to dig through Logs.
+          <span
+            className="rounded-sm bg-[var(--accent-soft)] px-1 py-px text-[8px] uppercase tracking-wider text-[var(--accent)]"
+            title={`Auto-router: ${message.routingReason}`}
+          >
+            Auto
+          </span>
+        )}
         {canSpeak && voice && (
           <SpeakerButton voice={voice} text={displayContent} />
         )}

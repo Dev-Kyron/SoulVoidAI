@@ -748,6 +748,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const hasImage = attachments.some((a) => a.kind === 'image')
     let provider = activeProvider
     let effectiveModel = override || activeProvider.model
+    // v1.13.6 — captured when the router overrides the user's active pick,
+    // so the bubble can show WHY a different model answered. Stays null
+    // when the active provider is used as-is (per-thread override OR
+    // auto-route off OR router didn't reroute).
+    let routingReason: string | null = null
     if (!override && config.chat.autoRoute) {
       const available = config.providers.map<AvailableProvider>((p) => ({
         id: p.id,
@@ -792,9 +797,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
         if (swapped) {
           provider = swapped
           effectiveModel = pick.modelId
-          // Quiet log only — the assistant bubble already shows the model
-          // it answered with via the `model:` stamp, so the user sees the
-          // routing decision in the bubble rather than as a separate toast.
+          // Stamp the routing reason so the assistant bubble can show a
+          // small "Auto · why" badge next to the model tag — without this,
+          // the routing decision was visible only in the Logs tab and
+          // users had no in-chat signal that the router had moved them
+          // off their active pick.
+          routingReason = pick.reason
+          // Quiet log too, so the routing history is still scannable in
+          // Logs even when the bubble badge gets dismissed off-screen.
           void vs.logs.write('info', 'ai', `Routed to ${pick.reason}`)
         }
       }
@@ -835,7 +845,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
       createdAt: new Date().toISOString(),
       // Stamp the model that's about to answer so a later override change
       // or thread switch can't retroactively relabel this turn.
-      model: effectiveModel
+      model: effectiveModel,
+      // Optional — only present when the router overrode the active pick.
+      // The MessageBubble renders it as a small badge next to `model`.
+      ...(routingReason ? { routingReason } : {})
     }
 
     stopSpeaking()

@@ -109,6 +109,14 @@ export interface ChatMessage {
    * Lets the UI show "answered by gpt-4o" inline, à la OpenRouter / Cursor.
    */
   model?: string
+  /**
+   * v1.13.6 — present when the auto-router overrode the user's active
+   * provider for this turn. Carries the short human-readable reason
+   * (e.g. "tool-heavy + filepath → strong reasoning") so the bubble can
+   * surface WHY a different model answered. Omitted when the active
+   * provider was used as-is or when auto-route is off.
+   */
+  routingReason?: string
 }
 
 /** Wire format sent to the main process for a completion request. */

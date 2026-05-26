@@ -110,7 +110,24 @@ const DEFAULT_SYSTEM_PROMPT =
   "permissions in your context show those capabilities are granted AND " +
   "the matching tool is in your toolbox. If a tool exists for what the " +
   "user asked, the correct answer is to call it. Refusing a capability " +
-  "you actually have is a worse failure than calling the wrong tool."
+  "you actually have is a worse failure than calling the wrong tool. " +
+  // v1.13.2 — tool fallback hierarchy. The MCP filesystem server is
+  // SANDBOXED to a single configured folder; the built-in read_file /
+  // write_file / list_files actions have unrestricted filesystem
+  // access (modulo the `filesystem` permission, which is granted when
+  // the user can see Permissions → File System as ON). Models keep
+  // calling MCP filesystem first, hitting "outside allowed directories"
+  // for any path the user didn't pre-scope, and then giving up. Tell
+  // them to fall back.
+  "\n\nFile-access fallback: when reading/writing any file by ABSOLUTE " +
+  "PATH on the user's machine, prefer the BUILT-IN `read_file` / " +
+  "`write_file` / `list_files` tools — they work on any path the user " +
+  "has filesystem permission for, with no folder allowlist. The MCP " +
+  "filesystem server (if installed) is sandboxed to a specific folder " +
+  "and will refuse paths outside it with 'Access denied — path outside " +
+  "allowed directories'. If you see that error, retry the same path " +
+  "with the built-in tool instead of telling the user you can't access " +
+  "their file. The built-in tool can read it."
 
 const DEFAULT_PROVIDERS = (Object.keys(PROVIDER_META) as ProviderId[]).reduce(
   (acc, id) => {

@@ -351,11 +351,48 @@ async function fetchMcpRegistryUncached(): Promise<McpRegistryEntry[]> {
  * Unknown tokens are left intact — usually a sign the registry entry is
  * inconsistent with the prompts list, and worth surfacing rather than
  * silently producing a malformed command line.
+ *
+ * v1.13.2 — when an arg is EXACTLY a single token (e.g. `{PATH}`) and
+ * the user-supplied value contains the multi-path delimiter `;`, the
+ * arg fans out into multiple args. Lets the filesystem MCP server be
+ * scoped to several folders without forcing the user to install a
+ * separate server per path. Example: PATH = "C:\\foo;C:\\bar"
+ *   → ['-y','...server-filesystem','C:\\foo','C:\\bar']
+ * Inline tokens (`--root={PATH}`) are still single-substituted because
+ * splitting them would produce malformed args.
  */
 function templateArgs(args: string[], values: Record<string, string>): string[] {
-  return args.map((arg) =>
-    arg.replace(/\{([A-Z0-9_]+)\}/g, (_, key) => values[key] ?? `{${key}}`)
-  )
+  const SINGLE_TOKEN = /^\{([A-Z0-9_]+)\}$/
+  const expanded: string[] = []
+  for (const arg of args) {
+    const sole = SINGLE_TOKEN.exec(arg)
+    if (sole) {
+      const value = values[sole[1]]
+      if (value === undefined) {
+        expanded.push(arg)
+        continue
+      }
+      const parts = value
+        .split(';')
+        .map((p) => p.trim())
+        .filter((p) => p.length > 0)
+      if (parts.length === 0) {
+        // Empty / whitespace-only input. Push a single empty arg so the
+        // downstream MCP launch sees a missing path and surfaces the
+        // error, rather than silently dropping the slot.
+        expanded.push('')
+      } else {
+        expanded.push(...parts)
+      }
+      continue
+    }
+    // Inline substitution for `--flag={KEY}` style args. No multi-path
+    // expansion — splitting these would corrupt the flag's value.
+    expanded.push(
+      arg.replace(/\{([A-Z0-9_]+)\}/g, (_, key) => values[key] ?? `{${key}}`)
+    )
+  }
+  return expanded
 }
 
 export interface InstallRegistryServerInput {

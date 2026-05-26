@@ -14,10 +14,10 @@
       "argPrompts": [
         {
           "key": "PATH",
-          "label": "Folder to expose",
-          "description": "Absolute path. The server can read/write files inside this folder only.",
+          "label": "Folder(s) to expose",
+          "description": "Absolute path. The server can read/write files only inside this folder (and its sub-folders). To expose multiple folders, separate paths with a semicolon — e.g. C:\\Users\\you\\code;C:\\Users\\you\\Documents. Or pick your home folder (C:\\Users\\you on Windows, /Users/you on Mac) for broad access.",
           "type": "folder",
-          "placeholder": "C:\\Users\\you\\code"
+          "placeholder": "C:\\Users\\you  (or path1;path2 for multiple)"
         }
       ],
       "envPrompts": [],

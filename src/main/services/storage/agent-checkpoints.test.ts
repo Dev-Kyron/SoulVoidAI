@@ -163,7 +163,9 @@ describe.skipIf(!RUN)('agent-checkpoints', () => {
     const { db } = await import('./db')
     mod.createCheckpoint(makeCreate())
     db()
-      .prepare(`UPDATE agent_checkpoints SET invocations_json = 'not json' WHERE request_id = 'req-1'`)
+      .prepare(
+        `UPDATE agent_checkpoints SET invocations_json = 'not json' WHERE request_id = 'req-1'`
+      )
       .run()
     const cp = mod.getCheckpoint('req-1')
     expect(cp).not.toBeNull()

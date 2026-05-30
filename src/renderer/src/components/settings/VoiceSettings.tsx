@@ -42,7 +42,14 @@ import { speak } from '../../lib/voice'
 import { vs } from '../../lib/bridge'
 import { cn, relativeTime } from '../../lib/utils'
 import { getTimeWindow, getDefaultTone, getWindowLabel } from '@shared/voicePersona'
-import type { InstalledVoice, VoiceConfig, VoicePersona, VoiceSetupStatus } from '@shared/types'
+import type {
+  InstalledVoice,
+  ModeId,
+  VoiceConfig,
+  VoicePersona,
+  VoiceSetupStatus
+} from '@shared/types'
+import { MODES } from '@shared/modes'
 
 const PIPER_REPO = 'https://github.com/rhasspy/piper'
 const PIPER_VOICES_REPO = 'https://github.com/rhasspy/piper/blob/master/VOICES.md'
@@ -96,11 +103,7 @@ export function VoiceSettings(): JSX.Element | null {
         hint="Piper TTS — neural voices running locally on your machine. No cloud, no API key, no rate limits."
         defaultOpen
       >
-        <VoicePickerBody
-          voice={voice}
-          status={status}
-          setVoice={setVoice}
-        />
+        <VoicePickerBody voice={voice} status={status} setVoice={setVoice} />
       </CollapsibleSection>
 
       <CollapsibleSection
@@ -126,7 +129,7 @@ export function VoiceSettings(): JSX.Element | null {
 
       <CollapsibleSection
         title="Wake word"
-        hint="Continuous listening for &quot;Hey Void&quot; / &quot;Hey Soul&quot;."
+        hint='Continuous listening for "Hey Void" / "Hey Soul".'
       >
         <WakeWordBody voice={voice} />
       </CollapsibleSection>
@@ -155,10 +158,7 @@ function VoicePickerBody({
           <p className="text-[12px] text-slate-200">Spoken replies</p>
           <p className="text-[10px] text-slate-500">Read assistant responses aloud</p>
         </div>
-        <Toggle
-          checked={voice.enabled}
-          onChange={(enabled) => void setVoice({ enabled })}
-        />
+        <Toggle checked={voice.enabled} onChange={(enabled) => void setVoice({ enabled })} />
       </div>
 
       {!status?.binaryAvailable && (
@@ -248,16 +248,27 @@ function VoicePickerBody({
            *  the resulting silence as "voice is broken." Flag it cheaply. */}
           {voice.volume > 0 && voice.volume < 0.3 && (
             <p className="mt-1 text-[10px] text-amber-300/80">
-              Slider is low — Piper voices may be barely audible at this level.
-              Try 50–80% if chat replies sound silent.
+              Slider is low — Piper voices may be barely audible at this level. Try 50–80% if chat
+              replies sound silent.
             </p>
           )}
         </div>
       </div>
 
+      {/* v2.0 — multi-voice picker. Only renders when a persona has
+          >1 .onnx installed; pre-2.0 activeVoice() always returned
+          voices[0] and the user had no way to choose. */}
+      <VoicePicker persona="void" voices={status?.installed.void ?? []} voice={voice} />
+      <VoicePicker persona="soul" voices={status?.installed.soul ?? []} voice={voice} />
+
+      {/* v2.0 — per-mode persona override. Without this, switching mode
+          left the voice on whatever the global `persona` was; the user
+          had to manually toggle persona every time. Empty map = legacy. */}
+      <PersonaByMode voice={voice} />
+
       <p className="text-[10px] leading-relaxed text-slate-500">
         Active persona: <span className="uppercase text-[var(--accent)]">{voice.persona}</span> —
-        switch between Void and Soul from the Nexus HUD.
+        switch between Void and Soul from the Nexus HUD, or pin a persona per mode above.
       </p>
 
       <PiperCredit />
@@ -290,7 +301,7 @@ const TONE_SAMPLES: ReadonlyArray<{
     tone: 'focused',
     label: 'Focused',
     hint: 'direct, minimal filler, task mode',
-    sample: "Two changes — schema migration and the API patch. Both look clean."
+    sample: 'Two changes — schema migration and the API patch. Both look clean.'
   },
   {
     tone: 'excited',
@@ -320,7 +331,7 @@ const TONE_SAMPLES: ReadonlyArray<{
     tone: 'playful',
     label: 'Playful',
     hint: 'light, mischievous, teasing',
-    sample: "Oh? Going off the rails, are we? Lead on."
+    sample: 'Oh? Going off the rails, are we? Lead on.'
   },
   {
     tone: 'warm',
@@ -338,7 +349,7 @@ const TONE_SAMPLES: ReadonlyArray<{
     tone: 'thinking',
     label: 'Thinking',
     hint: 'pondering out loud, slower',
-    sample: "Let me sit with that for a moment. Yeah, I think the second approach has legs."
+    sample: 'Let me sit with that for a moment. Yeah, I think the second approach has legs.'
   }
 ]
 
@@ -359,10 +370,9 @@ function VoiceDirectionBody({ voice }: { voice: VoiceConfig }): JSX.Element {
   return (
     <>
       <p className="mb-2 text-[10px] leading-relaxed text-slate-500">
-        Replies have a chat layer (what you read) and a voice layer (what gets
-        spoken aloud). {personaName} picks the tone for each spoken segment —
-        it's their call, not a setting. Tap any tone below to audition it
-        with the active persona.
+        Replies have a chat layer (what you read) and a voice layer (what gets spoken aloud).{' '}
+        {personaName} picks the tone for each spoken segment — it's their call, not a setting. Tap
+        any tone below to audition it with the active persona.
       </p>
       {/* Current-window indicator. Informational only — the persona
        *  knows what time it is and reads the moment themselves; this
@@ -373,9 +383,8 @@ function VoiceDirectionBody({ voice }: { voice: VoiceConfig }): JSX.Element {
         </p>
         <p className="mt-0.5 text-[10px] text-slate-400">
           Natural fit for this window:{' '}
-          <span className="font-mono text-[var(--accent)]">{defaultTone}</span>
-          {' '}— but {personaName} may pick a different tone based on the
-          moment.
+          <span className="font-mono text-[var(--accent)]">{defaultTone}</span> — but {personaName}{' '}
+          may pick a different tone based on the moment.
         </p>
       </div>
       <div className="space-y-1">
@@ -409,13 +418,9 @@ function VoiceDirectionBody({ voice }: { voice: VoiceConfig }): JSX.Element {
               <div className="min-w-0 flex-1">
                 <p className="text-[11px] font-semibold text-white">
                   {t.label}
-                  <span className="ml-1.5 text-[9px] font-normal text-slate-500">
-                    · {t.hint}
-                  </span>
+                  <span className="ml-1.5 text-[9px] font-normal text-slate-500">· {t.hint}</span>
                 </p>
-                <p className="truncate font-mono text-[9px] italic text-slate-500">
-                  "{t.sample}"
-                </p>
+                <p className="truncate font-mono text-[9px] italic text-slate-500">"{t.sample}"</p>
               </div>
             </button>
           )
@@ -492,7 +497,9 @@ function VoiceCard({
             className="min-w-0 flex-1 text-left"
             disabled={active}
           >
-            <p className="truncate text-[12px] font-semibold capitalize text-white">{installed.name}</p>
+            <p className="truncate text-[12px] font-semibold capitalize text-white">
+              {installed.name}
+            </p>
             <p className="mt-0.5 truncate font-mono text-[9px] text-slate-500">
               {installed.id}
               {installed.language && ` · ${installed.language}`}
@@ -582,11 +589,7 @@ function ProactiveVoiceBody(): JSX.Element {
     await useConfigStore.getState().setProactiveVoice({ enabled: next })
   }
 
-  const handleTaskToggle = async (
-    id: string,
-    name: string,
-    next: boolean
-  ): Promise<void> => {
+  const handleTaskToggle = async (id: string, name: string, next: boolean): Promise<void> => {
     if (loading) return
     setLoading(true)
     try {
@@ -640,17 +643,14 @@ function ProactiveVoiceBody(): JSX.Element {
   return (
     <>
       <p className="mb-2 text-[10px] leading-relaxed text-slate-500">
-        Soul can initiate without being asked — a quick nudge when a long
-        task finishes, when you've been idle a while, when she notices
-        you're stuck. Opt in to the ones you want, or build your own with
-        "+ Custom task". DND + voice mute always override.
+        Soul can initiate without being asked — a quick nudge when a long task finishes, when you've
+        been idle a while, when she notices you're stuck. Opt in to the ones you want, or build your
+        own with "+ Custom task". DND + voice mute always override.
       </p>
 
       <div className="mb-2 flex items-center justify-between rounded-lg border border-white/5 bg-black/20 px-2.5 py-2">
         <div>
-          <p className="text-[11px] font-semibold text-slate-200">
-            Master switch
-          </p>
+          <p className="text-[11px] font-semibold text-slate-200">Master switch</p>
           <p className="text-[10px] text-slate-500">
             Off = no proactive speech regardless of per-task toggles.
           </p>
@@ -662,9 +662,7 @@ function ProactiveVoiceBody(): JSX.Element {
         <>
           <div className="space-y-1">
             {tasks.length === 0 ? (
-              <p className="text-[10px] italic text-slate-500">
-                Loading built-in tasks…
-              </p>
+              <p className="text-[10px] italic text-slate-500">Loading built-in tasks…</p>
             ) : (
               tasks.map((task) => {
                 const isCustom = !BUILT_IN_NAMES.has(task.name)
@@ -742,9 +740,9 @@ function PiperCredit(): JSX.Element {
         <p className="text-[12px] font-semibold text-white">Voices powered by Piper TTS</p>
       </div>
       <p className="mb-2 text-[10px] leading-relaxed text-slate-300">
-        Open-source neural text-to-speech by Michael Hansen (Rhasspy). Runs locally on your
-        machine — no cloud, no API key, no rate limits. If you like the voices, star the repo or
-        sponsor the project.
+        Open-source neural text-to-speech by Michael Hansen (Rhasspy). Runs locally on your machine
+        — no cloud, no API key, no rate limits. If you like the voices, star the repo or sponsor the
+        project.
       </p>
       <div className="flex gap-1.5">
         <button
@@ -865,10 +863,10 @@ function WakeWordBody({ voice }: { voice: VoiceConfig }): JSX.Element {
         />
       </div>
       <p className="text-[10px] leading-relaxed text-slate-500">
-        Continuous listening for "Hey Void" / "Hey Soul". Works keyless via the local Whisper
-        model (~75 MB, downloads once — same model used for voice input). With a Picovoice access
-        key, the engine upgrades to Porcupine for lower CPU and faster detection; custom .ppn
-        keyword files dropped in the wake-words folder override the defaults.
+        Continuous listening for "Hey Void" / "Hey Soul". Works keyless via the local Whisper model
+        (~75 MB, downloads once — same model used for voice input). With a Picovoice access key, the
+        engine upgrades to Porcupine for lower CPU and faster detection; custom .ppn keyword files
+        dropped in the wake-words folder override the defaults.
       </p>
       {voice.wakeWord.enabled && <ArmRow />}
       <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[10px]">
@@ -1006,9 +1004,7 @@ function WakeHeardTicker(): JSX.Element {
        *  the loop isn't running. If Scans>0 but no events, every scan
        *  is short-circuiting — reason shows why. */}
       <p className="mb-1 flex flex-wrap items-baseline gap-x-2 font-mono text-[9px] text-slate-500">
-        <span className={scans === 0 ? 'text-rose-300' : 'text-slate-300'}>
-          Scans: {scans}
-        </span>
+        <span className={scans === 0 ? 'text-rose-300' : 'text-slate-300'}>Scans: {scans}</span>
         {heard.length > 0 && (
           <>
             <span className="text-emerald-400">· {stats.matched} matched</span>
@@ -1078,9 +1074,176 @@ function WakeHeardTicker(): JSX.Element {
         </ul>
       )}
       <p className="mt-1 text-[9px] leading-relaxed text-slate-500">
-        Green = matched. Grey = heard but no match. Cyan = silence beat
-        (proves the engine is alive). Red = transcribe error — check the activity log.
+        Green = matched. Grey = heard but no match. Cyan = silence beat (proves the engine is
+        alive). Red = transcribe error — check the activity log.
       </p>
+    </div>
+  )
+}
+
+/* ----------------------- v2.0 multi-voice picker ---------------------- */
+
+/**
+ * v2.0 — picks which installed voice a persona uses. Pre-2.0 the
+ * resolver always returned voices[0] for the persona folder, so users
+ * with multiple .onnx files had no UI to choose between them. This
+ * component renders only when >1 voice exists for the persona, so the
+ * common single-voice case stays clutter-free.
+ *
+ * Changes persist to `VoiceConfig.selectedVoiceByPersona[persona]` via
+ * the standard setVoice IPC. The next synth call (chat reply, proactive
+ * nudge, etc.) picks up the new id without restart — activeVoice()
+ * reads config lazily.
+ */
+function VoicePicker({
+  persona,
+  voices,
+  voice
+}: {
+  persona: VoicePersona
+  voices: InstalledVoice[]
+  voice: VoiceConfig
+}): JSX.Element | null {
+  const setVoice = useConfigStore((s) => s.setVoice)
+  // Single voice = no choice to make; matches pre-2.0 behaviour (zero UI).
+  if (voices.length <= 1) return null
+  const selected = voice.selectedVoiceByPersona?.[persona] ?? voices[0]?.id
+  const personaLabel = persona === 'void' ? 'Void' : 'Soul'
+  const pick = (id: string): void => {
+    const next = { ...(voice.selectedVoiceByPersona ?? {}), [persona]: id }
+    void setVoice({ selectedVoiceByPersona: next })
+  }
+  return (
+    <div className="mt-2 rounded-lg border border-white/5 bg-black/20 px-2.5 py-2">
+      <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+        {personaLabel} voice picker
+      </p>
+      <p className="mt-0.5 text-[9px] leading-snug text-slate-500">
+        {voices.length} voices installed in{' '}
+        <code className="text-slate-400">voices/{persona}/</code>. Pick the one to use.
+      </p>
+      <div className="mt-2 space-y-1">
+        {voices.map((v) => {
+          const isActive = v.id === selected
+          return (
+            <button
+              key={v.id}
+              type="button"
+              onClick={() => pick(v.id)}
+              className={cn(
+                'flex w-full items-center gap-2 rounded-md border px-2 py-1.5 text-left transition',
+                isActive
+                  ? 'border-[var(--accent-ring)] bg-[var(--accent-soft)] text-white'
+                  : 'border-white/5 bg-black/20 text-slate-300 hover:border-white/15 hover:bg-white/5'
+              )}
+            >
+              <span
+                className={cn(
+                  'h-2 w-2 shrink-0 rounded-full',
+                  isActive ? 'bg-[var(--accent)]' : 'bg-white/15'
+                )}
+              />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-[11px] font-medium">{v.name}</p>
+                <p className="truncate text-[9px] text-slate-500">
+                  {v.id}
+                  {v.language && ` · ${v.language}`}
+                  {v.quality && ` · ${v.quality}`}
+                </p>
+              </div>
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+/* ---------------------- v2.0 per-mode persona ------------------------- */
+
+/**
+ * v2.0 — per-mode persona override. The user can pin a persona to a
+ * mode so switching modes auto-swaps the voice (creative writing → Soul,
+ * indie-dev → Void, etc). Missing modes fall through to the global
+ * `voice.persona` via resolveEffectivePersona, so empty map = legacy.
+ *
+ * UI is a tri-state per mode: Default (fall through) / Void / Soul.
+ * Clicking the active state again clears the override (back to Default).
+ */
+function PersonaByMode({ voice }: { voice: VoiceConfig }): JSX.Element {
+  const setVoice = useConfigStore((s) => s.setVoice)
+  const overrides = voice.personaByMode ?? {}
+  const overrideCount = Object.keys(overrides).length
+
+  const setOverride = (mode: ModeId, persona: VoicePersona | null): void => {
+    const next = { ...overrides }
+    if (persona === null) delete next[mode]
+    else next[mode] = persona
+    void setVoice({ personaByMode: next })
+  }
+
+  return (
+    <div className="mt-2 rounded-lg border border-white/5 bg-black/20 px-2.5 py-2">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+            Per-mode persona
+          </p>
+          <p className="mt-0.5 text-[9px] leading-snug text-slate-500">
+            Pin a voice persona to a mode. Mid-chat mode swaps then auto-swap the voice.
+          </p>
+        </div>
+        <p className="text-[9px] text-slate-500">
+          {overrideCount === 0 ? 'all default' : `${overrideCount} pinned`}
+        </p>
+      </div>
+      <div className="mt-2 space-y-1">
+        {MODES.map((mode) => {
+          const current = overrides[mode.id] ?? null
+          return (
+            <div
+              key={mode.id}
+              className="flex items-center justify-between gap-2 rounded-md border border-white/5 bg-black/20 px-2 py-1"
+            >
+              <span className="text-[11px] font-medium text-white">{mode.name}</span>
+              <div className="flex items-center gap-1">
+                {(['void', 'soul'] as const).map((p) => {
+                  const active = current === p
+                  return (
+                    <button
+                      key={p}
+                      type="button"
+                      onClick={() => setOverride(mode.id, active ? null : p)}
+                      title={
+                        active
+                          ? `Click again to clear (use global ${voice.persona})`
+                          : `Pin ${mode.name} to the ${p} persona`
+                      }
+                      className={cn(
+                        'rounded-md border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide transition',
+                        active
+                          ? 'border-[var(--accent-ring)] bg-[var(--accent-soft)] text-[var(--accent)]'
+                          : 'border-white/10 text-slate-500 hover:border-white/20 hover:text-slate-300'
+                      )}
+                    >
+                      {p}
+                    </button>
+                  )
+                })}
+                {current === null && (
+                  // Only render the trailing "default · X" caption when
+                  // no override is pinned. Pre-fix this rendered an
+                  // empty span with `ml-1` margin in the override-set
+                  // state, nudging the void/soul buttons visually.
+                  <span className="ml-1 text-[9px] italic text-slate-500">
+                    default · {voice.persona}
+                  </span>
+                )}
+              </div>
+            </div>
+          )
+        })}
+      </div>
     </div>
   )
 }

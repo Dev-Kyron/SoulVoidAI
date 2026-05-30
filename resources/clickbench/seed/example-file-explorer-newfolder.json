@@ -1,0 +1,11 @@
+{
+  "id": "example-file-explorer-newfolder",
+  "label": "File Explorer — New Folder button",
+  "prompt": "New folder button in the File Explorer toolbar",
+  "category": "labeled-native",
+  "inWindow": "File Explorer",
+  "referenceScreenshotPath": null,
+  "groundTruth": null,
+  "notes": "PLACEHOLDER. Open File Explorer to any directory where you can create a folder, then capture. UIA should match cleanly on Windows 11 (the ribbon toolbar exposes labels); this is the 'works today' baseline that proves the harness can see a green column.",
+  "capturedAt": null
+}

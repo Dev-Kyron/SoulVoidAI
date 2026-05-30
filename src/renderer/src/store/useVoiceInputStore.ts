@@ -113,9 +113,7 @@ export const useVoiceInputStore = create<VoiceInputState>((set, get) => ({
         // Prefix the friendly context so the user sees "Voice transcription
         // failed — <detail>" rather than just a cryptic provider error like
         // "401 Unauthorized" floating in a toast with no operation context.
-        useUiStore
-          .getState()
-          .pushToast('error', `Voice transcription failed — ${result.error}`)
+        useUiStore.getState().pushToast('error', `Voice transcription failed — ${result.error}`)
         return
       }
       const text = result.text.trim()

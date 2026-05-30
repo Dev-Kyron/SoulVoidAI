@@ -28,9 +28,7 @@ describe('parseClassifierOutput', () => {
   })
 
   it('rejects unknown sentiment labels', () => {
-    const r = parseClassifierOutput(
-      '{"sentiment":"happy","intensity":3,"summary":"good"}'
-    )
+    const r = parseClassifierOutput('{"sentiment":"happy","intensity":3,"summary":"good"}')
     expect(r).toBeNull()
   })
 
@@ -68,9 +66,7 @@ describe('parseClassifierOutput', () => {
 
   it('truncates oversized summary to 200 chars', () => {
     const huge = 'x'.repeat(500)
-    const r = parseClassifierOutput(
-      `{"sentiment":"neutral","intensity":1,"summary":"${huge}"}`
-    )
+    const r = parseClassifierOutput(`{"sentiment":"neutral","intensity":1,"summary":"${huge}"}`)
     expect(r?.summary.length).toBeLessThanOrEqual(200)
   })
 
@@ -91,8 +87,7 @@ describe('parseClassifierOutput', () => {
     // than discard the whole classification because of a missing number.
     expect(parseClassifierOutput('{"sentiment":"neutral","summary":""}')?.intensity).toBe(1)
     expect(
-      parseClassifierOutput('{"sentiment":"neutral","intensity":"high","summary":""}')
-        ?.intensity
+      parseClassifierOutput('{"sentiment":"neutral","intensity":"high","summary":""}')?.intensity
     ).toBe(1)
   })
 
@@ -113,9 +108,7 @@ describe('parseClassifierOutput', () => {
   })
 
   it('rejects when sentiment is not a string', () => {
-    expect(
-      parseClassifierOutput('{"sentiment":42,"intensity":3,"summary":""}')
-    ).toBeNull()
+    expect(parseClassifierOutput('{"sentiment":42,"intensity":3,"summary":""}')).toBeNull()
   })
 
   it('ignores extra fields the model might add', () => {

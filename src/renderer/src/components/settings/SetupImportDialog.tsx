@@ -353,8 +353,8 @@ function ServerRow({
             <p className="mt-1 flex items-start gap-1 text-[9px] text-amber-300">
               <AlertCircle size={9} className="mt-0.5 shrink-0" />
               <span>
-                Will need {server.missingEnv.join(', ')} after import —
-                edit the server in Settings → MCP to paste the value.
+                Will need {server.missingEnv.join(', ')} after import — edit the server in Settings
+                → MCP to paste the value.
               </span>
             </p>
           )}
@@ -372,9 +372,7 @@ function ResultSummary({ result }: { result: SetupImportResult }): JSX.Element {
       <div
         className={cn(
           'rounded-lg border px-3 py-2.5',
-          allOk
-            ? 'border-emerald-500/30 bg-emerald-500/10'
-            : 'border-amber-500/30 bg-amber-500/10'
+          allOk ? 'border-emerald-500/30 bg-emerald-500/10' : 'border-amber-500/30 bg-amber-500/10'
         )}
       >
         <p className="text-[12px] font-semibold text-white">
@@ -382,16 +380,13 @@ function ResultSummary({ result }: { result: SetupImportResult }): JSX.Element {
             ? `Imported ${result.imported} server${result.imported === 1 ? '' : 's'}`
             : 'Nothing imported'}
           {result.skipped > 0 && (
-            <span className="text-slate-400">
-              {' '}
-              · {result.skipped} already installed
-            </span>
+            <span className="text-slate-400"> · {result.skipped} already installed</span>
           )}
         </p>
         {result.imported > 0 && (
           <p className="mt-0.5 text-[10px] text-slate-400">
-            New servers connect in the background — give them a few seconds, their tools will
-            appear in the list.
+            New servers connect in the background — give them a few seconds, their tools will appear
+            in the list.
           </p>
         )}
         {totalActioned === 0 && (

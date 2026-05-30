@@ -117,7 +117,10 @@ export function ProviderShareBar({
             <div
               key={row.provider}
               title={`${row.provider} — ${dollars(row.cost)} (${pct.toFixed(1)}%)`}
-              style={{ width: `${pct}%`, background: PROVIDER_PALETTE[i % PROVIDER_PALETTE.length] }}
+              style={{
+                width: `${pct}%`,
+                background: PROVIDER_PALETTE[i % PROVIDER_PALETTE.length]
+              }}
             />
           )
         })}

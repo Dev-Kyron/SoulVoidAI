@@ -36,7 +36,8 @@ export function ModeSettings(): JSX.Element | null {
         ))}
       </select>
       <p className="mt-1.5 text-[10px] text-slate-400">
-        {mode.permissions.length} permissions · {mode.quickActions.length} quick actions in this mode.
+        {mode.permissions.length} permissions · {mode.quickActions.length} quick actions in this
+        mode.
       </p>
     </CollapsibleSection>
   )

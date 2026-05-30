@@ -20,10 +20,11 @@
  * persisted task lands enabled-by-default (the user just created it on
  * purpose, no reason to make them toggle it on too).
  */
-import { useState, type ReactNode } from 'react'
+import { cloneElement, isValidElement, useId, useRef, useState, type ReactElement } from 'react'
 import { X } from 'lucide-react'
 import { vs } from '../../lib/bridge'
 import { useUiStore } from '../../store/useUiStore'
+import { useDialog } from '../../lib/useDialog'
 import { Toggle } from '../common/ui'
 import { TONE_TAGS, type ToneTag } from '@shared/voiceMarkers'
 import type { SessionSentimentLabel, WatchConditionType, WatchSpec } from '@shared/types'
@@ -140,6 +141,14 @@ export function CustomWatchTaskDialog({
   const pushToast = useUiStore((s) => s.pushToast)
   const [state, setState] = useState<FormState>(INITIAL_STATE)
   const [submitting, setSubmitting] = useState(false)
+  // v2.0 — a11y plumbing. Ref + useDialog handle Esc-to-close, focus
+  // trap, and focus restoration on unmount. The titleId pairs the
+  // dialog container's aria-labelledby with the visible heading so
+  // screen readers announce "New watch task — Proactive voice" on open
+  // instead of just "dialog".
+  const dialogRef = useRef<HTMLDivElement>(null)
+  const titleId = useId()
+  useDialog(dialogRef, onClose)
 
   if (!open) return null
 
@@ -229,6 +238,10 @@ export function CustomWatchTaskDialog({
       onClick={onClose}
     >
       <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
         className="scrollbar-void max-h-[88vh] w-[440px] max-w-[92vw] overflow-y-auto rounded-2xl border border-white/10 bg-void-700 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
@@ -237,12 +250,15 @@ export function CustomWatchTaskDialog({
             <p className="text-[10px] uppercase tracking-[0.18em] text-slate-500">
               Proactive voice
             </p>
-            <p className="text-[14px] font-semibold text-white">New watch task</p>
+            <p id={titleId} className="text-[14px] font-semibold text-white">
+              New watch task
+            </p>
           </div>
           <button
             type="button"
             onClick={onClose}
             title="Close"
+            aria-label="Close new watch task dialog"
             className="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 transition hover:bg-white/5 hover:text-white"
           >
             <X size={14} />
@@ -260,7 +276,16 @@ export function CustomWatchTaskDialog({
             />
           </Field>
 
-          <Field label="Condition" hint="What triggers Soul to speak.">
+          {/* The condition picker gets a dynamic per-type hint AFTER the
+              field — kept outside the Field component so Field can enforce
+              its one-control-per-row contract for the htmlFor pairing.
+              The static label-prompt ("What triggers Soul to speak.")
+              flows in via Field's hint prop; the dynamic copy below shows
+              the picked option's specific behaviour. */}
+          <Field
+            label="Condition"
+            hint={`What triggers Soul to speak. ${CONDITION_OPTIONS.find((o) => o.type === state.type)?.hint ?? ''}`.trim()}
+          >
             <select
               value={state.type}
               onChange={(e) => onTypeChange(e.target.value as WatchConditionType)}
@@ -272,14 +297,9 @@ export function CustomWatchTaskDialog({
                 </option>
               ))}
             </select>
-            <p className="mt-1 text-[10px] text-slate-500">
-              {CONDITION_OPTIONS.find((o) => o.type === state.type)?.hint}
-            </p>
           </Field>
 
-          {state.type === 'idle-duration' && (
-            <IdleParams state={state} setState={setState} />
-          )}
+          {state.type === 'idle-duration' && <IdleParams state={state} setState={setState} />}
           {state.type === 'task-complete' && (
             <TaskCompleteParams state={state} setState={setState} />
           )}
@@ -377,6 +397,27 @@ export function CustomWatchTaskDialog({
 
 /* -------- generic field row -------- */
 
+/** Props the cloned form control receives — narrow enough that a stray
+ *  non-form child (a wrapping div, an SVG) flags at compile time. */
+type FieldControlProps = {
+  id?: string
+  'aria-describedby'?: string
+}
+
+/**
+ * Label + control wrapper. v2.0 — `htmlFor` pairs the visible label
+ * text with a stable `useId()` so SRs announce "Name, edit text" instead
+ * of just "edit text" when focus lands on the input. The child gets
+ * `id` + `aria-describedby` injected via cloneElement so existing call
+ * sites don't have to pass the ids by hand.
+ *
+ * Both props MERGE with anything the caller already supplied — a child
+ * with its own id keeps it (and we point htmlFor at that), and a child
+ * with its own aria-describedby gets the hint id appended (space-
+ * separated, per the spec) rather than overwritten. Otherwise a future
+ * call site that wires `<input aria-describedby="warning-id">` would
+ * silently lose the warning when wrapped in Field.
+ */
 function Field({
   label,
   hint,
@@ -384,15 +425,35 @@ function Field({
 }: {
   label: string
   hint?: string
-  children: ReactNode
+  /** Single form control element — input, textarea, or select. */
+  children: ReactElement<FieldControlProps>
 }): JSX.Element {
+  const fallbackId = useId()
+  const hintId = useId()
+  const childId = children.props.id ?? fallbackId
+  const describedBy = [hint ? hintId : null, children.props['aria-describedby']]
+    .filter((s): s is string => Boolean(s))
+    .join(' ')
+  const child = isValidElement(children)
+    ? cloneElement(children, {
+        id: childId,
+        'aria-describedby': describedBy || undefined
+      })
+    : children
   return (
     <div>
-      <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+      <label
+        htmlFor={childId}
+        className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-400"
+      >
         {label}
       </label>
-      {children}
-      {hint && <p className="mt-1 text-[10px] text-slate-500">{hint}</p>}
+      {child}
+      {hint && (
+        <p id={hintId} className="mt-1 text-[10px] text-slate-500">
+          {hint}
+        </p>
+      )}
     </div>
   )
 }

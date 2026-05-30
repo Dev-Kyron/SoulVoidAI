@@ -1,0 +1,48 @@
+{
+  "manifest_version": 3,
+  "name": "VoidSoul AI Companion",
+  "short_name": "VoidSoul",
+  "description": "Highlight any text on a page, hit a hotkey, get a VoidSoul reply inline. Talks directly to your local VoidSoul desktop app — nothing leaves your machine.",
+  "version": "2.0.0",
+  "permissions": ["nativeMessaging", "storage", "activeTab", "contextMenus"],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["content.js"],
+      "css": ["overlay.css"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "VoidSoul (Alt+Shift+J)",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "commands": {
+    "ask-voidsoul": {
+      "suggested_key": {
+        "default": "Alt+Shift+J",
+        "mac": "Alt+Shift+J"
+      },
+      "description": "Open VoidSoul Quick AI overlay with the current selection"
+    }
+  },
+  "options_page": "options.html",
+  "host_permissions": []
+}

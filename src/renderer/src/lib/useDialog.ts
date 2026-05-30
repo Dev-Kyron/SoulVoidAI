@@ -46,10 +46,22 @@ function getFocusables(root: HTMLElement): HTMLElement[] {
 export function useDialog(
   ref: RefObject<HTMLElement>,
   onClose: () => void,
-  options?: { autoFocus?: boolean }
+  options?: { autoFocus?: boolean; open?: boolean }
 ): void {
   const autoFocus = options?.autoFocus !== false
+  // v2.0 — explicit `open` opt-in for the pattern where the dialog body
+  // is conditionally rendered INSIDE a long-lived parent (e.g. the
+  // Overlays' approval modals). Default `true` matches the historical
+  // contract where consumers mount/unmount the dialog themselves — those
+  // call sites don't pass `open` and behave as before. New call sites
+  // that pass `open: false` get a clean no-op until the dialog opens,
+  // then run setup once; on close the cleanup runs once (focus restore
+  // + listener removal). Without this opt-in, a mid-prompt re-render
+  // (e.g. queueLength updates) would re-run the effect and STEAL focus
+  // back to the first focusable, disrupting the user mid-Tab.
+  const open = options?.open !== false
   useEffect(() => {
+    if (!open) return
     const dialog = ref.current
     if (!dialog) return
     const previouslyFocused = document.activeElement as HTMLElement | null
@@ -120,5 +132,5 @@ export function useDialog(
         }
       }
     }
-  }, [ref, onClose, autoFocus])
+  }, [ref, onClose, autoFocus, open])
 }

@@ -1,0 +1,11 @@
+{
+  "id": "example-vscode-explorer-icon",
+  "label": "VS Code — Activity bar Explorer icon",
+  "prompt": "Explorer icon in the VS Code activity bar",
+  "category": "icon-only-native",
+  "inWindow": "Visual Studio Code",
+  "referenceScreenshotPath": null,
+  "groundTruth": null,
+  "notes": "PLACEHOLDER. Open VS Code with the activity bar visible. Capture mode will record the Explorer icon's bbox. Tests the icon-only-native case where UIA labels are present but vision struggles with the small icon. Re-capture if you change your VS Code theme or icon size.",
+  "capturedAt": null
+}

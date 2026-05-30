@@ -93,7 +93,12 @@ export function SpiritMotes(): JSX.Element {
               x: [0, mote.drift, -mote.drift, 0],
               opacity: [0, 0.6, 0.6, 0]
             }}
-            transition={{ duration: mote.duration, delay: mote.delay, repeat: Infinity, ease: 'linear' }}
+            transition={{
+              duration: mote.duration,
+              delay: mote.delay,
+              repeat: Infinity,
+              ease: 'linear'
+            }}
           />
         ))}
     </div>

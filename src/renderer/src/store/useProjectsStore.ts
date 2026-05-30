@@ -17,7 +17,11 @@ interface ProjectsState {
   loaded: boolean
 
   load: () => Promise<void>
-  create: (input: { name: string; description?: string | null; instructions?: string | null }) => Promise<Project>
+  create: (input: {
+    name: string
+    description?: string | null
+    instructions?: string | null
+  }) => Promise<Project>
   update: (
     id: string,
     patch: { name?: string; description?: string | null; instructions?: string | null }

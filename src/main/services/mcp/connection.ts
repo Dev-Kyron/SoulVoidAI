@@ -159,12 +159,11 @@ export class McpConnection {
         name: `mcp_${prefix}_${t.name}`.slice(0, 64),
         originalName: t.name,
         description: t.description ?? '',
-        inputSchema:
-          (t.inputSchema as Record<string, unknown>) ?? {
-            type: 'object',
-            properties: {},
-            required: []
-          },
+        inputSchema: (t.inputSchema as Record<string, unknown>) ?? {
+          type: 'object',
+          properties: {},
+          required: []
+        },
         serverId: this.config.id,
         serverName: this.config.name
       }))
@@ -224,14 +223,30 @@ export class McpConnection {
       return { ok: false, text: 'MCP server is not connected.' }
     }
     try {
-      const result = await this.client.callTool({ name: originalName, arguments: args })
+      // v2.0 round-4 security polish — wrap in withTimeout. Without this, a
+      // malicious or stuck MCP server that never responds to tools/call
+      // hangs the agent step indefinitely (the SDK's promise has no ceiling,
+      // and the outer dispatch's AbortSignal doesn't reach inside the
+      // transport's in-flight request). 90s is the same ceiling we use for
+      // connect / listTools — generous for legitimate long-running tools
+      // but short enough that a broken server doesn't freeze the chat.
+      const result = await withTimeout(
+        this.client.callTool({ name: originalName, arguments: args }),
+        90_000,
+        `MCP tool "${originalName}" on "${this.config.name}"`
+      )
       const text = flattenContent(result.content) || '(empty)'
       const ok = !result.isError
       if (!ok) {
         // Audit log every server-side tool failure — MCP is one of the most
         // privileged paths the agent has, "tool reported error" should never
         // be silent.
-        log('warn', 'mcp', `Tool "${originalName}" on "${this.config.name}" reported error`, text.slice(0, 400))
+        log(
+          'warn',
+          'mcp',
+          `Tool "${originalName}" on "${this.config.name}" reported error`,
+          text.slice(0, 400)
+        )
       }
       return { ok, text }
     } catch (err) {

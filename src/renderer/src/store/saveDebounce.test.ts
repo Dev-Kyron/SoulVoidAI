@@ -12,13 +12,19 @@ interface PendingSave {
   payload: string
 }
 
-function createSaver(write: (s: PendingSave) => void, debounceMs = 1200): {
+function createSaver(
+  write: (s: PendingSave) => void,
+  debounceMs = 1200
+): {
   schedule: (threadId: string, payload: string) => void
   flush: (threadId: string) => void
   invalidate: () => void
   pendingCount: () => number
 } {
-  const slots = new Map<string, { timer: ReturnType<typeof setTimeout>; payload: PendingSave; gen: number }>()
+  const slots = new Map<
+    string,
+    { timer: ReturnType<typeof setTimeout>; payload: PendingSave; gen: number }
+  >()
   let gen = 0
   return {
     schedule(threadId, payload) {

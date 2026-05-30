@@ -254,7 +254,7 @@ export function stopRecording(): Promise<RecordedAudioClip | null> {
   if (stoppingPromise) return stoppingPromise
   stopSilenceMonitor()
   const promise = new Promise<RecordedAudioClip | null>((resolve, reject) => {
-    const settle = <T,>(fn: (value: T) => void, value: T): void => {
+    const settle = <T>(fn: (value: T) => void, value: T): void => {
       stoppingPromise = null
       fn(value)
     }

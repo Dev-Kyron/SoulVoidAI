@@ -26,18 +26,14 @@ describe('substituteReferences', () => {
     expect(substituteReferences('plain text', [])).toBe('plain text')
   })
 
-  it('replaces {{cell-N}} ordinal references with that cell\'s output', () => {
+  it("replaces {{cell-N}} ordinal references with that cell's output", () => {
     const priors = [cell('a', 'first'), cell('b', 'second')]
-    expect(substituteReferences('A: {{cell-1}}, B: {{cell-2}}', priors)).toBe(
-      'A: first, B: second'
-    )
+    expect(substituteReferences('A: {{cell-1}}, B: {{cell-2}}', priors)).toBe('A: first, B: second')
   })
 
   it('replaces {{cell-<id>}} uuid references', () => {
     const priors = [cell('uuid-aaa', 'aaa-output')]
-    expect(substituteReferences('seed: {{cell-uuid-aaa}}', priors)).toBe(
-      'seed: aaa-output'
-    )
+    expect(substituteReferences('seed: {{cell-uuid-aaa}}', priors)).toBe('seed: aaa-output')
   })
 
   it('leaves unknown references intact so the user notices', () => {

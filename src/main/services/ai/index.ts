@@ -381,16 +381,15 @@ async function invokeCompletionAttempt(
     // bundle. When off, the model literally doesn't see the tool exists.
     // v1.10.2 — surface the filter outcome in the log so we can debug
     // "is the model actually seeing click_on_screen?" without guessing.
-    const assembled =
-      options?.tools ?? [
-        ...TOOL_SPECS.filter((t) => {
-          if (t.actionType === 'visual-click') {
-            return getConfig().experimentalFeatures?.visualClick === true
-          }
-          return true
-        }),
-        ...getMcpTools()
-      ]
+    const assembled = options?.tools ?? [
+      ...TOOL_SPECS.filter((t) => {
+        if (t.actionType === 'visual-click') {
+          return getConfig().experimentalFeatures?.visualClick === true
+        }
+        return true
+      }),
+      ...getMcpTools()
+    ]
     // v1.13.1 — apply the OpenAI-compatible cap of 128 tools. Built-ins
     // get priority via insertion order (TOOL_SPECS spread first); MCP
     // overflow truncates from the tail. See applyToolCap docstring.
@@ -400,9 +399,7 @@ async function invokeCompletionAttempt(
     // passing [], vision-locate calls passing []) don't need a noise
     // entry every tick.
     if (!options?.tools) {
-      const visualClickAvailable = filteredTools.some(
-        (t) => t.name === 'click_on_screen'
-      )
+      const visualClickAvailable = filteredTools.some((t) => t.name === 'click_on_screen')
       log(
         'info',
         'ai',
@@ -476,9 +473,7 @@ export async function listModels(provider: ProviderId): Promise<string[]> {
   try {
     const models = await impl.listModels(getApiKey(provider), resolveBaseUrl(provider))
     reachable = models.length > 0
-    result = models.length
-      ? [...new Set([...models, ...meta.defaultModels])]
-      : meta.defaultModels
+    result = models.length ? [...new Set([...models, ...meta.defaultModels])] : meta.defaultModels
   } catch {
     result = meta.defaultModels
   }

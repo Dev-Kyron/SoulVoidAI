@@ -22,12 +22,7 @@ import { hasApiKey } from '../storage/keys'
 import { PROVIDER_META } from '../ai/types'
 import { log } from '../logger'
 import { getNotebook, saveNotebook } from './store'
-import type {
-  ChatRequest,
-  Notebook,
-  NotebookCell,
-  NotebookCellKind
-} from '@shared/types'
+import type { ChatRequest, Notebook, NotebookCell, NotebookCellKind } from '@shared/types'
 
 /**
  * Replace `{{cell-N}}` (1-based ordinal) and `{{cell-<uuid>}}` placeholders
@@ -50,10 +45,7 @@ function substituteReferences(input: string, priorCells: NotebookCell[]): string
 }
 
 /** Runs one cell type and returns just its text output. */
-async function executeKind(
-  kind: NotebookCellKind,
-  resolvedInput: string
-): Promise<string> {
+async function executeKind(kind: NotebookCellKind, resolvedInput: string): Promise<string> {
   if (kind === 'markdown') {
     return resolvedInput.trim()
   }
@@ -63,9 +55,7 @@ async function executeKind(
     const providerId = config.activeProvider
     const provider = config.providers[providerId]
     if (PROVIDER_META[providerId].needsKey && !hasApiKey(providerId)) {
-      throw new Error(
-        `${PROVIDER_META[providerId].label} has no API key — set one in Settings.`
-      )
+      throw new Error(`${PROVIDER_META[providerId].label} has no API key — set one in Settings.`)
     }
     const req: ChatRequest = {
       requestId: randomUUID(),
@@ -136,11 +126,7 @@ export async function runCell(notebookId: string, cellId: string): Promise<Noteb
       error: undefined,
       ranAt: now
     }
-    log(
-      'success',
-      'system',
-      `Notebook cell "${cell.kind}" ran in ${updated.durationMs}ms.`
-    )
+    log('success', 'system', `Notebook cell "${cell.kind}" ran in ${updated.durationMs}ms.`)
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     updated = {

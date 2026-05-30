@@ -8,18 +8,13 @@
  * surfaces a thin progress strip with the current file being processed.
  */
 import { useEffect, useState } from 'react'
-import { FolderPlus, FolderX, RefreshCcw, Files, Cpu } from 'lucide-react'
+import { FolderPlus, FolderX, RefreshCcw, Files, Cpu, Pause } from 'lucide-react'
 import { CollapsibleSection } from './CollapsibleSection'
 import { vs } from '../../lib/bridge'
 import { useUiStore } from '../../store/useUiStore'
 import { useConfigStore } from '../../store/useConfigStore'
 import { basename } from '../../lib/utils'
-import type {
-  EmbeddingProvider,
-  IndexedFolder,
-  ScanProgress,
-  ScanResult
-} from '@shared/types'
+import type { EmbeddingProvider, IndexedFolder, ScanProgress, ScanResult } from '@shared/types'
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
@@ -66,15 +61,12 @@ function FolderRow({
       <div className="flex items-start gap-2">
         <Files size={14} className="mt-0.5 shrink-0 text-[var(--accent)]" />
         <div className="min-w-0 flex-1">
-          <p
-            className="truncate font-mono text-[11px] text-slate-100"
-            title={folder.path}
-          >
+          <p className="truncate font-mono text-[11px] text-slate-100" title={folder.path}>
             {shortPath}
           </p>
           <p className="mt-0.5 text-[10px] text-slate-500">
-            {folder.fileCount} file{folder.fileCount === 1 ? '' : 's'} ·{' '}
-            {folder.chunkCount} chunk{folder.chunkCount === 1 ? '' : 's'} ·{' '}
+            {folder.fileCount} file{folder.fileCount === 1 ? '' : 's'} · {folder.chunkCount} chunk
+            {folder.chunkCount === 1 ? '' : 's'} ·{' '}
             {folder.lastScan
               ? `scanned ${new Date(folder.lastScan).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}`
               : 'never scanned'}
@@ -152,9 +144,7 @@ const EMBEDDING_OPTIONS: Array<{
 ]
 
 function EmbeddingProviderPicker(): JSX.Element {
-  const selected = useConfigStore(
-    (s) => s.config?.chat.embeddingProvider ?? 'auto'
-  )
+  const selected = useConfigStore((s) => s.config?.chat.embeddingProvider ?? 'auto')
   const setEmbeddingProvider = useConfigStore((s) => s.setEmbeddingProvider)
   const current = EMBEDDING_OPTIONS.find((o) => o.id === selected) ?? EMBEDDING_OPTIONS[0]
 
@@ -213,6 +203,13 @@ export function FilesRagSettings(): JSX.Element {
         pushToast('error', `Scan failed: ${result.error}`)
         return
       }
+      // v2.0 — user clicked Pause. Partial progress stays on disk; a
+      // subsequent Rescan picks up via the stat-skip path. Distinct toast
+      // copy so it doesn't read as a failure.
+      if (result.paused) {
+        pushToast('info', `Scan paused at ${result.filesScanned} files. Click Rescan to resume.`)
+        return
+      }
       // Distinguish "nothing to index" from a real success. A zero-file walk
       // usually means the folder was unreadable or had no supported files —
       // the user wants a hint, not a fake "Indexed 0 file(s)" thumbs-up.
@@ -263,13 +260,25 @@ export function FilesRagSettings(): JSX.Element {
         <EmbeddingProviderPicker />
         {progress && progress.total > 0 && (
           <div className="rounded-lg border border-[var(--accent-ring)]/40 bg-[var(--accent-soft)]/30 px-2.5 py-1.5">
-            <div className="flex justify-between text-[10px] text-slate-300">
+            <div className="flex items-center justify-between gap-2 text-[10px] text-slate-300">
               <span>
                 Scanning {progress.done}/{progress.total}
               </span>
-              <span className="truncate pl-2 text-slate-500" title={progress.current}>
+              <span className="min-w-0 flex-1 truncate text-slate-500" title={progress.current}>
                 {progress.current ? basename(progress.current) : '…'}
               </span>
+              {/* v2.0 — Pause request is fire-and-forget; the scan loop
+                  exits after the current file and the done-handler turns
+                  the panel back into the idle state. */}
+              <button
+                type="button"
+                onClick={() => void vs.filesRag.stopScan(progress.folder)}
+                title="Pause scan — partial progress is kept, click Rescan to resume"
+                className="flex shrink-0 items-center gap-1 rounded-md border border-white/10 px-1.5 py-0.5 text-[10px] text-slate-300 transition hover:bg-white/10"
+              >
+                <Pause size={10} />
+                Pause
+              </button>
             </div>
             <div className="mt-1 h-1 overflow-hidden rounded-full bg-black/40">
               <div
@@ -284,9 +293,8 @@ export function FilesRagSettings(): JSX.Element {
 
         {folders.length === 0 ? (
           <p className="text-[11px] text-slate-500">
-            No folders indexed yet. Add a folder (your UE5 project, a doc tree, a notes
-            directory…) and VoidSoul will recall passages from it semantically when you
-            ask.
+            No folders indexed yet. Add a folder (your UE5 project, a doc tree, a notes directory…)
+            and VoidSoul will recall passages from it semantically when you ask.
           </p>
         ) : (
           <div className="space-y-1.5">
@@ -296,10 +304,7 @@ export function FilesRagSettings(): JSX.Element {
             <p className="pt-1 text-[10px] text-slate-500">
               Total: {folders.reduce((sum, f) => sum + f.fileCount, 0)} file(s),{' '}
               {folders.reduce((sum, f) => sum + f.chunkCount, 0)} chunk(s) (~
-              {formatBytes(
-                folders.reduce((sum, f) => sum + f.chunkCount, 0) * 240
-              )}{' '}
-              of previews)
+              {formatBytes(folders.reduce((sum, f) => sum + f.chunkCount, 0) * 240)} of previews)
             </p>
           </div>
         )}

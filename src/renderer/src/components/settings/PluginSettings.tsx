@@ -9,23 +9,27 @@
  * from the marketplace writes its manifest into the plugins folder and
  * reloads the registry; the actions become available immediately.
  */
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertTriangle,
   Check,
   Download,
+  ExternalLink,
   FolderOpen,
   Puzzle,
   RefreshCw,
   Search,
-  Store
+  ShieldCheck,
+  Store,
+  Users
 } from 'lucide-react'
 import { usePluginStore } from '../../store/usePluginStore'
+import { useConfigStore } from '../../store/useConfigStore'
 import { useUiStore } from '../../store/useUiStore'
 import { runAction } from '../../lib/actions'
 import { resolveIcon } from '../../lib/icons'
 import { vs } from '../../lib/bridge'
-import { cn } from '../../lib/utils'
+import { cn, isSafeExternalUrl } from '../../lib/utils'
 import { EmptyState, Toggle } from '../common/ui'
 import { CollapsibleSection } from './CollapsibleSection'
 import { AgentReadinessNotice } from './AgentReadinessNotice'
@@ -37,26 +41,68 @@ export function PluginSettings(): JSX.Element {
   const plugins = usePluginStore((s) => s.plugins)
   const actions = usePluginStore((s) => s.actions)
   const load = usePluginStore((s) => s.load)
+  const pluginHooksOn = useConfigStore((s) => s.config?.chat.pluginHooks ?? false)
+  const setPluginHooks = useConfigStore((s) => s.setPluginHooks)
   const [tab, setTab] = useState<Tab>('installed')
 
   useEffect(() => {
     void load()
   }, [load])
 
+  // v2.0 — true when any installed plugin declares JS hooks. Drives the
+  // "you have JS-enabled plugins, here's the master switch" banner.
+  // Computed inline (cheap — plugin lists rarely top a dozen entries).
+  const hasJsHooks = plugins.some((p) => (p.hookCount ?? 0) > 0)
+
   return (
     <CollapsibleSection
       title="Plugins"
-      hint="Declarative JSON workflow packs that add quick actions. No code runs — they only bundle the same permission-gated actions VoidSoul already has."
+      hint="Workflow packs that add quick actions. Most are pure JSON; v2.0 plugins can also subscribe to JS lifecycle hooks if you opt in."
     >
       {/* v1.12.6 — agent-readiness banner. Plugin actions are routed through
-        * the same permission/tool pipeline, so the "inert without agent mode"
-        * gap applies here too. */}
+       * the same permission/tool pipeline, so the "inert without agent mode"
+       * gap applies here too. */}
       <AgentReadinessNotice />
+
+      {/* v2.0 — master JS-hook toggle. Only renders when at least one
+          installed plugin actually declares hooks; no need to show a
+          warning surface to users with pure-JSON plugins. */}
+      {hasJsHooks && (
+        <div className="mb-3 rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="flex items-center gap-1.5 text-[11px] font-semibold text-amber-200">
+                <AlertTriangle size={11} />
+                Plugin JavaScript hooks
+              </p>
+              <p className="mt-0.5 text-[10px] leading-snug text-amber-200/80">
+                One or more installed plugins declare JS hook handlers that run in the main process
+                with full Node access. Off by default — turn this on only after reviewing the code
+                of each plugin you trust. Individual plugins must also be enabled.
+              </p>
+            </div>
+            <Toggle checked={pluginHooksOn} onChange={(v) => void setPluginHooks(v)} />
+          </div>
+        </div>
+      )}
+
       {/* Tab bar — Installed / Browse. Two-button radio group rather than
           a fancy tab strip; this is settings, not a primary nav. */}
       <div className="mb-3 flex gap-1 rounded-lg border border-white/10 p-0.5">
-        <TabButton current={tab} value="installed" onClick={setTab} label="Installed" count={plugins.length} />
-        <TabButton current={tab} value="browse" onClick={setTab} label="Browse" icon={<Store size={11} />} />
+        <TabButton
+          current={tab}
+          value="installed"
+          onClick={setTab}
+          label="Installed"
+          count={plugins.length}
+        />
+        <TabButton
+          current={tab}
+          value="browse"
+          onClick={setTab}
+          label="Browse"
+          icon={<Store size={11} />}
+        />
       </div>
 
       {tab === 'installed' ? (
@@ -100,7 +146,12 @@ function TabButton({
       {icon}
       {label}
       {typeof count === 'number' && count > 0 && (
-        <span className={cn('rounded-full px-1.5 text-[9px]', active ? 'bg-white/15' : 'bg-white/10 text-slate-500')}>
+        <span
+          className={cn(
+            'rounded-full px-1.5 text-[9px]',
+            active ? 'bg-white/15' : 'bg-white/10 text-slate-500'
+          )}
+        >
           {count}
         </span>
       )}
@@ -215,8 +266,8 @@ function InstalledTab({
       </div>
 
       <p className="mt-2 text-[10px] leading-relaxed text-slate-500">
-        Plugins are declarative JSON workflow packs. They bundle permission-gated quick actions —
-        no code execution. Copy <span className="text-slate-400">example-pack.json</span> in the
+        Plugins are declarative JSON workflow packs. They bundle permission-gated quick actions — no
+        code execution. Copy <span className="text-slate-400">example-pack.json</span> in the
         plugins folder to build your own.
       </p>
     </>
@@ -230,6 +281,7 @@ function BrowseTab({ installedIds }: { installedIds: Set<string> }): JSX.Element
   const registryError = usePluginStore((s) => s.registryError)
   const registryBusy = usePluginStore((s) => s.registryBusy)
   const browseRegistry = usePluginStore((s) => s.browseRegistry)
+  const pushToast = useUiStore((s) => s.pushToast)
   const [filter, setFilter] = useState('')
 
   // First mount of the tab — kick off the registry fetch lazily so the
@@ -239,6 +291,22 @@ function BrowseTab({ installedIds }: { installedIds: Set<string> }): JSX.Element
   useEffect(() => {
     void browseRegistry()
   }, [browseRegistry])
+
+  // v2.0 polish — surface registry-load failures via the toast layer too,
+  // not just the inline rose panel. pushToast mirrors into the LiveRegion
+  // so SR users hear "Couldn't load plugin registry — <reason>" instead
+  // of silently staring at a visual error they can't read. We snapshot
+  // the previous error so the toast only fires on the transition (null →
+  // non-null), not every render that still shows the error state.
+  const lastReportedError = useRef<string | null>(null)
+  useEffect(() => {
+    if (registryError && registryError !== lastReportedError.current) {
+      lastReportedError.current = registryError
+      pushToast('error', `Plugin registry: ${registryError}`)
+    } else if (!registryError) {
+      lastReportedError.current = null
+    }
+  }, [registryError, pushToast])
 
   const filtered = useMemo(() => {
     if (!registry) return null
@@ -291,6 +359,7 @@ function BrowseTab({ installedIds }: { installedIds: Set<string> }): JSX.Element
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
             placeholder="Search the marketplace…"
+            aria-label="Search the plugin marketplace"
             className="w-full rounded-md border border-white/10 bg-black/30 py-1 pl-7 pr-2 text-[11px] text-slate-100 outline-none placeholder:text-slate-600 focus:border-[var(--accent-ring)]"
           />
         </div>
@@ -318,11 +387,7 @@ function BrowseTab({ installedIds }: { installedIds: Set<string> }): JSX.Element
       ) : (
         <div className="space-y-1.5">
           {(filtered ?? []).map((entry) => (
-            <RegistryCard
-              key={entry.id}
-              entry={entry}
-              installed={installedIds.has(entry.id)}
-            />
+            <RegistryCard key={entry.id} entry={entry} installed={installedIds.has(entry.id)} />
           ))}
         </div>
       )}
@@ -346,8 +411,42 @@ function RegistryCard({
   const pushToast = useUiStore((s) => s.pushToast)
   const [busy, setBusy] = useState(false)
 
+  // v2.0 — community PR submission marker. Curated entries (studio-published)
+  // get a "Verified" badge; community entries get an open-source badge plus
+  // the submitter handle. Validators force missing/invalid source to
+  // 'curated' so a pre-2.0 entry never accidentally badges as community.
+  const isCommunity = entry.source === 'community'
+  const hookCount = entry.hooks ? Object.keys(entry.hooks).length : 0
+  // v2.0 polish — mirror the MarketplaceCard memoisation pattern. Without
+  // this, every parent re-render (filter change, install completes,
+  // installedIds set rebuilds) ran a fresh `new URL(entry.repoUrl)` and
+  // re-formatted the date. Both inputs are immutable for the card's
+  // lifetime, so memoising on the entry id is sufficient.
+  const submittedAtLabel = useMemo(
+    () => (entry.submittedAt ? new Date(entry.submittedAt).toLocaleDateString() : null),
+    [entry.submittedAt]
+  )
+  const safeRepoUrl = useMemo(
+    () => (entry.repoUrl && isSafeExternalUrl(entry.repoUrl) ? entry.repoUrl : null),
+    [entry.repoUrl]
+  )
+  // Extra-warn when a community-submitted entry runs JavaScript. The
+  // master hooks switch is still required to actually fire them, but the
+  // user deserves to see this BEFORE they click Install — a stranger's
+  // code running in-process is a meaningfully different consent than a
+  // declarative `open-url` action.
+  const showCommunityCodeWarning = isCommunity && hookCount > 0
+
   const handleInstall = async (): Promise<void> => {
     if (busy || installed) return
+    if (showCommunityCodeWarning) {
+      const confirmed = window.confirm(
+        `"${entry.name}" was submitted by ${entry.submittedBy ?? 'a community contributor'} ` +
+          `and declares ${hookCount} JavaScript hook${hookCount === 1 ? '' : 's'} that ` +
+          `run in-process when enabled.\n\nReview the source before installing.\n\nInstall anyway?`
+      )
+      if (!confirmed) return
+    }
     setBusy(true)
     try {
       await install(entry)
@@ -364,16 +463,72 @@ function RegistryCard({
       <div className="flex items-start gap-2">
         <Puzzle size={13} className="mt-0.5 shrink-0 text-[var(--accent)]" />
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-1.5">
+          <div className="flex flex-wrap items-center gap-1.5">
             <p className="text-[11px] font-semibold text-white">{entry.name}</p>
             <span className="text-[9px] text-slate-500">v{entry.version}</span>
+            {/* Trust badge — small, always visible. Curated wears the
+                emerald shield; community wears the slate "users" mark. */}
+            {isCommunity ? (
+              <span
+                className="flex items-center gap-0.5 rounded-full bg-slate-500/15 px-1.5 text-[9px] font-medium text-slate-300"
+                title="Community-submitted via public PR. Review before install."
+              >
+                <Users size={9} />
+                Community
+              </span>
+            ) : (
+              <span
+                className="flex items-center gap-0.5 rounded-full bg-emerald-500/15 px-1.5 text-[9px] font-medium text-emerald-300"
+                title="Studio-curated entry."
+              >
+                <ShieldCheck size={9} />
+                Verified
+              </span>
+            )}
+            {hookCount > 0 && (
+              <span
+                className="flex items-center gap-0.5 rounded-full bg-amber-500/15 px-1.5 text-[9px] font-medium text-amber-200"
+                title={`Runs ${hookCount} JavaScript hook${hookCount === 1 ? '' : 's'} when enabled (master switch in Plugins → Hooks).`}
+              >
+                <AlertTriangle size={9} />
+                Runs JS
+              </span>
+            )}
           </div>
-          <p className="text-[10px] leading-snug text-slate-400">{entry.description}</p>
+          <p className="mt-0.5 text-[10px] leading-snug text-slate-400">{entry.description}</p>
           <p className="mt-0.5 text-[9px] text-slate-500">
-            {entry.author ?? 'Unknown'} · {entry.quickActions.length} action
-            {entry.quickActions.length === 1 ? '' : 's'}
+            {entry.author ?? 'Unknown'}
+            {entry.submittedBy && entry.submittedBy !== entry.author && (
+              <span> · submitted by {entry.submittedBy}</span>
+            )}
+            {submittedAtLabel && <span> · added {submittedAtLabel}</span>}
+            <span>
+              {' '}
+              · {entry.quickActions.length} action
+              {entry.quickActions.length === 1 ? '' : 's'}
+            </span>
             {entry.tags && entry.tags.length > 0 && (
               <span> · {entry.tags.slice(0, 3).join(', ')}</span>
+            )}
+            {safeRepoUrl && (
+              <>
+                {' · '}
+                {/* window.open routes through the main BrowserWindow's
+                    setWindowOpenHandler → shell.openExternal, so this lands
+                    in the user's real browser, not inside the widget.
+                    isSafeExternalUrl guards against javascript: / data: /
+                    file: URLs a community submission could try to sneak
+                    in — the validator already enforces http(s) at PR
+                    time, but defence-in-depth at the call site too. */}
+                <button
+                  type="button"
+                  onClick={() => window.open(safeRepoUrl, '_blank', 'noopener,noreferrer')}
+                  className="inline-flex items-center gap-0.5 text-slate-400 underline-offset-2 transition hover:text-[var(--accent)] hover:underline"
+                >
+                  source
+                  <ExternalLink size={8} />
+                </button>
+              </>
             )}
           </p>
         </div>

@@ -2,7 +2,7 @@
  * Floating overlays rendered above the panel: transient toast notifications
  * and the modal permission-approval dialog.
  */
-import { Suspense, lazy, useEffect, useRef } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useRef } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
   Check,
@@ -19,6 +19,8 @@ import { useUiStore, type ToastKind } from '../../store/useUiStore'
 import { undoAction } from '../../lib/actions'
 import { PERMISSIONS } from '@shared/permissions'
 import { cn } from '../../lib/utils'
+import { useDialog } from '../../lib/useDialog'
+import { LiveRegion } from '../common/LiveRegion'
 
 // Lazy-loaded — the review dialog mounts at most once per beta tester's
 // lifetime, so there's no reason to weigh down the initial bundle with it.
@@ -67,15 +69,17 @@ function ToastHost(): JSX.Element {
                   void undoAction(toast.undoId as string)
                   dismiss(toast.id)
                 }}
+                aria-label="Undo last action"
                 className="flex items-center gap-1 rounded-md bg-white/15 px-1.5 py-0.5 font-semibold transition hover:bg-white/25"
               >
-                <Undo2 size={11} />
+                <Undo2 size={11} aria-hidden="true" />
                 Undo
               </button>
             )}
             <button
               type="button"
               onClick={() => dismiss(toast.id)}
+              aria-label="Dismiss notification"
               className="rounded p-0.5 opacity-60 transition hover:opacity-100"
             >
               <X size={12} />
@@ -92,23 +96,23 @@ function PermissionDialog(): JSX.Element {
   const queueLength = useUiStore((s) => s.permissionQueue.length)
   const resolve = useUiStore((s) => s.resolvePermission)
   const definition = prompt ? PERMISSIONS.find((p) => p.id === prompt.permission) : null
-  const denyRef = useRef<HTMLButtonElement>(null)
+  const dialogRef = useRef<HTMLDivElement>(null)
 
-  // v1.12.3 — Escape key denies. Default-safe: a panicked user mashing Esc
-  // gets the safer outcome (no new permission granted) rather than nothing
-  // happening. Also focus Deny on open so the same is true for Enter key.
-  useEffect(() => {
-    if (!prompt) return
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') {
-        e.preventDefault()
-        resolve(false)
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    denyRef.current?.focus()
-    return () => window.removeEventListener('keydown', onKey)
-  }, [prompt, resolve])
+  // v1.12.3 / v2.0 — Esc denies (safer default for a panicked-user mash)
+  // and useDialog wires Tab focus trap + focus restoration on close on
+  // top of that. Without the trap, Tab from Deny could escape the dialog
+  // and land on chat-surface controls behind the modal — confusing on a
+  // security prompt. The Deny button is the first focusable inside the
+  // dialog, so useDialog's auto-focus lands there (same outcome as the
+  // previous denyRef.focus() call).
+  //
+  // `open: !!prompt` gates the effect on the actual visibility state.
+  // PermissionDialog itself stays mounted in Overlays, but the inner
+  // motion.div is conditionally rendered; without the gate, useDialog's
+  // effect would fire once on Overlays' mount (ref still null) and again
+  // on every queueLength change (stealing focus back to Deny mid-Tab).
+  const handleClose = useCallback(() => resolve(false), [resolve])
+  useDialog(dialogRef, handleClose, { open: Boolean(prompt) })
 
   return (
     <AnimatePresence>
@@ -120,6 +124,7 @@ function PermissionDialog(): JSX.Element {
           exit={{ opacity: 0 }}
         >
           <motion.div
+            ref={dialogRef}
             role="dialog"
             aria-modal="true"
             aria-label="Permission required"
@@ -154,7 +159,6 @@ function PermissionDialog(): JSX.Element {
             </p>
             <div className="mt-3 flex gap-2">
               <button
-                ref={denyRef}
                 type="button"
                 onClick={() => resolve(false)}
                 className="flex-1 rounded-lg border border-white/10 py-2 text-[12px] font-medium text-slate-300 transition hover:bg-white/5 focus:outline-none focus:ring-2 focus:ring-white/20"
@@ -193,20 +197,14 @@ function ShellApprovalDialog(): JSX.Element {
   const prompt = useUiStore((s) => s.shellApproval)
   const queueLength = useUiStore((s) => s.shellApprovalQueue.length)
   const resolve = useUiStore((s) => s.resolveShellApproval)
-  const cancelRef = useRef<HTMLButtonElement>(null)
+  const dialogRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => {
-    if (!prompt) return
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') {
-        e.preventDefault()
-        resolve(false)
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    cancelRef.current?.focus()
-    return () => window.removeEventListener('keydown', onKey)
-  }, [prompt, resolve])
+  // v2.0 — same useDialog wiring as PermissionDialog. Cancel sits first
+  // in DOM order so the auto-focus lands on the safer action; Esc routes
+  // through resolve(false) for the panicked-user-mash case. `open` gate
+  // matches the inner motion.div's render condition.
+  const handleClose = useCallback(() => resolve(false), [resolve])
+  useDialog(dialogRef, handleClose, { open: Boolean(prompt) })
 
   return (
     <AnimatePresence>
@@ -218,6 +216,7 @@ function ShellApprovalDialog(): JSX.Element {
           exit={{ opacity: 0 }}
         >
           <motion.div
+            ref={dialogRef}
             role="dialog"
             aria-modal="true"
             aria-label="Shell command approval"
@@ -231,9 +230,8 @@ function ShellApprovalDialog(): JSX.Element {
             </div>
             <h3 className="text-sm font-semibold text-white">Run shell command?</h3>
             <p className="mt-1.5 text-[12px] text-slate-300">
-              The agent wants to run this command. Review carefully — shell
-              commands can modify or delete files, install software, or change
-              system settings.
+              The agent wants to run this command. Review carefully — shell commands can modify or
+              delete files, install software, or change system settings.
             </p>
             <pre className="mt-2 max-h-32 overflow-auto rounded-lg bg-black/50 px-2.5 py-2 font-mono text-[11px] text-amber-200">
               {prompt.command}
@@ -256,7 +254,6 @@ function ShellApprovalDialog(): JSX.Element {
             </p>
             <div className="mt-3 flex gap-2">
               <button
-                ref={cancelRef}
                 type="button"
                 onClick={() => resolve(false)}
                 className="flex-1 rounded-lg border border-white/10 py-2 text-[12px] font-medium text-slate-300 transition hover:bg-white/5 focus:outline-none focus:ring-2 focus:ring-white/20"
@@ -296,25 +293,16 @@ function WriteApprovalDialog(): JSX.Element {
   const prompt = useUiStore((s) => s.writeApproval)
   const queueLength = useUiStore((s) => s.writeApprovalQueue.length)
   const resolve = useUiStore((s) => s.resolveWriteApproval)
-  const cancelRef = useRef<HTMLButtonElement>(null)
+  const dialogRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => {
-    if (!prompt) return
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') {
-        e.preventDefault()
-        resolve(false)
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    cancelRef.current?.focus()
-    return () => window.removeEventListener('keydown', onKey)
-  }, [prompt, resolve])
+  // v2.0 — same useDialog wiring; Cancel sits first so auto-focus lands
+  // on the safer action. `open` gate matches the inner motion.div's
+  // render condition (here the function early-returns when !prompt).
+  const handleClose = useCallback(() => resolve(false), [resolve])
+  useDialog(dialogRef, handleClose, { open: Boolean(prompt) })
 
   if (!prompt) {
-    return (
-      <AnimatePresence>{/* nothing */}</AnimatePresence>
-    )
+    return <AnimatePresence>{/* nothing */}</AnimatePresence>
   }
 
   const isNewFile = prompt.previousContent === null
@@ -325,12 +313,8 @@ function WriteApprovalDialog(): JSX.Element {
   // Stats — counting +/- lines lets the user judge change size at a
   // glance. Skip the file-header lines ("+++", "---") which would
   // double-count as additions/removals otherwise.
-  const additions = diffLines.filter(
-    (l) => l.startsWith('+') && !l.startsWith('+++')
-  ).length
-  const removals = diffLines.filter(
-    (l) => l.startsWith('-') && !l.startsWith('---')
-  ).length
+  const additions = diffLines.filter((l) => l.startsWith('+') && !l.startsWith('+++')).length
+  const removals = diffLines.filter((l) => l.startsWith('-') && !l.startsWith('---')).length
 
   return (
     <AnimatePresence>
@@ -341,6 +325,7 @@ function WriteApprovalDialog(): JSX.Element {
         exit={{ opacity: 0 }}
       >
         <motion.div
+          ref={dialogRef}
           role="dialog"
           aria-modal="true"
           aria-label="File write approval"
@@ -364,7 +349,10 @@ function WriteApprovalDialog(): JSX.Element {
               <h3 className="text-sm font-semibold text-white">
                 {isNewFile ? 'Create new file?' : 'Apply changes to file?'}
               </h3>
-              <p className="mt-0.5 truncate font-mono text-[11px] text-slate-400" title={prompt.path}>
+              <p
+                className="mt-0.5 truncate font-mono text-[11px] text-slate-400"
+                title={prompt.path}
+              >
                 {prompt.path}
               </p>
               <p className="mt-1 text-[10px] text-slate-500">
@@ -382,8 +370,8 @@ function WriteApprovalDialog(): JSX.Element {
             </div>
           </div>
           {/* Diff body — pre-formatted, scrollable, monospace. Each line
-            * styled by leading marker so a quick scan reads as a normal
-            * unified diff. Max-h-[55vh] keeps the dialog itself bounded. */}
+           * styled by leading marker so a quick scan reads as a normal
+           * unified diff. Max-h-[55vh] keeps the dialog itself bounded. */}
           <pre className="scrollbar-void flex-1 overflow-auto rounded-lg bg-black/50 px-2 py-2 font-mono text-[11px] leading-snug">
             {diffLines.map((line, i) => {
               const marker = line[0]
@@ -406,7 +394,6 @@ function WriteApprovalDialog(): JSX.Element {
           </pre>
           <div className="mt-3 flex gap-2">
             <button
-              ref={cancelRef}
               type="button"
               onClick={() => resolve(false)}
               className="flex-1 rounded-lg border border-white/10 py-2 text-[12px] font-medium text-slate-300 transition hover:bg-white/5 focus:outline-none focus:ring-2 focus:ring-white/20"
@@ -464,6 +451,12 @@ export function Overlays(): JSX.Element {
           <ReviewDialog />
         </Suspense>
       )}
+      {/* v2.0 — global screen-reader announcer. Subscribes to the two
+       * announcement slots on useUiStore (polite + assertive) so toasts,
+       * stream completions, and modal opens reach AT users the same
+       * way they reach sighted users. Lives here so every Overlays
+       * mount (panel + Settings) gets one without duplicate plumbing. */}
+      <LiveRegion />
     </>
   )
 }

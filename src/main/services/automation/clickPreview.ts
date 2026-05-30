@@ -117,9 +117,12 @@ export function requestPreview(req: PreviewRequest): Promise<PreviewDecision> {
   // arrives, we still resolve and close the window. Generous vs the 3s
   // default countdown to allow user-extended cancellation flows we may
   // add later (e.g. "+2s" button) without flooring the safety net.
-  const timer = setTimeout(() => {
-    settle(token, 'cancel')
-  }, (req.seconds + 4) * 1000)
+  const timer = setTimeout(
+    () => {
+      settle(token, 'cancel')
+    },
+    (req.seconds + 4) * 1000
+  )
 
   const devUrl = process.env['ELECTRON_RENDERER_URL']
   const query = {

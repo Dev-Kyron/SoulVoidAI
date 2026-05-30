@@ -24,7 +24,10 @@ export const INVOKE_TIMEOUT_MS = 120_000
  * Node 18.17+ / Electron 28+ ship AbortSignal.any + AbortSignal.timeout
  * natively; we're on Node 22 in CI and Electron 33 at runtime.
  */
-export function invokeAbortSignal(userSignal: AbortSignal | undefined, ms = INVOKE_TIMEOUT_MS): AbortSignal {
+export function invokeAbortSignal(
+  userSignal: AbortSignal | undefined,
+  ms = INVOKE_TIMEOUT_MS
+): AbortSignal {
   const timeout = AbortSignal.timeout(ms)
   return userSignal ? AbortSignal.any([userSignal, timeout]) : timeout
 }
@@ -36,7 +39,11 @@ export function invokeAbortSignal(userSignal: AbortSignal | undefined, ms = INVO
  * to a user staring at a stuck agent run; this gives them an actionable
  * line. Pass-through for any other error.
  */
-export function rethrowAsTimeout(err: unknown, providerLabel: string, ms = INVOKE_TIMEOUT_MS): never {
+export function rethrowAsTimeout(
+  err: unknown,
+  providerLabel: string,
+  ms = INVOKE_TIMEOUT_MS
+): never {
   // DOMException with name='TimeoutError' is the standard signal from
   // AbortSignal.timeout. A user-driven Stop produces name='AbortError'
   // instead, which we let bubble up unchanged.
@@ -49,9 +56,7 @@ export function rethrowAsTimeout(err: unknown, providerLabel: string, ms = INVOK
 }
 
 /** Yields the response body one text line at a time (CRLF tolerant). */
-export async function* readLines(
-  body: ReadableStream<Uint8Array>
-): AsyncGenerator<string> {
+export async function* readLines(body: ReadableStream<Uint8Array>): AsyncGenerator<string> {
   const decoder = new TextDecoder()
   let buffer = ''
   for await (const chunk of body as unknown as AsyncIterable<Uint8Array>) {
@@ -67,9 +72,7 @@ export async function* readLines(
 }
 
 /** Yields the payload of every `data:` line in a Server-Sent-Events stream. */
-export async function* readSSE(
-  body: ReadableStream<Uint8Array>
-): AsyncGenerator<string> {
+export async function* readSSE(body: ReadableStream<Uint8Array>): AsyncGenerator<string> {
   for await (const line of readLines(body)) {
     const trimmed = line.trimStart()
     if (trimmed.startsWith('data:')) {
@@ -105,10 +108,7 @@ export async function readJsonOrError<T>(res: Response, label: string): Promise<
   // Heuristic: if the body opens with `<` it's HTML/XML and json parse will
   // fail with a cryptic message. Surface the real cause instead.
   const trimmed = text.trimStart()
-  if (
-    !contentType.includes('json') &&
-    (trimmed.startsWith('<') || /<html/i.test(trimmed))
-  ) {
+  if (!contentType.includes('json') && (trimmed.startsWith('<') || /<html/i.test(trimmed))) {
     throw new ProviderError(
       `${label} returned HTML instead of JSON — likely a captive portal, CDN error page, or wrong endpoint URL (${res.status}).`
     )

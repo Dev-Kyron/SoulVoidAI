@@ -48,9 +48,7 @@ function taskSnippet(checkpoint: { turns?: { role: string; content: string }[] }
     (t) => t.role === 'user' && t.content && t.content.length > 4
   )
   if (!firstUser) return 'Untitled task'
-  const oneLine = firstUser.content
-    .replace(/\s+/g, ' ')
-    .trim()
+  const oneLine = firstUser.content.replace(/\s+/g, ' ').trim()
   return oneLine.length > 70 ? `${oneLine.slice(0, 67)}…` : oneLine
 }
 
@@ -67,10 +65,7 @@ function CheckpointPill({ checkpoint }: { checkpoint: AgentCheckpoint }): JSX.El
       await resumeFromCheckpoint(checkpoint)
       removeStale(checkpoint.requestId)
     } catch (err) {
-      pushToast(
-        'error',
-        `Couldn't resume: ${err instanceof Error ? err.message : 'unknown error'}`
-      )
+      pushToast('error', `Couldn't resume: ${err instanceof Error ? err.message : 'unknown error'}`)
       setBusy(false)
     }
   }
@@ -91,9 +86,7 @@ function CheckpointPill({ checkpoint }: { checkpoint: AgentCheckpoint }): JSX.El
     <div className="flex items-start gap-2 rounded-md border border-emerald-400/30 bg-emerald-500/5 px-2.5 py-1.5">
       <RefreshCcw size={12} className="mt-0.5 flex-none text-emerald-400" />
       <div className="min-w-0 flex-1">
-        <p className="truncate text-[11px] font-medium text-slate-200">
-          {taskSnippet(checkpoint)}
-        </p>
+        <p className="truncate text-[11px] font-medium text-slate-200">{taskSnippet(checkpoint)}</p>
         <p className="truncate text-[10px] text-slate-500">
           step {checkpoint.step} · {checkpoint.modelId} · {formatAge(checkpoint.updatedAt)}
         </p>
@@ -151,7 +144,9 @@ export function ResumeAgentBanner(): JSX.Element | null {
       <div className="flex items-center gap-1.5">
         <RefreshCcw size={11} className="text-emerald-400" />
         <p className="text-[11px] font-semibold uppercase tracking-widest text-emerald-300">
-          {staleCheckpoints.length === 1 ? '1 task to resume' : `${staleCheckpoints.length} tasks to resume`}
+          {staleCheckpoints.length === 1
+            ? '1 task to resume'
+            : `${staleCheckpoints.length} tasks to resume`}
         </p>
       </div>
       <div className="space-y-1">
@@ -160,9 +155,9 @@ export function ResumeAgentBanner(): JSX.Element | null {
         ))}
       </div>
       <p className="text-[10px] leading-relaxed text-slate-500">
-        These agent runs were still in flight when the app last quit. Resume
-        picks up from the last persisted step; the conversation already has the
-        tool-call breadcrumbs so the model knows where it left off.
+        These agent runs were still in flight when the app last quit. Resume picks up from the last
+        persisted step; the conversation already has the tool-call breadcrumbs so the model knows
+        where it left off.
       </p>
     </div>
   )

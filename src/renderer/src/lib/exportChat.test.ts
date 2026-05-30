@@ -13,10 +13,19 @@ function thread(): ExportableThread {
   return {
     title: 'UE5 input <handling>',
     createdAt: '2026-01-15T09:00:00.000Z',
-    summary: { text: 'Discussed PlayerController input mapping.', coversUpToId: 'm1', generatedAt: '2026-01-15T09:30:00.000Z' },
+    summary: {
+      text: 'Discussed PlayerController input mapping.',
+      coversUpToId: 'm1',
+      generatedAt: '2026-01-15T09:30:00.000Z'
+    },
     messages: [
       { id: 'welcome', role: 'assistant', content: 'hi', createdAt: '2026-01-15T08:59:00.000Z' },
-      { id: 'm1', role: 'user', content: 'How do I handle player input?', createdAt: '2026-01-15T09:00:01.000Z' },
+      {
+        id: 'm1',
+        role: 'user',
+        content: 'How do I handle player input?',
+        createdAt: '2026-01-15T09:00:01.000Z'
+      },
       {
         id: 'm2',
         role: 'assistant',

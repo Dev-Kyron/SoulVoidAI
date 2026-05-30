@@ -9,12 +9,7 @@ import { McpConnection } from './connection'
 import { getServers, setServers } from './store'
 import { log } from '../logger'
 import { TOOL_SPECS } from '@shared/agent-tools'
-import type {
-  McpServerConfig,
-  McpServerInput,
-  McpServerStatus,
-  McpToolInfo
-} from '@shared/types'
+import type { McpServerConfig, McpServerInput, McpServerStatus, McpToolInfo } from '@shared/types'
 import type { ProviderTool } from '../ai/types'
 
 const connections = new Map<string, McpConnection>()
@@ -84,13 +79,13 @@ async function bringUp(config: McpServerConfig): Promise<McpConnection> {
       return null
     })
     .then(async () => {
-    const existing = connections.get(config.id)
-    if (existing) await existing.disconnect()
-    const conn = new McpConnection(config)
-    connections.set(config.id, conn)
-    if (config.enabled) await conn.connect()
-    return conn
-  })
+      const existing = connections.get(config.id)
+      if (existing) await existing.disconnect()
+      const conn = new McpConnection(config)
+      connections.set(config.id, conn)
+      if (config.enabled) await conn.connect()
+      return conn
+    })
   bringUpInFlight.set(config.id, work)
   try {
     return await work

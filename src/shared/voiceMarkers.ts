@@ -111,8 +111,7 @@ export interface ParseResult {
  * Tone value capture stops at whitespace, `>`, or matching quote so
  * unquoted attributes don't swallow the closing `>`.
  */
-const OPEN_TAG_RE =
-  /<voice(?![a-zA-Z])(?:\s+tone\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>'"]+)))?\s*>/i
+const OPEN_TAG_RE = /<voice(?![a-zA-Z])(?:\s+tone\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>'"]+)))?\s*>/i
 
 /**
  * Same shape but global + non-greedy content match for the one-shot parser.
@@ -161,9 +160,7 @@ export function parseVoiceSegments(text: string): ParseResult {
  * doesn't leave a yawning gap.
  */
 export function stripVoiceTagsOnly(text: string): string {
-  return text
-    .replace(/<\/?voice(?:\s[^>]*)?>/gi, '')
-    .replace(/\n{3,}/g, '\n\n')
+  return text.replace(/<\/?voice(?:\s[^>]*)?>/gi, '').replace(/\n{3,}/g, '\n\n')
 }
 
 /**
@@ -279,9 +276,7 @@ export class StreamingVoiceExtractor {
    * "chunk split mid-`<voice tone="`" case by returning null until the
    * closing `>` arrives.
    */
-  private findOpenTag(
-    from: number
-  ): { tone: ToneTag; contentStart: number } | null {
+  private findOpenTag(from: number): { tone: ToneTag; contentStart: number } | null {
     // Slice to the from-offset so the regex's lastIndex semantics don't
     // bite us. Cheap — the buffer is bounded by the reply size.
     const slice = this.buffer.slice(from)

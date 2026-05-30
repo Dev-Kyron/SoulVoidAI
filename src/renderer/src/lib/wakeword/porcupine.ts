@@ -16,9 +16,9 @@ import type { WakeDetectCallback, WakeEngine } from './types'
 import type { VoicePersona } from '@shared/types'
 
 interface PorcupineModules {
-  PorcupineWorker: typeof import('@picovoice/porcupine-web')['PorcupineWorker']
-  BuiltInKeyword: typeof import('@picovoice/porcupine-web')['BuiltInKeyword']
-  WebVoiceProcessor: typeof import('@picovoice/web-voice-processor')['WebVoiceProcessor']
+  PorcupineWorker: (typeof import('@picovoice/porcupine-web'))['PorcupineWorker']
+  BuiltInKeyword: (typeof import('@picovoice/porcupine-web'))['BuiltInKeyword']
+  WebVoiceProcessor: (typeof import('@picovoice/web-voice-processor'))['WebVoiceProcessor']
 }
 
 let modulesPromise: Promise<PorcupineModules> | null = null

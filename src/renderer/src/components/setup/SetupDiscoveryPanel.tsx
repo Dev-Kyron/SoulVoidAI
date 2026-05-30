@@ -191,8 +191,7 @@ export function SetupDiscoveryPanel(): JSX.Element {
       report.envKeys.length
     : 0
 
-  const totalSelected =
-    selection.claude.size + selection.cursor.size + selection.envKeys.size
+  const totalSelected = selection.claude.size + selection.cursor.size + selection.envKeys.size
 
   const handleImportAll = async (): Promise<void> => {
     setPhase('importing')
@@ -295,8 +294,10 @@ export function SetupDiscoveryPanel(): JSX.Element {
               {phase === 'importing' && (
                 <div className="flex flex-col items-center justify-center gap-3 py-10">
                   <Loader2 size={20} className="animate-spin text-[var(--accent)]" />
-                  <p className="text-[12px] text-slate-300">Importing {totalSelected} item
-                    {totalSelected === 1 ? '' : 's'}…</p>
+                  <p className="text-[12px] text-slate-300">
+                    Importing {totalSelected} item
+                    {totalSelected === 1 ? '' : 's'}…
+                  </p>
                 </div>
               )}
 
@@ -604,17 +605,17 @@ function DoneBody({ summary }: { summary: ImportSummary }): JSX.Element {
         </div>
         <ul className="space-y-0.5 pl-1 text-[11px] text-slate-300">
           {summary.mcpImported > 0 && (
-            <li>· {summary.mcpImported} MCP server{summary.mcpImported === 1 ? '' : 's'} imported</li>
+            <li>
+              · {summary.mcpImported} MCP server{summary.mcpImported === 1 ? '' : 's'} imported
+            </li>
           )}
           {summary.mcpSkipped > 0 && (
-            <li className="text-slate-500">
-              · {summary.mcpSkipped} already installed
-            </li>
+            <li className="text-slate-500">· {summary.mcpSkipped} already installed</li>
           )}
           {summary.keysImported > 0 && (
             <li>
-              · {summary.keysImported} API key{summary.keysImported === 1 ? '' : 's'} imported into the
-              OS keychain
+              · {summary.keysImported} API key{summary.keysImported === 1 ? '' : 's'} imported into
+              the OS keychain
             </li>
           )}
           {summary.mcpImported === 0 && summary.keysImported === 0 && (

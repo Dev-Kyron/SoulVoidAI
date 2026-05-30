@@ -14,7 +14,21 @@ import { dataPath, JsonStore } from '../storage/store'
 import { log } from '../logger'
 import { ACTION_DESCRIPTORS } from '../automation/actions'
 import { PERMISSION_IDS } from '@shared/permissions'
-import type { PluginInfo, PluginManifest, QuickAction } from '@shared/types'
+import { compileHookBody, registerPluginHooks, type HookContext } from './pluginHooks'
+import type {
+  PluginHookName,
+  PluginInfo,
+  PluginManifest,
+  PluginRegistryEntry,
+  QuickAction
+} from '@shared/types'
+
+const HOOK_NAMES: readonly PluginHookName[] = [
+  'onUserMessage',
+  'onAssistantReply',
+  'onProactiveSpeak',
+  'onToolCalled'
+]
 
 const VALID_ACTIONS = new Set(ACTION_DESCRIPTORS.map((d) => d.type))
 const VALID_PERMISSIONS = new Set<string>(PERMISSION_IDS)
@@ -48,6 +62,10 @@ const EXAMPLE_PLUGIN: PluginManifest = {
 interface LoadedPlugin {
   info: PluginInfo
   actions: QuickAction[]
+  /** v2.0 — compiled JS handlers, keyed by hook name. Compilation
+   *  failures are surfaced as plugin load errors so the user can see
+   *  WHICH hook on WHICH plugin failed to parse. */
+  hooks: Partial<Record<PluginHookName, (payload: unknown, ctx: HookContext) => unknown>>
 }
 
 let registry: LoadedPlugin[] = []
@@ -102,6 +120,19 @@ function validate(raw: unknown): { manifest?: PluginManifest; error?: string } {
     })
   }
 
+  // v2.0 — hooks. Each value is a JS function body string. We don't
+  // compile here (compilation happens in the loader so error messages
+  // can carry the file path), just validate shape + recognised hook
+  // names. Unknown hook names are dropped silently; that lets future
+  // versions add new hooks without breaking older plugins.
+  const rawHooks =
+    m.hooks && typeof m.hooks === 'object' ? (m.hooks as Record<string, unknown>) : {}
+  const hooks: Partial<Record<PluginHookName, string>> = {}
+  for (const name of HOOK_NAMES) {
+    const body = rawHooks[name]
+    if (isString(body)) hooks[name] = body
+  }
+
   return {
     manifest: {
       id: m.id,
@@ -109,7 +140,8 @@ function validate(raw: unknown): { manifest?: PluginManifest; error?: string } {
       version: isString(m.version) ? m.version : '1.0.0',
       description: isString(m.description) ? m.description : '',
       author: isString(m.author) ? m.author : undefined,
-      quickActions
+      quickActions,
+      ...(Object.keys(hooks).length > 0 ? { hooks } : {})
     }
   }
 }
@@ -124,10 +156,12 @@ function errorEntry(file: string, error: string): LoadedPlugin {
       author: 'Unknown',
       enabled: false,
       actionCount: 0,
+      hookCount: 0,
       file,
       error
     },
-    actions: []
+    actions: [],
+    hooks: {}
   }
 }
 
@@ -138,11 +172,7 @@ export function loadPlugins(): void {
 
   // Seed an example plugin the first time the directory is empty.
   if (files.length === 0) {
-    writeFileSync(
-      join(dir, 'example-pack.json'),
-      JSON.stringify(EXAMPLE_PLUGIN, null, 2),
-      'utf-8'
-    )
+    writeFileSync(join(dir, 'example-pack.json'), JSON.stringify(EXAMPLE_PLUGIN, null, 2), 'utf-8')
     files.push('example-pack.json')
   }
 
@@ -157,6 +187,25 @@ export function loadPlugins(): void {
         registry.push(errorEntry(file, error ?? 'Invalid manifest.'))
         continue
       }
+      // v2.0 — compile hook bodies. A bad function body fails LOAD of
+      // that plugin so the user sees "could not compile onUserMessage"
+      // instead of a silent runtime nothing. Other plugins with valid
+      // hooks still load.
+      const hooksCompiled: LoadedPlugin['hooks'] = {}
+      let compileError: string | null = null
+      for (const [name, body] of Object.entries(manifest.hooks ?? {})) {
+        if (!body) continue
+        const compiled = compileHookBody(body)
+        if (!compiled) {
+          compileError = `Could not compile hook "${name}".`
+          break
+        }
+        hooksCompiled[name as PluginHookName] = compiled
+      }
+      if (compileError) {
+        registry.push(errorEntry(file, compileError))
+        continue
+      }
       registry.push({
         info: {
           id: manifest.id,
@@ -166,9 +215,11 @@ export function loadPlugins(): void {
           author: manifest.author ?? 'Unknown',
           enabled: !disabled.has(manifest.id),
           actionCount: manifest.quickActions.length,
+          hookCount: Object.keys(hooksCompiled).length,
           file
         },
-        actions: manifest.quickActions
+        actions: manifest.quickActions,
+        hooks: hooksCompiled
       })
     } catch {
       registry.push(errorEntry(file, 'Could not parse JSON.'))
@@ -177,6 +228,20 @@ export function loadPlugins(): void {
 
   const ok = registry.filter((p) => !p.info.error).length
   log('info', 'system', `Loaded ${ok} plugin(s) from ${files.length} file(s).`)
+
+  // v2.0 — push the compiled hooks into the dispatcher's registry.
+  // Disabled plugins are filtered HERE (not in pluginHooks) so the
+  // enable/disable toggle re-registers without a full reload.
+  registerPluginHooks(
+    registry
+      .filter((p) => !p.info.error)
+      .map((p) => ({
+        id: p.info.id,
+        name: p.info.name,
+        enabled: p.info.enabled,
+        hooks: p.hooks
+      }))
+  )
 }
 
 export function getPlugins(): PluginInfo[] {
@@ -195,8 +260,19 @@ export function setPluginEnabled(id: string, enabled: boolean): PluginInfo[] {
   if (enabled) disabled.delete(id)
   else disabled.add(id)
   state().set({ disabled: [...disabled] })
-  registry = registry.map((p) =>
-    p.info.id === id ? { ...p, info: { ...p.info, enabled } } : p
+  registry = registry.map((p) => (p.info.id === id ? { ...p, info: { ...p.info, enabled } } : p))
+  // v2.0 — re-register the hooks list so the dispatcher honours the
+  // enable/disable toggle without a full plugin reload. Cheap: just
+  // walks the in-memory registry, no disk IO.
+  registerPluginHooks(
+    registry
+      .filter((p) => !p.info.error)
+      .map((p) => ({
+        id: p.info.id,
+        name: p.info.name,
+        enabled: p.info.enabled,
+        hooks: p.hooks
+      }))
   )
   return getPlugins()
 }
@@ -231,10 +307,13 @@ const REGISTRY_URL =
  * for hundreds of plugin entries. */
 const MAX_REGISTRY_BYTES = 200_000
 
-export interface RegistryEntry extends PluginManifest {
-  /** Optional tags for marketplace filtering. Not part of the manifest. */
-  tags?: string[]
-}
+/**
+ * Main-process alias for the shared marketplace entry shape. The TS
+ * definition lives in `@shared/types` (so the renderer + main agree on
+ * what a registry row looks like); we re-export under the local name
+ * `RegistryEntry` so existing consumers in this file stay unchanged.
+ */
+export type RegistryEntry = PluginRegistryEntry
 
 interface RegistryFile {
   version?: number
@@ -273,14 +352,24 @@ function parseRegistryText(text: string, source: 'remote' | 'bundled'): Registry
   const entries: RegistryEntry[] = []
   for (const raw of parsed.plugins ?? []) {
     const { manifest } = validate(raw)
-    if (manifest) {
-      entries.push({
-        ...manifest,
-        tags: Array.isArray((raw as RegistryEntry).tags)
-          ? (raw as RegistryEntry).tags
-          : undefined
-      })
-    }
+    if (!manifest) continue
+    const r = raw as RegistryEntry
+    // v2.0 — trust tier coercion. Anything we don't recognise lands as
+    // 'curated' so a typo or omitted field in the registry doesn't
+    // accidentally badge an entry as community (which is the stricter
+    // side — community + hooks shows extra warnings). Net: validator
+    // bias is toward "treat as trusted unless explicitly community".
+    const source: 'curated' | 'community' = r.source === 'community' ? 'community' : 'curated'
+    entries.push({
+      ...manifest,
+      tags: Array.isArray(r.tags) ? r.tags : undefined,
+      source,
+      // Provenance fields only meaningful for community submissions; we
+      // still pass them through if present on curated entries (cheap).
+      submittedBy: typeof r.submittedBy === 'string' ? r.submittedBy : undefined,
+      submittedAt: typeof r.submittedAt === 'string' ? r.submittedAt : undefined,
+      repoUrl: typeof r.repoUrl === 'string' ? r.repoUrl : undefined
+    })
   }
   log(
     'info',

@@ -48,9 +48,8 @@ async function importMcpFromSource(
   names: string[]
 ): Promise<SetupImportResult> {
   const report = runSetupDetection()
-  const detectedList = source === 'claude-desktop'
-    ? report.claudeDesktop.mcpServers
-    : report.cursor.mcpServers
+  const detectedList =
+    source === 'claude-desktop' ? report.claudeDesktop.mcpServers : report.cursor.mcpServers
   const detectedByName = new Map(detectedList.map((s) => [s.name, s]))
 
   const existingNames = new Set(listServers().map((s) => s.name))

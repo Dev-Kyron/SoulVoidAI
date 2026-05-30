@@ -261,6 +261,22 @@ const MIGRATIONS: Array<{ version: number; sql: string }> = [
         ADD COLUMN kind TEXT NOT NULL DEFAULT 'cron';
       CREATE INDEX IF NOT EXISTS scheduled_tasks_kind ON scheduled_tasks(kind);
     `
+  },
+  {
+    // v2.0 — async background research. Cron tasks gain an execution-mode
+    // dimension orthogonal to the existing kind discriminator:
+    //   'prompt'   — original behaviour: prompt → runCompletion → toast/notification
+    //   'research' — topic → runDeepResearch → new chat thread with the
+    //                synthesised brief + click-to-open OS notification
+    // The split lives on `mode` rather than yet-another `kind` value so the
+    // 'cron' scheduling semantics (daily/interval/once/jitter/DND) apply
+    // identically — only the execution branch differs. Defaulting to
+    // 'prompt' keeps every pre-v2 row behaving exactly as before.
+    version: 10,
+    sql: `
+      ALTER TABLE scheduled_tasks
+        ADD COLUMN mode TEXT NOT NULL DEFAULT 'prompt';
+    `
   }
 ]
 

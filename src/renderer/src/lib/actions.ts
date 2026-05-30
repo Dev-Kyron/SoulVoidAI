@@ -68,10 +68,7 @@ async function gateWriteFile(args: Record<string, unknown>): Promise<boolean> {
   })
 }
 
-export async function runAction(
-  req: ActionRequest,
-  label: string
-): Promise<ActionResult | null> {
+export async function runAction(req: ActionRequest, label: string): Promise<ActionResult | null> {
   const ui = useUiStore.getState()
   let result = await vs.automation.execute(req)
 
@@ -153,10 +150,15 @@ function toolResultText(result: ActionResult): string {
  * the action's abort controller registers against the same key the LLM call
  * does. When the user clicks Stop, `vs.ai.abort(requestId)` then kills the
  * tool's in-flight fetch / subprocess too, not just the LLM stream.
+ *
+ * `threadId` is the active chat thread. Forwarded to the action so stateful
+ * tools (v2.0+ persistent Python sandbox; future per-thread shell sessions)
+ * can pool their state per thread. Ephemeral tools ignore it.
  */
 export async function runAgentTool(
   call: ToolCall,
-  requestId?: string
+  requestId?: string,
+  threadId?: string
 ): Promise<ToolInvocation> {
   // MCP-provided tools are name-prefixed; they're routed to the MCP manager
   // in the main process, which calls the right server's tool.
@@ -214,7 +216,7 @@ export async function runAgentTool(
     }
   }
 
-  const request: ActionRequest = { type: actionType, params: call.args, requestId }
+  const request: ActionRequest = { type: actionType, params: call.args, requestId, threadId }
   let result = await vs.automation.execute(request)
 
   if (result.needsPermission) {
@@ -223,9 +225,7 @@ export async function runAgentTool(
     // ToolSpec doesn't carry a label field (kept minimal for provider
     // schema compactness), so we format from the name here at the call
     // site rather than threading a label through every spec.
-    const actionLabel = call.name
-      .replace(/_/g, ' ')
-      .replace(/\b\w/g, (c) => c.toUpperCase())
+    const actionLabel = call.name.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
     const granted = await useUiStore
       .getState()
       .promptPermission(result.needsPermission, actionLabel)

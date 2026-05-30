@@ -107,8 +107,8 @@ export function ReviewDialog(): JSX.Element {
             <div className="space-y-3 p-4">
               {!isReviewFormReady() ? (
                 <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-200">
-                  Review submissions aren&apos;t configured yet — please update VoidSoul and
-                  try again, or report feedback via the GitHub issues link in About.
+                  Review submissions aren&apos;t configured yet — please update VoidSoul and try
+                  again, or report feedback via the GitHub issues link in About.
                 </p>
               ) : (
                 <>
@@ -137,9 +137,7 @@ export function ReviewDialog(): JSX.Element {
                             size={26}
                             className={cn(
                               'transition-colors',
-                              n <= displayed
-                                ? 'fill-amber-400 text-amber-400'
-                                : 'text-slate-600'
+                              n <= displayed ? 'fill-amber-400 text-amber-400' : 'text-slate-600'
                             )}
                           />
                         </button>
@@ -185,8 +183,8 @@ export function ReviewDialog(): JSX.Element {
                   </div>
 
                   <p className="text-[10px] leading-relaxed text-slate-500">
-                    Reviews are sent privately to the studio. The best ones get hand-picked
-                    onto the public Reactions wall on voidsoul.app.
+                    Reviews are sent privately to the studio. The best ones get hand-picked onto the
+                    public Reactions wall on voidsoul.app.
                   </p>
                 </>
               )}

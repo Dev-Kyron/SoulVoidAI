@@ -25,11 +25,7 @@ import { fetchSmitheryRegistry } from './smithery'
 import { fetchGlamaRegistry } from './glama'
 import { fetchPulseMcpRegistry } from './pulsemcp'
 import { verifyRegistrySignature } from './registry-signing'
-import type {
-  McpInstallValues,
-  McpMarketplaceInstallResult,
-  McpRegistryEntry
-} from '@shared/types'
+import type { McpInstallValues, McpMarketplaceInstallResult, McpRegistryEntry } from '@shared/types'
 
 const REGISTRY_URL =
   'https://raw.githubusercontent.com/Dev-Kyron/SoulVoidAI/main/mcp-registry/registry.json'
@@ -73,11 +69,22 @@ function validateEntry(raw: unknown): McpRegistryEntry | null {
   // argPrompts / envPrompts default to empty arrays — the entry's still
   // installable as a one-click without prompts.
   const argPrompts = Array.isArray(r.argPrompts)
-    ? r.argPrompts.filter((p) => p && typeof p === 'object').map((p) => p as McpRegistryEntry['argPrompts'][number])
+    ? r.argPrompts
+        .filter((p) => p && typeof p === 'object')
+        .map((p) => p as McpRegistryEntry['argPrompts'][number])
     : []
   const envPrompts = Array.isArray(r.envPrompts)
-    ? r.envPrompts.filter((p) => p && typeof p === 'object').map((p) => p as McpRegistryEntry['envPrompts'][number])
+    ? r.envPrompts
+        .filter((p) => p && typeof p === 'object')
+        .map((p) => p as McpRegistryEntry['envPrompts'][number])
     : []
+
+  // v2.0 — trust tier. Same coercion as the plugin registry: anything
+  // we don't explicitly recognise as 'community' lands as 'curated'.
+  // Conservative bias — a typo or missing field doesn't badge a row
+  // as more-trusted than it really is (community is the stricter
+  // surface; curated is the relaxed-trust one).
+  const source: McpRegistryEntry['source'] = r.source === 'community' ? 'community' : 'curated'
 
   return {
     id: r.id,
@@ -93,7 +100,20 @@ function validateEntry(raw: unknown): McpRegistryEntry | null {
     requires: isString(r.requires) ? r.requires : undefined,
     author: isString(r.author) ? r.author : undefined,
     docsUrl: isString(r.docsUrl) ? r.docsUrl : undefined,
-    source: 'curated'
+    source,
+    // Provenance fields — only meaningful for community entries, but
+    // we pass them through for curated rows too if present (harmless).
+    submittedBy: isString(r.submittedBy) ? r.submittedBy : undefined,
+    submittedAt: isString(r.submittedAt) ? r.submittedAt : undefined,
+    repoUrl: isString(r.repoUrl) ? r.repoUrl : undefined,
+    // v2.0 round-3 polish — pass through the wizard-routing flags. The
+    // previous validator stripped these silently, so the
+    // McpMarketplaceDialog's `entry.builtin` check at the Home Assistant
+    // row always evaluated false and the Install button went down the
+    // generic-command flow (which then failed since HA isn't a real
+    // npm package). Now the wizard fires correctly.
+    builtin: r.builtin === true ? true : undefined,
+    builtinHandlerId: r.builtinHandlerId === 'home-assistant' ? 'home-assistant' : undefined
   }
 }
 
@@ -203,9 +223,7 @@ async function fetchCuratedRegistry(): Promise<McpRegistryEntry[]> {
   try {
     const [registryResp, signatureResp] = await Promise.all([
       fetch(REGISTRY_URL, { headers: { Accept: 'application/json' } }),
-      fetch(REGISTRY_SIGNATURE_URL, { headers: { Accept: 'application/json' } }).catch(
-        () => null
-      )
+      fetch(REGISTRY_SIGNATURE_URL, { headers: { Accept: 'application/json' } }).catch(() => null)
     ])
     if (registryResp.ok) {
       const contentLength = Number(registryResp.headers.get('content-length') ?? '0')
@@ -279,12 +297,14 @@ let cachedRegistry: { value: McpRegistryEntry[]; expiresAt: number } | null = nu
  *  and accidental re-opens. */
 const REGISTRY_CACHE_TTL_MS = 30_000
 
-export async function fetchMcpRegistry(opts: {
-  /** Bypass the TTL cache and force a fresh network fan-out. Wired to the
-   *  in-dialog Refresh button so a user reacting to a network hiccup
-   *  actually re-fetches instead of getting the same cached miss back. */
-  force?: boolean
-} = {}): Promise<McpRegistryEntry[]> {
+export async function fetchMcpRegistry(
+  opts: {
+    /** Bypass the TTL cache and force a fresh network fan-out. Wired to the
+     *  in-dialog Refresh button so a user reacting to a network hiccup
+     *  actually re-fetches instead of getting the same cached miss back. */
+    force?: boolean
+  } = {}
+): Promise<McpRegistryEntry[]> {
   if (opts.force) {
     cachedRegistry = null
     // Note: an in-flight fetch from a normal (non-forced) caller can still
@@ -388,9 +408,7 @@ function templateArgs(args: string[], values: Record<string, string>): string[] 
     }
     // Inline substitution for `--flag={KEY}` style args. No multi-path
     // expansion — splitting these would corrupt the flag's value.
-    expanded.push(
-      arg.replace(/\{([A-Z0-9_]+)\}/g, (_, key) => values[key] ?? `{${key}}`)
-    )
+    expanded.push(arg.replace(/\{([A-Z0-9_]+)\}/g, (_, key) => values[key] ?? `{${key}}`))
   }
   return expanded
 }

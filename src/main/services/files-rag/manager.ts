@@ -17,12 +17,7 @@ import { walkFolder } from './scan'
 import { chunkText } from './chunk'
 import { indexFileChunks, removeByFolder, removeByFilePath } from '../embeddings'
 import { log } from '../logger'
-import type {
-  IndexedFileSummary,
-  IndexedFolder,
-  ScanProgress,
-  ScanResult
-} from '@shared/types'
+import type { IndexedFileSummary, IndexedFolder, ScanProgress, ScanResult } from '@shared/types'
 
 export type { IndexedFileSummary, IndexedFolder, ScanProgress, ScanResult }
 
@@ -36,9 +31,27 @@ let activeScan: ScanProgress | null = null
 const scanInFlight = new Map<string, Promise<ScanResult>>()
 /** Tombstone set of folders the user removed mid-scan — checked in the loop. */
 const removedDuringScan = new Set<string>()
+/**
+ * v2.0 — pause requests. The user clicked Pause while a scan was running;
+ * the loop checks this set after each file and exits cleanly. The partial
+ * index stays on disk (per-file upserts already commit progress), so a
+ * subsequent `scanFolder` call resumes via the existing stat-skip path.
+ */
+const pauseRequested = new Set<string>()
 
 export function getActiveScan(): ScanProgress | null {
   return activeScan
+}
+
+/**
+ * v2.0 — request that the in-flight scan for `folder` pause after the
+ * current file finishes. Idempotent and safe to call when no scan is
+ * running (the flag clears on the next scan start). The in-flight promise
+ * resolves with `paused: true` rather than throwing — the renderer treats
+ * it as a non-error outcome.
+ */
+export function stopScan(folder: string): void {
+  pauseRequested.add(folder)
 }
 
 /* ----------------------------- folder CRUD ------------------------------ */
@@ -158,13 +171,16 @@ function existingFiles(folder: string): Map<string, FileRow> {
   return new Map(rows.map((r) => [r.path, r]))
 }
 
-function upsertFileRow(folder: string, file: {
-  path: string
-  size: number
-  mtime: string
-  sha: string
-  chunkCount: number
-}): void {
+function upsertFileRow(
+  folder: string,
+  file: {
+    path: string
+    size: number
+    mtime: string
+    sha: string
+    chunkCount: number
+  }
+): void {
   db()
     .prepare(
       `INSERT INTO indexed_files (path, folder, size, mtime, sha, chunk_count, last_indexed)
@@ -213,10 +229,7 @@ export function scanFolder(
   return work
 }
 
-async function runScan(
-  path: string,
-  onProgress?: (p: ScanProgress) => void
-): Promise<ScanResult> {
+async function runScan(path: string, onProgress?: (p: ScanProgress) => void): Promise<ScanResult> {
   // Make sure the folder is registered before we proceed. Validation lives in
   // addFolder so a bad path bubbles up here instead of producing a "0 files"
   // ghost entry.
@@ -233,8 +246,11 @@ async function runScan(
     }
   }
   // A fresh scan run begins — clear any stale tombstone so the new run isn't
-  // immediately aborted by a previous removal.
+  // immediately aborted by a previous removal. Pause flag too: a Pause
+  // request from a *previous* run is stale once the user explicitly
+  // triggered a new scan.
   removedDuringScan.delete(path)
+  pauseRequested.delete(path)
 
   const result: ScanResult = {
     folder: path,
@@ -246,7 +262,11 @@ async function runScan(
 
   let paths: string[]
   try {
-    paths = (await walkFolder(path)).filter(isSupportedFile)
+    // Sort lexicographically so a resumed scan walks files in the same
+    // order as the previous run — gives the stat-skip path a predictable
+    // contiguous prefix of "already done" instead of jumping around. Also
+    // makes progress feel monotonic to the user staring at the breadcrumb.
+    paths = (await walkFolder(path)).filter(isSupportedFile).sort()
   } catch (err) {
     result.error = err instanceof Error ? err.message : 'walk failed'
     return result
@@ -257,6 +277,11 @@ async function runScan(
   activeScan = { folder: path, done: 0, total: paths.length }
   onProgress?.(activeScan)
 
+  // Snapshot the "already indexed" count BEFORE we walk — if this scan was
+  // paused and is now resuming, the diff between this and `filesSkipped`
+  // at the end tells us how much was previously indexed vs newly skipped.
+  const alreadyIndexedAtStart = known.size
+
   try {
     for (const filePath of paths) {
       // Honour the tombstone — the user removed this folder mid-scan, so stop
@@ -265,8 +290,20 @@ async function runScan(
         result.error = 'Folder removed during scan'
         break
       }
+      // User clicked Pause — exit cleanly. Per-file commits already landed
+      // for everything we processed, so a future scan picks up here via
+      // the stat-skip path.
+      if (pauseRequested.has(path)) {
+        result.paused = true
+        break
+      }
       seen.add(filePath)
-      activeScan = { folder: path, done: result.filesScanned, total: paths.length, current: filePath }
+      activeScan = {
+        folder: path,
+        done: result.filesScanned,
+        total: paths.length,
+        current: filePath
+      }
       onProgress?.(activeScan)
       result.filesScanned++
 
@@ -278,10 +315,7 @@ async function runScan(
       if (prior) {
         try {
           const stats = await stat(filePath)
-          if (
-            stats.size === prior.size &&
-            stats.mtime.toISOString() === prior.mtime
-          ) {
+          if (stats.size === prior.size && stats.mtime.toISOString() === prior.mtime) {
             result.filesSkipped++
             continue
           }
@@ -350,9 +384,12 @@ async function runScan(
       result.filesIndexed++
     }
 
-    // Skip the prune + last_scan update if the folder was removed mid-scan;
-    // its rows are already gone via the tombstone-triggered removeFolder.
-    if (!removedDuringScan.has(path)) {
+    // Skip the prune + last_scan update if the folder was removed mid-scan
+    // (its rows are already gone via the tombstone-triggered removeFolder)
+    // OR if the user paused mid-scan (files past the pause point haven't
+    // been visited — pruning would delete legitimately-indexed entries
+    // just because we hadn't gotten to verifying their on-disk presence).
+    if (!removedDuringScan.has(path) && !result.paused) {
       // Files that vanished from disk since the previous scan get pruned.
       for (const [knownPath] of known) {
         if (!seen.has(knownPath)) dropFileRow(knownPath)
@@ -363,13 +400,22 @@ async function runScan(
     }
   } finally {
     activeScan = null
+    pauseRequested.delete(path)
     onProgress?.({ folder: path, done: result.filesScanned, total: paths.length })
   }
-  log(
-    'info',
-    'files-rag',
-    `Scan finished for ${path}: ${result.filesIndexed} indexed, ${result.filesSkipped} skipped, ${result.chunksAdded} chunks.`
-  )
+  if (result.paused) {
+    log(
+      'info',
+      'files-rag',
+      `Scan paused for ${path}: ${result.filesScanned}/${paths.length} files visited (${alreadyIndexedAtStart} already indexed at start). Resume by clicking Rescan.`
+    )
+  } else {
+    log(
+      'info',
+      'files-rag',
+      `Scan finished for ${path}: ${result.filesIndexed} indexed, ${result.filesSkipped} skipped, ${result.chunksAdded} chunks${alreadyIndexedAtStart > 0 ? ` (${alreadyIndexedAtStart} files carried over from previous runs)` : ''}.`
+    )
+  }
   return result
 }
 

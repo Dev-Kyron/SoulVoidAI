@@ -165,7 +165,16 @@ describe('keyPreview', () => {
 
 describe('ENV_KEY_PROVIDERS map', () => {
   it('covers every cloud provider that uses an API key', () => {
-    const cloudProviders = ['anthropic', 'openai', 'gemini', 'groq', 'xai', 'openrouter', 'deepseek', 'mistral']
+    const cloudProviders = [
+      'anthropic',
+      'openai',
+      'gemini',
+      'groq',
+      'xai',
+      'openrouter',
+      'deepseek',
+      'mistral'
+    ]
     const covered = new Set(Object.values(ENV_KEY_PROVIDERS))
     for (const p of cloudProviders) {
       expect(covered.has(p as never)).toBe(true)

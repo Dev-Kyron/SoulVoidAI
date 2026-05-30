@@ -683,6 +683,57 @@
       ],
       "author": "ElevenLabs",
       "docsUrl": "https://github.com/elevenlabs/elevenlabs-mcp"
+    },
+    {
+      "id": "gmail",
+      "name": "Gmail",
+      "description": "Read, search, send, draft, label Gmail messages. First connect opens your browser for one-time Google OAuth (saved to ~/.gmail-mcp/); later restarts are instant.",
+      "category": "productivity",
+      "tags": ["productivity", "google", "email"],
+      "command": "npx",
+      "args": ["-y", "@gongrzhe/server-gmail-autoauth-mcp"],
+      "env": {},
+      "argPrompts": [],
+      "envPrompts": [],
+      "author": "@gongrzhe",
+      "docsUrl": "https://github.com/GongRzhe/Gmail-MCP-Server"
+    },
+    {
+      "id": "google-calendar",
+      "name": "Google Calendar",
+      "description": "Read, search, create, update, delete Google Calendar events. First connect opens your browser for one-time Google OAuth; later restarts are instant.",
+      "category": "productivity",
+      "tags": ["productivity", "google", "calendar"],
+      "command": "npx",
+      "args": ["-y", "@cocal/google-calendar-mcp"],
+      "env": {},
+      "argPrompts": [],
+      "envPrompts": [
+        {
+          "key": "GOOGLE_OAUTH_CREDENTIALS",
+          "label": "Path to OAuth credentials JSON",
+          "description": "Absolute path to the Google Cloud OAuth credentials.json (Cloud Console → APIs & Services → Credentials → OAuth client → Desktop app → Download). The server caches its access tokens next to this file after first auth.",
+          "secret": false
+        }
+      ],
+      "author": "@cocal",
+      "docsUrl": "https://github.com/nspady/google-calendar-mcp"
+    },
+    {
+      "id": "home-assistant",
+      "name": "Home Assistant",
+      "description": "Control your smart home from chat — lights, locks, thermostat, scenes, scripts, anything HA exposes. Native integration over HA's REST API (no external server to install). Three agent tools: ha_list_entities (discovery), ha_get_state (read), ha_call_service (universal write).",
+      "category": "home",
+      "tags": ["home", "iot", "smart-home", "essential"],
+      "command": "builtin",
+      "args": [],
+      "env": {},
+      "argPrompts": [],
+      "envPrompts": [],
+      "builtin": true,
+      "builtinHandlerId": "home-assistant",
+      "author": "VoidSoul Studio",
+      "docsUrl": "https://www.home-assistant.io/integrations/http/"
     }
   ]
 }

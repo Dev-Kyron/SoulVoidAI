@@ -56,8 +56,10 @@ const STOPWORDS = new Set([
 ])
 
 /** Control types we prefer for click actions. Order matters — first
- *  match wins on tiebreak. */
-const PREFERRED_CONTROL_TYPES = [
+ *  match wins on tiebreak. Exported so the v2.0 Phase 3 uia-pick path
+ *  ranks against the same canonical set the production matcher uses
+ *  — adding a new type here automatically improves both paths. */
+export const PREFERRED_CONTROL_TYPES = [
   'ControlType.Button',
   'ControlType.SplitButton',
   'ControlType.MenuItem',
@@ -77,14 +79,23 @@ const PREFERRED_CONTROL_TYPES = [
  *  "Messenger | Facebook - Opera"), the Pane scores well and we click
  *  the centre of the browser window instead of the actual button. Hard-
  *  reject these once they cross the size threshold so the matcher falls
- *  through to vision instead. */
-const CONTAINER_CONTROL_TYPES = new Set([
+ *  through to vision instead. Exported for the same reason as the
+ *  PREFERRED list — keeps the uia-pick taxonomy aligned. */
+export const CONTAINER_CONTROL_TYPES = new Set([
   'ControlType.Pane',
   'ControlType.Window',
   'ControlType.Document',
   'ControlType.Group',
   'ControlType.Custom'
 ])
+
+/** Strip the canonical `ControlType.` prefix for user-visible display.
+ *  Centralised here (uiaMatch owns the taxonomy) so log lines, the
+ *  preview HUD, the bench report, and Settings dialogs all render the
+ *  same short form. */
+export function prettyControlType(ct: string): string {
+  return ct.replace(/^ControlType\./, '')
+}
 
 /** Pixel-area threshold above which a CONTAINER_CONTROL_TYPES element
  *  is treated as structural framing rather than a click target. 500×400
@@ -180,10 +191,7 @@ function scoreElement(elem: UiaElement, tokens: string[], descriptionLower: stri
  * Pick the best UIA match for the description, or null if no candidate
  * is confident enough. Exported for tests as well as the orchestrator.
  */
-export function matchUiaElement(
-  elements: UiaElement[],
-  description: string
-): UiaMatch | null {
+export function matchUiaElement(elements: UiaElement[], description: string): UiaMatch | null {
   if (elements.length === 0) return null
   const tokens = tokeniseDescription(description)
   if (tokens.length === 0) return null
@@ -227,7 +235,7 @@ export function matchUiaElement(
 
   // Build a human-readable reason for the preview HUD.
   const nameBit = top.element.name ? `"${top.element.name}"` : top.element.automationId
-  const typeBit = top.element.controlType.replace('ControlType.', '')
+  const typeBit = prettyControlType(top.element.controlType)
   const reason = `accessibility match: ${nameBit} (${typeBit})`
 
   return { element: top.element, confidence: normalised, reason }

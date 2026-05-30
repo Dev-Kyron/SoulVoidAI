@@ -10,9 +10,15 @@
  * (best guess at "what the user is looking at"), and cap the thumbnail
  * at a reasonable resolution so a 4K@200% display doesn't produce a 30MB
  * PNG that stalls IPC.
+ *
+ * v2.0 polish — added `persist` option (default true for back-compat) and
+ * a janitor that caps the screenshots dir at MAX_PERSISTED. The semantic-
+ * awareness loop fires every window change and was accruing ~1-2MB PNGs
+ * indefinitely with no consumer — passing `persist: false` skips the
+ * write entirely and OCR runs against the data URL instead.
  */
 import { desktopCapturer, screen } from 'electron'
-import { writeFile, mkdir } from 'node:fs/promises'
+import { writeFile, mkdir, readdir, stat, unlink } from 'node:fs/promises'
 import { join } from 'node:path'
 import { dataPath } from '../storage/store'
 import { log } from '../logger'
@@ -23,7 +29,21 @@ import type { ScreenshotResult } from '@shared/types'
  *  past anything we'd want to ship over IPC or feed into a vision API. */
 const MAX_THUMBNAIL_WIDTH = 2400
 
-export async function captureScreen(): Promise<ScreenshotResult> {
+/** Keep at most this many persisted shots in the screenshots dir. Older
+ *  files get pruned best-effort after a successful write. Stops the dir
+ *  from growing without bound for callers that legitimately persist
+ *  (manual `screen:capture` IPC, debug-audit knobs). */
+const MAX_PERSISTED = 50
+
+export interface CaptureScreenOptions {
+  /** Write the PNG to disk under userData/screenshots. Defaults to true
+   *  so callers that depended on `path` keep working — semantic awareness
+   *  passes `false` because it only needs the data URL for OCR. */
+  persist?: boolean
+}
+
+export async function captureScreen(opts: CaptureScreenOptions = {}): Promise<ScreenshotResult> {
+  const persist = opts.persist !== false
   // v1.12.3 — pick the display under the cursor as a best guess at "what
   // the user is currently looking at". Falls back to the primary display
   // if the cursor is between monitors or on an unrecognised display.
@@ -83,10 +103,23 @@ export async function captureScreen(): Promise<ScreenshotResult> {
   const png = image.toPNG()
   const size = image.getSize()
 
-  const dir = dataPath('screenshots')
-  await mkdir(dir, { recursive: true })
-  const file = join(dir, `shot-${Date.now()}.png`)
-  await writeFile(file, png)
+  let file = ''
+  if (persist) {
+    const dir = dataPath('screenshots')
+    await mkdir(dir, { recursive: true })
+    file = join(dir, `shot-${Date.now()}.png`)
+    await writeFile(file, png)
+    // Best-effort prune so the dir doesn't grow without bound. Awaited so a
+    // burst of captures can't pile up writes faster than we trim, but
+    // failures are swallowed — pruning is non-essential.
+    await pruneOldShots(dir).catch((err) => {
+      log(
+        'warn',
+        'system',
+        `screenshot: prune failed (${err instanceof Error ? err.message : String(err)}) — dir may grow.`
+      )
+    })
+  }
 
   return {
     path: file,
@@ -94,4 +127,42 @@ export async function captureScreen(): Promise<ScreenshotResult> {
     width: size.width,
     height: size.height
   }
+}
+
+/**
+ * Delete the oldest PNGs in `dir` until at most MAX_PERSISTED remain. Best
+ * effort — any individual unlink failure is logged and skipped so a locked
+ * file (anti-virus scan, explorer preview) can't stall the loop.
+ */
+async function pruneOldShots(dir: string): Promise<void> {
+  let names: string[]
+  try {
+    names = await readdir(dir)
+  } catch {
+    return
+  }
+  const pngs = names.filter((n) => n.endsWith('.png'))
+  if (pngs.length <= MAX_PERSISTED) return
+  const entries = await Promise.all(
+    pngs.map(async (name) => {
+      try {
+        const s = await stat(join(dir, name))
+        return { name, mtime: s.mtimeMs }
+      } catch {
+        return null
+      }
+    })
+  )
+  const ranked = entries
+    .filter((e): e is { name: string; mtime: number } => e != null)
+    .sort((a, b) => a.mtime - b.mtime)
+  const excess = ranked.length - MAX_PERSISTED
+  if (excess <= 0) return
+  await Promise.all(
+    ranked.slice(0, excess).map((e) =>
+      unlink(join(dir, e.name)).catch(() => {
+        /* swallow — file may already be gone or AV-locked */
+      })
+    )
+  )
 }

@@ -18,7 +18,7 @@ import { moveMouse, mouseClick, sendHotkey } from './input'
 import { performVisualClick } from './visualClick'
 import { rememberProject } from '../storage/memory'
 import { getApiKey, getSecret } from '../storage/keys'
-import { resolveBaseUrl } from '../storage/config'
+import { getConfig, resolveBaseUrl } from '../storage/config'
 import { dataPath } from '../storage/store'
 import { renderContent, promptSaveAndWrite, type ThreadExportFormat } from '../export/thread'
 import { recordUsage } from '../usage'
@@ -26,12 +26,52 @@ import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { extractFromHtml } from './readability'
 import { runWebSearch } from './search'
+import {
+  callHomeAssistantService,
+  getHomeAssistantState,
+  listHomeAssistantStates
+} from './homeassistant'
+import { runDeepResearch } from './deepResearch'
 import { checkUrlSafe } from './urlSafety'
 import { ENDPOINTS } from './endpoints'
+import { execInThread as runPersistentPython } from '../python-sandbox/manager'
+import { PYTHON_CMD } from '../python-sandbox/kernel'
 import type { ActionDescriptor, ActionRequest, ActionResult } from '@shared/types'
+
+/**
+ * Bounds the user-supplied (or model-supplied) timeout to a sane window.
+ * 30s default keeps interactive cells snappy; 2-minute ceiling protects
+ * against a runaway model that asks for an hour. Both `run-python`
+ * branches (persistent + ephemeral) call this so a tweak to the policy
+ * lands in one place.
+ */
+function normalizePythonTimeoutMs(raw: unknown): number {
+  return Math.min(Number(raw ?? 30000), 120_000)
+}
 
 const execAsync = promisify(exec)
 const MAX_READ_CHARS = 200_000
+
+/**
+ * v2.0 — shared image saver for the generate-image + edit-image-* actions.
+ * Writes PNG bytes to `<dataDir>/generated-images/<prefix>-<ts>.png` and
+ * returns both the path (for chat references) and a data URL (for inline
+ * preview). Lives at module scope so all four image actions reuse one
+ * implementation — the previous inline copy in generate-image's case was
+ * fine when it was alone, but four copies of the same five lines would be
+ * the worst kind of drift bait.
+ */
+async function saveImagePng(
+  b64: string,
+  prefix: string
+): Promise<{ path: string; dataUrl: string }> {
+  const dir = dataPath('generated-images')
+  await mkdir(dir, { recursive: true })
+  const filename = `${prefix}-${Date.now()}.png`
+  const filepath = join(dir, filename)
+  await writeFile(filepath, Buffer.from(b64, 'base64'))
+  return { path: filepath, dataUrl: `data:image/png;base64,${b64}` }
+}
 
 export const ACTION_DESCRIPTORS: ActionDescriptor[] = [
   {
@@ -90,33 +130,43 @@ export const ACTION_DESCRIPTORS: ActionDescriptor[] = [
     requires: 'filesystem',
     reversible: true
   },
+  // v2.0 round-8 multi-platform — input-driving actions (type, hotkey,
+  // mouse, visual-click) currently only have a Windows implementation in
+  // src/main/services/automation/input.ts. The `platforms: ['win32']`
+  // tag lets executeAction() reject cross-platform calls up front with a
+  // clear "Not supported on darwin/linux" error, instead of letting the
+  // agent retry into opaque "PowerShell SendKeys failed" stderr.
   {
     type: 'type-text',
     label: 'Type Text',
     description: 'Send keystrokes to the focused window.',
     requires: 'inputAccess',
-    reversible: false
+    reversible: false,
+    platforms: ['win32']
   },
   {
     type: 'hotkey',
     label: 'Send Hotkey',
     description: 'Send a keyboard shortcut (e.g. ctrl+s) to the focused window.',
     requires: 'inputAccess',
-    reversible: false
+    reversible: false,
+    platforms: ['win32']
   },
   {
     type: 'move-mouse',
     label: 'Move Cursor',
     description: 'Move the mouse cursor to screen coordinates.',
     requires: 'inputAccess',
-    reversible: false
+    reversible: false,
+    platforms: ['win32']
   },
   {
     type: 'mouse-click',
     label: 'Mouse Click',
     description: 'Perform a left or right mouse click.',
     requires: 'inputAccess',
-    reversible: false
+    reversible: false,
+    platforms: ['win32']
   },
   {
     type: 'visual-click',
@@ -130,7 +180,8 @@ export const ACTION_DESCRIPTORS: ActionDescriptor[] = [
     description:
       'Click a UI element described in plain English. Vision model finds it; a 3s preview HUD lets the user cancel.',
     requires: 'inputAccess',
-    reversible: false
+    reversible: false,
+    platforms: ['win32']
   },
   {
     type: 'screenshot',
@@ -161,9 +212,44 @@ export const ACTION_DESCRIPTORS: ActionDescriptor[] = [
     reversible: false
   },
   {
+    type: 'deep-research',
+    label: 'Deep Research',
+    description:
+      'Plan sub-queries, search the web, fetch top sources, and synthesise a cited markdown answer.',
+    // v2.0 — gated on browser permission for the same reasons web-search +
+    // web-fetch are: every internal step hits the network. Reuses those
+    // primitives, so a user who granted browser for the simple search/fetch
+    // pair has already opted into this tool's network surface.
+    requires: 'browser',
+    reversible: false
+  },
+  {
     type: 'generate-image',
     label: 'Generate Image',
     description: 'Generate an image from a text prompt (OpenAI DALL·E 3).',
+    requires: 'filesystem',
+    reversible: false
+  },
+  {
+    type: 'edit-image-inpaint',
+    label: 'Inpaint Image',
+    description:
+      'Replace a masked region of an existing image with content described by a prompt (Stability AI).',
+    requires: 'filesystem',
+    reversible: false
+  },
+  {
+    type: 'edit-image-upscale',
+    label: 'Upscale Image',
+    description: 'Upscale an image while preserving detail (Stability AI conservative upscaler).',
+    requires: 'filesystem',
+    reversible: false
+  },
+  {
+    type: 'edit-image-bg-remove',
+    label: 'Remove Background',
+    description:
+      'Cut out the foreground subject and return a transparent-background PNG (Stability AI).',
     requires: 'filesystem',
     reversible: false
   },
@@ -185,6 +271,30 @@ export const ACTION_DESCRIPTORS: ActionDescriptor[] = [
     // save the document they just asked the assistant to write.
     requires: null,
     reversible: false
+  },
+  /* ------------- v2.0 Home Assistant integration ------------- */
+  {
+    type: 'ha-list-entities',
+    label: 'List HA Entities',
+    description:
+      'List Home Assistant entities (lights, locks, climate, etc), optionally by domain.',
+    requires: 'homeAssistant',
+    reversible: false
+  },
+  {
+    type: 'ha-get-state',
+    label: 'Read HA Entity',
+    description: 'Read the current state and attributes of one HA entity.',
+    requires: 'homeAssistant',
+    reversible: false
+  },
+  {
+    type: 'ha-call-service',
+    label: 'Call HA Service',
+    description:
+      'Call a Home Assistant service (turn_on/off, lock/unlock, set_temperature, scene, script, etc).',
+    requires: 'homeAssistant',
+    reversible: false
   }
 ]
 
@@ -197,7 +307,10 @@ interface UndoEntry {
 
 const undoRegistry = new Map<string, UndoEntry>()
 
-function registerUndo(label: string, run: () => Promise<void>): {
+function registerUndo(
+  label: string,
+  run: () => Promise<void>
+): {
   undoId: string
   undoLabel: string
 } {
@@ -293,26 +406,66 @@ interface AppSpec {
 }
 
 function resolveApp(key: string): AppSpec {
+  // v2.0 round-7 multi-platform — the known-app shortcuts now branch on
+  // platform. The previous version returned Windows-only paths/binaries
+  // (obs64.exe, %LOCALAPPDATA%\Discord\Update.exe, wt) regardless of
+  // platform; the mac/linux branches of launchApp then fed those into
+  // `open -a` / `xdg-open` which fail (the bare filename + Windows path
+  // isn't a mac bundle name). Now each shortcut resolves to the
+  // platform-appropriate identifier.
+  const platform = process.platform
   switch (key.toLowerCase()) {
     case 'vscode':
     case 'code':
+      // VS Code's CLI is `code` on every platform when its `Install 'code'
+      // command in PATH` step has run (default on Windows + mac post-install).
       return { target: 'code' }
     case 'terminal':
-      return { target: 'wt' }
+      if (platform === 'darwin') return { target: 'Terminal' }
+      if (platform === 'win32') return { target: 'wt' }
+      // Linux: try gnome-terminal first; xdg-open will fall back gracefully.
+      return { target: 'gnome-terminal' }
     case 'obs':
-      return { target: 'obs64.exe', cwd: 'C:\\Program Files\\obs-studio\\bin\\64bit' }
-    case 'discord':
-      return {
-        target: expandEnv('%LOCALAPPDATA%\\Discord\\Update.exe'),
-        args: '--processStart Discord.exe'
+      if (platform === 'darwin') return { target: 'OBS' }
+      if (platform === 'win32') {
+        return { target: 'obs64.exe', cwd: 'C:\\Program Files\\obs-studio\\bin\\64bit' }
       }
+      return { target: 'obs' }
+    case 'discord':
+      if (platform === 'darwin') return { target: 'Discord' }
+      if (platform === 'win32') {
+        return {
+          target: expandEnv('%LOCALAPPDATA%\\Discord\\Update.exe'),
+          args: '--processStart Discord.exe'
+        }
+      }
+      // Linux: snap/flatpak/distro packages all expose `discord` in PATH.
+      return { target: 'discord' }
     default:
       return { target: key }
   }
 }
 
+// v2.0 round-3 security polish — whitelist for the open-app `key` arg.
+// resolveApp's `default` branch passes the model-supplied key straight
+// through to the shell command on Windows, where the surrounding `"..."`
+// can be broken with a `"` byte (or `&`, `|`, `;` in args). Restricting
+// the key to a benign character class makes injection structurally
+// impossible without rejecting legitimate apps (executable names, app
+// IDs, file paths with spaces all match this).
+const APP_KEY_OK = /^[A-Za-z0-9 ._\-:\\/]+$/
+const REJECT_APP_KEY_HINT =
+  'The application name must contain only letters, digits, spaces, and the characters . _ - : / \\'
+
 async function launchApp(key: string): Promise<string> {
   const spec = resolveApp(key)
+  // v2.0 round-3 — sanity-check the resolved target. Hardcoded specs
+  // (vscode, terminal, obs, discord) bypass since their target is a
+  // trusted constant; the default-branch fall-through is where the
+  // injection risk lives.
+  if (!APP_KEY_OK.test(spec.target)) {
+    throw new Error(`Refusing to launch app — invalid characters. ${REJECT_APP_KEY_HINT}`)
+  }
 
   if (process.platform === 'darwin') {
     await execAsync(`open -a ${JSON.stringify(spec.target)}`)
@@ -423,13 +576,10 @@ async function typeText(text: string): Promise<void> {
     // 30s is generous for typing 4096 chars (~40 chars/sec is human-
     // slow) and short enough that a genuinely stuck call surfaces
     // before the user gives up.
-    await execAsync(
-      `powershell -NoProfile -NonInteractive -EncodedCommand ${psEncoded(script)}`,
-      {
-        windowsHide: true,
-        timeout: 30_000
-      }
-    )
+    await execAsync(`powershell -NoProfile -NonInteractive -EncodedCommand ${psEncoded(script)}`, {
+      windowsHide: true,
+      timeout: 30_000
+    })
   } finally {
     resolveNext()
   }
@@ -480,7 +630,11 @@ async function organizeFolder(dirInput: string): Promise<ActionResult> {
   }
 
   if (moves.length === 0) {
-    return { ok: true, type: 'organize-folder', output: 'Nothing to organise — no loose files found.' }
+    return {
+      ok: true,
+      type: 'organize-folder',
+      output: 'Nothing to organise — no loose files found.'
+    }
   }
 
   const undo = registerUndo(`Organise of ${basename(dir)}`, async () => {
@@ -658,13 +812,21 @@ async function dispatch(req: ActionRequest, signal?: AbortSignal): Promise<Actio
       const x = numberParam(p, 'x')
       const y = numberParam(p, 'y')
       await moveMouse(x, y)
-      return { ok: true, type: req.type, output: `Moved cursor to ${Math.round(x)}, ${Math.round(y)}.` }
+      return {
+        ok: true,
+        type: req.type,
+        output: `Moved cursor to ${Math.round(x)}, ${Math.round(y)}.`
+      }
     }
 
     case 'mouse-click': {
       const button = optParam(p, 'button') === 'right' ? 'right' : 'left'
       await mouseClick(button)
-      return { ok: true, type: req.type, output: `${button === 'right' ? 'Right' : 'Left'} mouse click.` }
+      return {
+        ok: true,
+        type: req.type,
+        output: `${button === 'right' ? 'Right' : 'Left'} mouse click.`
+      }
     }
 
     case 'visual-click': {
@@ -813,6 +975,21 @@ async function dispatch(req: ActionRequest, signal?: AbortSignal): Promise<Actio
       }
     }
 
+    case 'deep-research': {
+      // v2.0 — Perplexity-style multi-step research. Plans sub-queries
+      // via the active LLM, runs them via the same search backend as
+      // web-search, fetches top results, synthesises a cited markdown
+      // answer. The whole pipeline runs in one tool-call from the
+      // agent's perspective; internal steps log to the structured log
+      // store for debugging but don't surface as separate tool cards.
+      const topic = String(p.topic ?? '').trim()
+      if (!topic) return { ok: false, type: req.type, error: 'No research topic supplied.' }
+      const rawDepth = String(p.depth ?? 'standard').toLowerCase()
+      const depth: 'quick' | 'standard' | 'deep' =
+        rawDepth === 'quick' || rawDepth === 'deep' ? rawDepth : 'standard'
+      return runDeepResearch({ topic, depth, signal })
+    }
+
     case 'generate-image': {
       const prompt = String(p.prompt ?? '').trim()
       if (!prompt) return { ok: false, type: req.type, error: 'No prompt supplied.' }
@@ -830,17 +1007,10 @@ async function dispatch(req: ActionRequest, signal?: AbortSignal): Promise<Actio
         return 'pollinations'
       })()
 
-      const saveImage = async (
-        b64: string,
-        prefix: string
-      ): Promise<{ path: string; dataUrl: string }> => {
-        const dir = dataPath('generated-images')
-        await mkdir(dir, { recursive: true })
-        const filename = `${prefix}-${Date.now()}.png`
-        const filepath = join(dir, filename)
-        await writeFile(filepath, Buffer.from(b64, 'base64'))
-        return { path: filepath, dataUrl: `data:image/png;base64,${b64}` }
-      }
+      // Inline alias kept so the body below reads identically to the v1.13
+      // shape — the function moved to module scope as `saveImagePng` so
+      // the v2.0 image-editing actions can reuse it.
+      const saveImage = saveImagePng
 
       try {
         if (provider === 'stability' || provider === 'sdxl') {
@@ -858,12 +1028,7 @@ async function dispatch(req: ActionRequest, signal?: AbortSignal): Promise<Actio
           form.append('prompt', prompt)
           form.append('output_format', 'png')
           // aspect_ratio maps from the same size hint the caller used.
-          const aspect =
-            size === '1792x1024'
-              ? '16:9'
-              : size === '1024x1792'
-                ? '9:16'
-                : '1:1'
+          const aspect = size === '1792x1024' ? '16:9' : size === '1024x1792' ? '9:16' : '1:1'
           form.append('aspect_ratio', aspect)
           const res = await fetch(ENDPOINTS.stabilityImage, {
             method: 'POST',
@@ -912,26 +1077,27 @@ async function dispatch(req: ActionRequest, signal?: AbortSignal): Promise<Actio
             }
           }
           // Imagen 3 endpoint — `predict` returns base64 PNG bytes.
-          const res = await fetch(
-            `${ENDPOINTS.geminiImagen}?key=${key}`,
-            {
-              method: 'POST',
-              signal,
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                instances: [{ prompt }],
-                parameters: {
-                  sampleCount: 1,
-                  aspectRatio:
-                    size === '1792x1024'
-                      ? '16:9'
-                      : size === '1024x1792'
-                        ? '9:16'
-                        : '1:1'
-                }
-              })
-            }
-          )
+          // v2.0 round-4 security polish — send the API key in the
+          // `x-goog-api-key` header instead of the URL query string.
+          // Query-string keys leak into HTTP-debug captures, corporate
+          // TLS-MITM proxy logs, and Electron crash reports that include
+          // the failing request URL. The gemini provider in ai/gemini.ts
+          // already uses the header form; this matches it.
+          const res = await fetch(ENDPOINTS.geminiImagen, {
+            method: 'POST',
+            signal,
+            headers: {
+              'Content-Type': 'application/json',
+              'x-goog-api-key': key
+            },
+            body: JSON.stringify({
+              instances: [{ prompt }],
+              parameters: {
+                sampleCount: 1,
+                aspectRatio: size === '1792x1024' ? '16:9' : size === '1024x1792' ? '9:16' : '1:1'
+              }
+            })
+          })
           if (!res.ok) {
             const text = await res.text()
             return {
@@ -1082,17 +1248,248 @@ async function dispatch(req: ActionRequest, signal?: AbortSignal): Promise<Actio
       }
     }
 
+    case 'edit-image-inpaint':
+    case 'edit-image-upscale':
+    case 'edit-image-bg-remove': {
+      // v2.0 — Stability AI image-editing pipeline. All three share the
+      // same key + multipart-form shape, only the endpoint URL and the
+      // form fields vary. Routed through one handler with a small per-op
+      // switch so the auth / error / save / record-usage scaffolding is
+      // written once.
+      const key = getSecret('stability')
+      if (!key) {
+        return {
+          ok: false,
+          type: req.type,
+          error:
+            'Stability AI key not configured. Settings → Integrations → paste a key from platform.stability.ai.'
+        }
+      }
+      const imagePath = String(p.image_path ?? '').trim()
+      if (!imagePath) {
+        return { ok: false, type: req.type, error: 'No image_path supplied.' }
+      }
+      let imageBytes: Buffer
+      try {
+        imageBytes = await readFile(imagePath)
+      } catch (err) {
+        return {
+          ok: false,
+          type: req.type,
+          error: `Could not read image at "${imagePath}": ${err instanceof Error ? err.message : String(err)}`
+        }
+      }
+      // Stability expects multipart/form-data with the image as a Blob.
+      // Node's Blob accepts a Buffer directly — wrapping in a Uint8Array
+      // first (the v2.0-RC1 shape) forced an extra full copy of the
+      // image bytes, which for a 50 MB photo doubles peak memory use
+      // for no benefit. Blob's [Buffer] form streams the same bytes
+      // through fetch without the intermediate allocation.
+      const imageBlob = new Blob([imageBytes], { type: 'image/png' })
+      const form = new FormData()
+      form.append('image', imageBlob, basename(imagePath))
+      form.append('output_format', 'png')
+
+      let endpoint: string
+      let opLabel: string
+      let savePrefix: string
+      if (req.type === 'edit-image-inpaint') {
+        const prompt = String(p.prompt ?? '').trim()
+        if (!prompt) return { ok: false, type: req.type, error: 'No prompt supplied for inpaint.' }
+        const maskPath = String(p.mask_path ?? '').trim()
+        const maskPrompt = String(p.mask_prompt ?? '').trim()
+        if (!maskPath && !maskPrompt) {
+          return {
+            ok: false,
+            type: req.type,
+            error:
+              'Inpaint needs either mask_path (a PNG mask) or mask_prompt (text describing what to mask).'
+          }
+        }
+        form.append('prompt', prompt)
+        if (maskPath) {
+          try {
+            const maskBytes = await readFile(maskPath)
+            form.append('mask', new Blob([maskBytes], { type: 'image/png' }), basename(maskPath))
+          } catch (err) {
+            return {
+              ok: false,
+              type: req.type,
+              error: `Could not read mask at "${maskPath}": ${err instanceof Error ? err.message : String(err)}`
+            }
+          }
+        } else {
+          // Stability's inpaint endpoint auto-segments when `search_prompt`
+          // is supplied without a binary mask — the API picks the matching
+          // region via a built-in vision model. Cheaper than asking the
+          // user (or another LLM) to hand-craft a mask.
+          form.append('search_prompt', maskPrompt)
+        }
+        endpoint = ENDPOINTS.stabilityInpaint
+        opLabel = 'inpaint'
+        savePrefix = 'inpaint'
+      } else if (req.type === 'edit-image-upscale') {
+        const prompt = String(p.prompt ?? '').trim()
+        if (prompt) form.append('prompt', prompt)
+        endpoint = ENDPOINTS.stabilityUpscale
+        opLabel = 'upscale'
+        savePrefix = 'upscale'
+      } else {
+        // bg-remove takes no extra fields beyond the image.
+        endpoint = ENDPOINTS.stabilityRemoveBackground
+        opLabel = 'background-remove'
+        savePrefix = 'cutout'
+      }
+
+      try {
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          signal,
+          headers: { Authorization: `Bearer ${key}`, Accept: 'application/json' },
+          body: form
+        })
+        if (!res.ok) {
+          const text = await res.text()
+          return {
+            ok: false,
+            type: req.type,
+            error: `Stability ${opLabel} failed: ${res.status} ${text.slice(0, 200)}`
+          }
+        }
+        const data = (await res.json()) as { image?: string; finish_reason?: string }
+        const b64 = data.image
+        if (!b64) {
+          return { ok: false, type: req.type, error: `No image data returned from ${opLabel}.` }
+        }
+        const saved = await saveImagePng(b64, savePrefix)
+        recordUsage({
+          provider: 'custom',
+          model: `stability-${opLabel}`,
+          kind: 'image',
+          inputTokens: 0,
+          outputTokens: 0,
+          imageCount: 1,
+          // The output dimensions vary per op — record a stable label
+          // rather than trying to read the PNG header for an exact size.
+          imageSize: opLabel === 'upscale' ? 'upscaled' : 'edited',
+          estimated: false
+        })
+        return {
+          ok: true,
+          type: req.type,
+          output: `Edited image saved to ${saved.path} (${opLabel}).`,
+          data: {
+            path: saved.path,
+            sourcePath: imagePath,
+            operation: opLabel,
+            dataUrl: saved.dataUrl,
+            provider: 'stability'
+          }
+        }
+      } catch (err) {
+        if (err instanceof Error && err.name === 'AbortError') {
+          return { ok: false, type: req.type, error: 'Image edit aborted.' }
+        }
+        return {
+          ok: false,
+          type: req.type,
+          error: err instanceof Error ? err.message : 'Image edit failed.'
+        }
+      }
+    }
+
     case 'run-python': {
       const code = String(p.code ?? '').trim()
       if (!code) return { ok: false, type: req.type, error: 'No code supplied.' }
-      const timeoutMs = Math.min(Number(p.timeout_ms ?? 30000), 120000)
+      const timeoutMs = normalizePythonTimeoutMs(p.timeout_ms)
+
+      // v2.0 — persistent path. When the caller threaded a threadId in
+      // (the agent loop always does), run the code through the per-thread
+      // Python kernel so variables / imports / generated files survive
+      // across turns. The kernel's CWD is the thread's workspace dir, so
+      // `open('out.csv', 'w')` lands somewhere the user can find later
+      // and a follow-up `pandas.read_csv('out.csv')` just works.
+      //
+      // Callers without a threadId (one-off tray runs, smoke tests) fall
+      // through to the ephemeral execAsync path below — same shape as v1.
+      if (req.threadId) {
+        // The kernel doesn't enforce a wall-clock timeout itself; we
+        // wrap the promise with an AbortController-backed race so the
+        // user-supplied `timeout_ms` still bounds runaway cells.
+        const timeoutController = new AbortController()
+        const userTimer = setTimeout(() => timeoutController.abort(), timeoutMs)
+        // Caller's abort signal + our timeout are both abort sources.
+        const combinedSignal = signal
+          ? AbortSignal.any([signal, timeoutController.signal])
+          : timeoutController.signal
+        try {
+          const result = await runPersistentPython(req.threadId, code, combinedSignal)
+          if (result.error) {
+            const combined = [result.stdout, result.stderr, result.error]
+              .filter(Boolean)
+              .join('\n')
+              .slice(0, 8000)
+            // KeyboardInterrupt is the abort path (user clicked Stop or
+            // we hit the timeout); surface it as the friendlier error
+            // instead of dumping the bare traceback string.
+            if (result.error === 'KeyboardInterrupt') {
+              const reason = signal?.aborted
+                ? 'Python execution aborted by user.'
+                : `Python execution timed out after ${timeoutMs}ms.`
+              return { ok: false, type: req.type, error: reason }
+            }
+            return {
+              ok: false,
+              type: req.type,
+              error: combined || result.error
+            }
+          }
+          const output = (result.stdout || result.stderr || '(no output)').slice(0, 8000)
+          return {
+            ok: true,
+            type: req.type,
+            output,
+            data: {
+              stdout: result.stdout,
+              stderr: result.stderr,
+              workspaceDir: result.workspaceDir,
+              python: result.ready.python
+            }
+          }
+        } catch (err) {
+          if (timeoutController.signal.aborted && !signal?.aborted) {
+            return {
+              ok: false,
+              type: req.type,
+              error: `Python execution timed out after ${timeoutMs}ms.`
+            }
+          }
+          if (signal?.aborted) {
+            return { ok: false, type: req.type, error: 'Python execution aborted.' }
+          }
+          // The most likely failure here is "Python isn't installed" —
+          // forward the kernel's friendly message verbatim.
+          return {
+            ok: false,
+            type: req.type,
+            error: err instanceof Error ? err.message : String(err)
+          }
+        } finally {
+          clearTimeout(userTimer)
+        }
+      }
+
+      // Legacy ephemeral path: tray quick-runs / smoke tests with no
+      // threadId. Kept verbatim from v1.x so no caller's behaviour
+      // changes silently.
       const tempDir = await mkdtemp(join(tmpdir(), 'voidsoul-py-'))
       const scriptPath = join(tempDir, 'script.py')
       try {
         await writeFile(scriptPath, code, 'utf-8')
-        // Try python3 first (mac/linux), fall back to python (windows).
-        const cmd = process.platform === 'win32' ? 'python' : 'python3'
-        const { stdout, stderr } = await execAsync(`${cmd} "${scriptPath}"`, {
+        // PYTHON_CMD: 'python' on Windows, 'python3' elsewhere — shared
+        // with the persistent kernel so a user with a working v1 setup
+        // needs no extra config for the v2 path either.
+        const { stdout, stderr } = await execAsync(`${PYTHON_CMD} "${scriptPath}"`, {
           timeout: timeoutMs,
           maxBuffer: 1024 * 1024 * 4,
           // Threaded from the agent loop's requestId → child gets SIGTERM
@@ -1177,6 +1574,130 @@ async function dispatch(req: ActionRequest, signal?: AbortSignal): Promise<Actio
       }
     }
 
+    /* ----------- v2.0 Home Assistant integration ------------ */
+    case 'ha-list-entities': {
+      // Disabled-but-permission-granted is a configuration error, not a
+      // permission denial. Surface it explicitly so the agent's next turn
+      // knows to ask the user to set HA up rather than retry.
+      if (!getConfig().homeAssistant?.enabled) {
+        return {
+          ok: false,
+          type: req.type,
+          error: 'Home Assistant is not enabled in Settings → Tools → Home Assistant.'
+        }
+      }
+      try {
+        const states = await listHomeAssistantStates(
+          { domain: typeof p.domain === 'string' && p.domain ? p.domain : undefined },
+          signal
+        )
+        // Trim to a compact form — full attributes blow the agent's
+        // context. Sample of 200 to cap the worst case (huge HA
+        // instances can run 1000+ entities).
+        const summary = states.slice(0, 200).map((s) => ({
+          entity_id: s.entity_id,
+          state: s.state,
+          friendly_name:
+            typeof s.attributes?.friendly_name === 'string'
+              ? (s.attributes.friendly_name as string)
+              : null,
+          domain: s.entity_id.split('.', 1)[0]
+        }))
+        const truncated = states.length > 200
+        return {
+          ok: true,
+          type: req.type,
+          output:
+            `Found ${states.length} HA entit${states.length === 1 ? 'y' : 'ies'}` +
+            (truncated ? ' (showing first 200)' : '') +
+            '.',
+          data: { entities: summary, total: states.length, truncated }
+        }
+      } catch (err) {
+        return {
+          ok: false,
+          type: req.type,
+          error: err instanceof Error ? err.message : String(err)
+        }
+      }
+    }
+
+    case 'ha-get-state': {
+      if (!getConfig().homeAssistant?.enabled) {
+        return {
+          ok: false,
+          type: req.type,
+          error: 'Home Assistant is not enabled in Settings → Tools → Home Assistant.'
+        }
+      }
+      const entityId = String(p.entity_id ?? '').trim()
+      if (!entityId) {
+        return { ok: false, type: req.type, error: 'entity_id is required.' }
+      }
+      try {
+        const state = await getHomeAssistantState(entityId, signal)
+        return {
+          ok: true,
+          type: req.type,
+          output: `${entityId} is ${state.state}.`,
+          data: state
+        }
+      } catch (err) {
+        return {
+          ok: false,
+          type: req.type,
+          error: err instanceof Error ? err.message : String(err)
+        }
+      }
+    }
+
+    case 'ha-call-service': {
+      if (!getConfig().homeAssistant?.enabled) {
+        return {
+          ok: false,
+          type: req.type,
+          error: 'Home Assistant is not enabled in Settings → Tools → Home Assistant.'
+        }
+      }
+      const domain = String(p.domain ?? '').trim()
+      const service = String(p.service ?? '').trim()
+      if (!domain || !service) {
+        return { ok: false, type: req.type, error: 'domain and service are both required.' }
+      }
+      const entityId = typeof p.entity_id === 'string' ? p.entity_id.trim() : ''
+      const data = p.data && typeof p.data === 'object' ? (p.data as Record<string, unknown>) : {}
+      try {
+        const changed = await callHomeAssistantService(
+          {
+            domain,
+            service,
+            target: entityId ? { entity_id: entityId } : undefined,
+            data
+          },
+          signal
+        )
+        const summary =
+          changed.length === 0
+            ? `Called ${domain}.${service} — HA reported no state changes (this is normal for fire-and-forget services).`
+            : `Called ${domain}.${service}. ${changed.length} entit${changed.length === 1 ? 'y' : 'ies'} updated: ${changed
+                .slice(0, 5)
+                .map((c) => `${c.entity_id} → ${c.state}`)
+                .join(', ')}${changed.length > 5 ? '…' : ''}`
+        return {
+          ok: true,
+          type: req.type,
+          output: summary,
+          data: { changed }
+        }
+      } catch (err) {
+        return {
+          ok: false,
+          type: req.type,
+          error: err instanceof Error ? err.message : String(err)
+        }
+      }
+    }
+
     default:
       return { ok: false, type: req.type, error: `Unsupported action: ${req.type}` }
   }
@@ -1200,12 +1721,37 @@ export async function executeAction(
     return { ok: false, type: req.type, error: `Unknown action: ${req.type}` }
   }
 
+  // v2.0 round-8 multi-platform — fail fast on platform-restricted
+  // actions before the permission check + dispatch. Without this, an
+  // agent on mac/linux calling type-text / mouse-click / hotkey /
+  // visual-click would hit input.ts's `throw new Error('... Windows
+  // only')` deeper in the stack and the chat surface would show a
+  // confusing low-level error. Now the agent gets a one-line clear
+  // "Not supported on darwin" up front so its retry loop can route
+  // around the Win-only capability.
+  if (descriptor.platforms && !descriptor.platforms.includes(process.platform)) {
+    log(
+      'info',
+      'automation',
+      `Refusing "${descriptor.label}" on ${process.platform} — supported only on ${descriptor.platforms.join(', ')}.`
+    )
+    return {
+      ok: false,
+      type: req.type,
+      error: `"${descriptor.label}" is not supported on ${process.platform}. Supported platforms: ${descriptor.platforms.join(', ')}.`
+    }
+  }
+
   if (descriptor.requires) {
     try {
       assertGranted(descriptor.requires)
     } catch (err) {
       if (err instanceof PermissionDeniedError) {
-        log('warn', 'automation', `Blocked "${descriptor.label}" — needs ${err.permission} permission.`)
+        log(
+          'warn',
+          'automation',
+          `Blocked "${descriptor.label}" — needs ${err.permission} permission.`
+        )
         return {
           ok: false,
           type: req.type,

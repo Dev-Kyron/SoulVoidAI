@@ -219,7 +219,9 @@ export function CommandPalette(): JSX.Element {
 
             <div className="scrollbar-void max-h-72 overflow-y-auto p-1.5">
               {filtered.length === 0 ? (
-                <p className="px-2 py-6 text-center text-[11px] text-slate-500">No matching command.</p>
+                <p className="px-2 py-6 text-center text-[11px] text-slate-500">
+                  No matching command.
+                </p>
               ) : (
                 filtered.map((command, i) => (
                   <button
@@ -236,7 +238,9 @@ export function CommandPalette(): JSX.Element {
                     <span className="text-[8px] uppercase tracking-wider text-slate-500">
                       {command.group}
                     </span>
-                    {i === selected && <CornerDownLeft size={12} className="text-[var(--accent)]" />}
+                    {i === selected && (
+                      <CornerDownLeft size={12} className="text-[var(--accent)]" />
+                    )}
                   </button>
                 ))
               )}

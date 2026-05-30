@@ -83,3 +83,17 @@ export function __registrySize(): number {
   for (const set of registry.values()) total += set.size
   return total
 }
+
+/**
+ * v2.0 — public sibling of `__registrySize()` for production callers
+ * that need to know "is anything actively running?" (e.g. the idle
+ * VACUUM scheduler). True when at least one AbortController is
+ * registered against any request id. False = no in-flight LLM call,
+ * tool run, or agent step at this moment.
+ */
+export function hasInFlightWork(): boolean {
+  for (const set of registry.values()) {
+    if (set.size > 0) return true
+  }
+  return false
+}

@@ -59,7 +59,8 @@ const COMMANDS: QuickAICommand[] = [
   {
     id: 'translate',
     label: 'Translate to English',
-    template: 'Translate the following to English. If it is already English, paraphrase it:\n\n{TEXT}'
+    template:
+      'Translate the following to English. If it is already English, paraphrase it:\n\n{TEXT}'
   },
   {
     id: 'fix',
@@ -347,8 +348,8 @@ export function QuickAIOverlay(): JSX.Element {
             {/* Empty-state hint */}
             {!answer && !streaming && !error && !clipboard && (
               <div className="px-3 py-3 text-[11px] leading-relaxed text-slate-500">
-                One-shot answers. Type a question and hit Enter. To run a preset
-                command on selected text, copy it first then re-open Quick AI.
+                One-shot answers. Type a question and hit Enter. To run a preset command on selected
+                text, copy it first then re-open Quick AI.
               </div>
             )}
           </motion.div>

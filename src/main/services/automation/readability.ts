@@ -12,7 +12,18 @@
  */
 const MAX_CHARS = 32_000
 
-const REMOVE_TAGS = ['script', 'style', 'noscript', 'nav', 'header', 'footer', 'aside', 'form', 'svg', 'iframe']
+const REMOVE_TAGS = [
+  'script',
+  'style',
+  'noscript',
+  'nav',
+  'header',
+  'footer',
+  'aside',
+  'form',
+  'svg',
+  'iframe'
+]
 
 function decodeEntities(text: string): string {
   return text

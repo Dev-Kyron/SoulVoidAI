@@ -1,0 +1,49 @@
+name: validate-plugin-registry
+
+# Runs on every PR that touches the plugin registry or the validator
+# itself, plus pushes to main so a direct commit can't slip past.
+# Cheap (one Node step, no install) — under 30s on the standard runner.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'plugins-registry/**'
+      - 'scripts/validate-plugin-registry.mjs'
+      - '.github/workflows/validate-plugin-registry.yml'
+      # The validator's hardcoded allowlists mirror three TS unions:
+      # ActionType (shared/types.ts), PermissionId (shared/permissions.ts),
+      # PluginHookName (shared/types.ts). A change to those WITHOUT
+      # matching script updates would silently let valid entries
+      # appear invalid (or vice versa). Trigger the validator on
+      # those changes too so the drift surfaces here, not in a
+      # contributor's PR.
+      - 'src/shared/types.ts'
+      - 'src/shared/permissions.ts'
+  pull_request:
+    paths:
+      - 'plugins-registry/**'
+      - 'scripts/validate-plugin-registry.mjs'
+      - '.github/workflows/validate-plugin-registry.yml'
+      - 'src/shared/types.ts'
+      - 'src/shared/permissions.ts'
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # fetch-depth: 1 — the validator reads one file, doesn't need
+      # repo history. Cuts ~5-10s off each PR's checkout step.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      # No npm install — the validator script is pure Node + native
+      # `fs`/`path`/`URL`. Keeps PR validation under a few seconds.
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Validate registry shape
+        run: node scripts/validate-plugin-registry.mjs

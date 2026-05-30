@@ -104,6 +104,16 @@ export interface ChatMessage {
   /** True while the assistant message is still streaming. */
   streaming?: boolean
   /**
+   * v2.0 — the agent loop hit MAX_AGENT_STEPS before the model declared
+   * itself done. Recoverable by sending "continue" in the same thread —
+   * the conversation history already carries the tool-call breadcrumbs
+   * the model needs to re-orient. MessageBubble surfaces this as a
+   * Resume button so the user doesn't have to type the literal word.
+   * Pre-v2.0 we showed the prefix only; users had to read the body to
+   * know "continue" was a magic word.
+   */
+  paused?: boolean
+  /**
    * Model id that produced this assistant message — captured at send time so
    * a later thread switch / global model change doesn't rewrite history.
    * Lets the UI show "answered by gpt-4o" inline, à la OpenRouter / Cursor.
@@ -202,9 +212,25 @@ export type ActionType =
   | 'read-screen'
   | 'web-search'
   | 'web-fetch'
+  | 'deep-research'
   | 'generate-image'
+  // v2.0 — image-editing tool surface. Inpaint replaces a masked region
+  // via a prompt; upscale is non-creative resolution boost; bg-remove
+  // returns a transparent-background PNG. All currently route through
+  // Stability AI (only major provider with all three under one key).
+  | 'edit-image-inpaint'
+  | 'edit-image-upscale'
+  | 'edit-image-bg-remove'
   | 'run-python'
   | 'save-document'
+  // v2.0 — Home Assistant integration. Three tools split by intent so
+  // each maps cleanly onto the agent's permission flow + log line:
+  //   ha-list-entities  — discovery (read-only across the whole instance)
+  //   ha-get-state      — read a single entity (read-only, targeted)
+  //   ha-call-service   — universal write (turn_on/off, set_temperature, etc)
+  | 'ha-list-entities'
+  | 'ha-get-state'
+  | 'ha-call-service'
 
 export interface ActionRequest {
   type: ActionType
@@ -218,6 +244,14 @@ export interface ActionRequest {
    * correlate with.
    */
   requestId?: string
+  /**
+   * v2.0 — active thread id. Currently consumed only by `run-python`, which
+   * uses it to route through the persistent per-thread Python kernel
+   * (state survives across calls within the same thread). Absent → the
+   * tool runs in its old ephemeral mode. Future stateful tools (REPL,
+   * shell sessions) can reuse the same plumbing.
+   */
+  threadId?: string
 }
 
 export interface ActionResult {
@@ -241,6 +275,17 @@ export interface ActionDescriptor {
   description: string
   requires: PermissionId | null
   reversible: boolean
+  /**
+   * v2.0 round-7 multi-platform — optional whitelist of NodeJS.Platform
+   * values where this action actually works. When unset, the action is
+   * cross-platform and runs everywhere. When set, dispatchers should
+   * reject calls on platforms NOT in the list with a clear
+   * "Not supported on darwin / linux" error so the agent on mac/linux
+   * doesn't keep retrying Windows-only paths (typeText, mouse, hotkey,
+   * visual-click) and getting opaque downstream errors. The renderer
+   * uses this to dim / hide Win-only action buttons too.
+   */
+  platforms?: ReadonlyArray<NodeJS.Platform>
 }
 
 /* --------------------------- Quick actions / plugins -------------------- */
@@ -257,6 +302,30 @@ export interface QuickAction {
 }
 
 /** On-disk plugin manifest (a declarative JSON workflow pack). */
+/**
+ * v2.0 — JS hook names plugins can subscribe to. Each hook fires at a
+ * specific lifecycle point in main and dispatches all registered handlers
+ * in sequence. Handlers may MUTATE the payload to influence downstream
+ * behaviour (e.g. rewrite a user message before it reaches the model).
+ *
+ * - `onUserMessage`   — fires before send. Payload: `{ content, threadId }`.
+ *                       Handler may return `{ content }` to rewrite.
+ * - `onAssistantReply` — fires after the model returns. Payload:
+ *                       `{ content, model, threadId }`. Read-only.
+ * - `onProactiveSpeak` — fires before a watch task broadcasts speech.
+ *                       Payload: `{ taskName, content, tone }`. Handler
+ *                       may return `{ content }` to rewrite or null/void
+ *                       to suppress (v2.1 — dispatch point not yet wired).
+ * - `onToolCalled`     — fires after each agent tool call resolves.
+ *                       Payload: `{ name, args, result }`. Read-only.
+ *                       (v2.1 — dispatch point not yet wired.)
+ */
+export type PluginHookName =
+  | 'onUserMessage'
+  | 'onAssistantReply'
+  | 'onProactiveSpeak'
+  | 'onToolCalled'
+
 export interface PluginManifest {
   id: string
   name: string
@@ -264,16 +333,58 @@ export interface PluginManifest {
   description: string
   author?: string
   quickActions: QuickAction[]
+  /**
+   * v2.0 — optional JS hook handlers. Each value is the body of a
+   * function (e.g. `"return { content: payload.content.toUpperCase() }"`).
+   * The loader compiles each entry via `new Function('payload', 'context', body)`
+   * and stores the compiled handler in main. Handlers run IN-PROCESS
+   * with full Node access; the plugins:hooks config flag is the master
+   * kill-switch and individual plugins still need to be enabled.
+   *
+   * Pre-2.0 manifests omit this and behave identically. Plugins with
+   * any hook value are flagged in the install dialog with a "runs
+   * JavaScript" warning, even if the master toggle is off.
+   */
+  hooks?: Partial<Record<PluginHookName, string>>
 }
 
 /**
+ * Trust tier for a marketplace entry.
+ *  - 'curated'   — published by the studio (or verified maintainers).
+ *                  Pre-2.0 entries default here for back-compat. Free to
+ *                  declare JS hooks; trusted in the UI without extra
+ *                  warnings beyond the master switch.
+ *  - 'community' — submitted via a public PR to the registry. Source +
+ *                  author surface in the UI; if the manifest declares
+ *                  any JS hook, the install dialog adds an explicit
+ *                  "this runs JavaScript a stranger wrote" warning
+ *                  even when the master hooks switch is on.
+ */
+export type PluginRegistrySource = 'curated' | 'community'
+
+/**
  * A registry entry — what the marketplace browse view receives. Extends
- * the manifest with optional non-installed metadata (`tags`) that the UI
- * uses for filtering / search and that the installer ignores.
+ * the manifest with optional non-installed metadata (`tags`, `source`,
+ * author attribution) that the UI uses for filtering / trust display /
+ * provenance, and that the installer ignores when writing the manifest.
  */
 export interface PluginRegistryEntry extends PluginManifest {
   /** Free-form tags for marketplace filtering, e.g. ["productivity", "ai"]. */
   tags?: string[]
+  /**
+   * v2.0 — trust tier. Missing/invalid values land as 'curated' via the
+   * registry validator so pre-2.0 entries don't suddenly badge differently.
+   */
+  source?: PluginRegistrySource
+  /** v2.0 — GitHub handle (or similar) of the person who submitted the PR.
+   *  Required by the validator for 'community' entries; ignored for curated. */
+  submittedBy?: string
+  /** v2.0 — ISO date when the PR was merged. Surfaced as "added on" in the
+   *  card so users can see what's fresh vs ancient. */
+  submittedAt?: string
+  /** v2.0 — optional link to the plugin's source repo / page. Renders as
+   *  an external "source ↗" link on the registry card. */
+  repoUrl?: string
 }
 
 /** Plugin state delivered to the renderer. */
@@ -285,6 +396,10 @@ export interface PluginInfo {
   author: string
   enabled: boolean
   actionCount: number
+  /** v2.0 — number of hook subscriptions the plugin declares. Surfaced
+   *  in the Settings list + install dialog so the user can see at a
+   *  glance which plugins execute JavaScript vs which are pure JSON. */
+  hookCount: number
   /** File name on disk. */
   file: string
   /** Set when the plugin failed to load or validate. */
@@ -313,6 +428,11 @@ export type LogCategory =
   | 'memory'
   | 'summarizer'
   | 'mcp'
+  // v2.0 — persistent Python kernel lifecycle (spawn, exit, idle reap).
+  | 'python'
+  // v2.0 — browser-extension local IPC bridge (socket lifecycle,
+  // connection events, native-host disconnects).
+  | 'extension'
 
 export interface LogEntry {
   id: string
@@ -370,12 +490,7 @@ export interface UserFact {
 /** Bucketed sentiment labels emitted by the classifier. Narrow set so the
  *  model's outputs are well-defined + system prompt copy can talk in
  *  terms it recognises. */
-export type SessionSentimentLabel =
-  | 'stressed'
-  | 'productive'
-  | 'stuck'
-  | 'excited'
-  | 'neutral'
+export type SessionSentimentLabel = 'stressed' | 'productive' | 'stuck' | 'excited' | 'neutral'
 
 export interface SessionSentiment {
   id: number
@@ -512,6 +627,54 @@ export interface MemoryState {
   customActions: QuickAction[]
   /** Long-term facts about the user, injected into the system prompt. */
   facts: UserFact[]
+  /**
+   * v2.0 — passive biographical profile, auto-extracted from conversation
+   * tails. Differs from `facts` (which the user explicitly opts into via
+   * "Remember this" or the auto-extract toggle) in three ways:
+   *   1. Always extracted in the background after every reply.
+   *   2. Categorized so the system prompt can inject a grouped block
+   *      ("What you know about projects:" / "...about preferences:")
+   *      instead of one flat list.
+   *   3. Carries a confidence + observation count so repeated mentions
+   *      strengthen an entry and conflicting / forgotten details fade
+   *      naturally on re-extraction.
+   * Optional in the on-disk schema so memory files created before v2.0
+   * migrate cleanly to an empty list.
+   */
+  biographical?: BiographicalEntry[]
+}
+
+/**
+ * v2.0 — passive-biographical category enum. Stays small on purpose so
+ * the extractor prompt can describe each category in one line, the
+ * system-prompt injection can render readable grouped blocks, and the
+ * UI can render one row per category at a glance. Free-form notes
+ * about anything that doesn't fit go in `identity` (a catch-all).
+ */
+export type BiographicalCategory =
+  | 'identity'
+  | 'projects'
+  | 'preferences'
+  | 'relationships'
+  | 'tools'
+  | 'work-patterns'
+
+export interface BiographicalEntry {
+  id: string
+  category: BiographicalCategory
+  /** One-line declarative statement ("Working on Spiritless, a UE5 game"). */
+  text: string
+  /**
+   * 0.0 - 1.0. Seeded at 0.5 on first observation, raised toward 1.0 on
+   * every re-confirmation (capped). Confidence below `MIN_BIO_CONFIDENCE`
+   * (renderer-side const) is excluded from system-prompt injection so
+   * the model isn't biased by guesses the extractor only saw once.
+   */
+  confidence: number
+  /** Distinct sessions that have surfaced this entry. */
+  observations: number
+  firstSeenAt: string
+  lastSeenAt: string
 }
 
 /** Kinds of custom Nexus action a user can create. */
@@ -578,7 +741,13 @@ export interface UsageSummary {
   totalEntries: number
   unknownPricing: number
   byProvider: Array<{ provider: ProviderId; cost: number; entries: number }>
-  byModel: Array<{ model: string; provider: ProviderId; cost: number; entries: number; tokens: number }>
+  byModel: Array<{
+    model: string
+    provider: ProviderId
+    cost: number
+    entries: number
+    tokens: number
+  }>
   /**
    * Daily total cost in USD for the chart. Days with zero spend get an
    * entry too (cost: 0) so the renderer can draw an empty bar without
@@ -800,12 +969,41 @@ export interface McpRegistryEntry {
   author?: string
   docsUrl?: string
   /**
-   * v1.11.0 / v1.11.1 — which registry surfaced this entry. Marketplace
-   * dialog colour-codes the badge so users can tell our curated picks
-   * from the broader community catalogues. Optional for back-compat
-   * with the bundled registry shape that predates this field.
+   * Origin of the registry row. Marketplace dialog colour-codes the badge
+   * so users can tell at a glance where an entry came from.
+   *  - 'curated'   — published by the studio in `mcp-registry/registry.json`.
+   *  - 'community' — v2.0: submitted via PR to the same registry by a
+   *                  community contributor. Same JSON, different
+   *                  attribution + a slate "Community" badge so users
+   *                  can apply more scrutiny. Cryptographically signed
+   *                  alongside curated entries (one Ed25519 signature
+   *                  covers the whole file).
+   *  - 'smithery' / 'glama' / 'pulsemcp' — aggregated from those
+   *                  external community catalogues. Inherently
+   *                  unverifiable (we don't control their upstream
+   *                  signing keys) — surfaced in browse for discovery
+   *                  but harder to trust at a glance.
+   * Optional for back-compat with the pre-v1.11 registry shape; the
+   * validator coerces missing values to 'curated'.
    */
-  source?: 'curated' | 'smithery' | 'glama' | 'pulsemcp'
+  source?: 'curated' | 'community' | 'smithery' | 'glama' | 'pulsemcp'
+  /**
+   * v2.0 — GitHub handle of the PR submitter. Required by the validator
+   * for entries with `source: 'community'`; ignored on curated entries.
+   */
+  submittedBy?: string
+  /**
+   * v2.0 — ISO date when the PR merged. Surfaces as "added on" in the
+   * card so users can see what's fresh vs ancient. Validator stamps it
+   * if you omit it on submission.
+   */
+  submittedAt?: string
+  /**
+   * v2.0 — optional link to the upstream server source / docs page.
+   * Renders as a "source ↗" link on the marketplace card so users can
+   * audit the actual package before installing.
+   */
+  repoUrl?: string
   /**
    * v1.12.0 — cryptographic verification flag. Set true only for
    * entries that came from a source whose detached Ed25519 signature
@@ -831,6 +1029,22 @@ export interface McpRegistryEntry {
    * still useful for browse + discover.
    */
   discoveryOnly?: boolean
+  /**
+   * v2.0 — built-in integration flag. When true, the entry isn't a
+   * spawnable MCP server at all — it points at a first-party feature
+   * already wired into main (e.g. Home Assistant native integration).
+   * The marketplace dialog shows a "Set up" button that opens the
+   * in-app wizard for that feature instead of running through the
+   * generic env-prompt + spawn flow.
+   *
+   * `builtinHandlerId` names the specific wizard the dialog should
+   * route to. Currently:
+   *   - 'home-assistant' → opens HomeAssistantWizardDialog
+   * Unknown handlers fall back to the generic install dialog with
+   * an "internal integration not available" toast.
+   */
+  builtin?: boolean
+  builtinHandlerId?: 'home-assistant'
 }
 
 /**
@@ -887,6 +1101,133 @@ export interface ScanProgress {
   current?: string
 }
 
+/* --------------------------- Persona templates (v2.0) ----------------- */
+
+/**
+ * User-defined persona templates. Live in `customPersonas` on the config.
+ * NOT a replacement for the 6 built-in MODES — these are sharable presets
+ * (system prompt + recommended model + sample prompts) the user applies
+ * to a chat thread. The runtime helpers + bundle validator live in
+ * `@shared/personas`; the type stays here to keep ClientConfig
+ * self-contained without a circular import.
+ */
+export interface PersonaTemplate {
+  id: string
+  name: string
+  tagline?: string
+  accent?: AccentColor
+  prompt: string
+  recommendedProvider?: ProviderId
+  recommendedModel?: string
+  samplePrompts?: string[]
+  baseMode?: ModeId
+  createdBy?: string
+  createdAt: string
+}
+
+/**
+ * Disk-shape for the export/import `.voidsoul-persona.json` file. The
+ * `kind` and `version` make it self-identifying so a future drag-drop
+ * importer can sniff the file without relying on extension.
+ */
+export interface PersonaBundle {
+  kind: 'voidsoul-persona'
+  version: 1
+  name: string
+  tagline?: string
+  accent?: AccentColor
+  prompt: string
+  recommendedProvider?: ProviderId
+  recommendedModel?: string
+  samplePrompts?: string[]
+  baseMode?: ModeId
+  createdBy?: string
+  createdAt?: string
+  notes?: string
+}
+
+/* --------------------------- Python sandbox (v2.0) --------------------- */
+
+/**
+ * One active Python kernel — what the Settings panel renders per row.
+ * Reflects the in-memory pool, NOT durable state — a thread can have
+ * an existing workspace dir on disk without an active kernel here.
+ */
+export interface PythonKernelStatus {
+  threadId: string
+  /** Python version (e.g. "3.12.4") reported on kernel startup. */
+  python: string
+  /** Absolute path to the interpreter that's running. Surfaces virtualenv
+   *  usage to the user — "wait, why is it pointing at my conda env?". */
+  executable: string
+  /** Per-thread workspace dir (CWD of the kernel). User can open this in
+   *  their file explorer to see generated files. */
+  workspaceDir: string
+  /** ISO timestamp of the most recent runCode() call against the kernel. */
+  lastUsedAt: string
+  /** False when the kernel exited (crash or manual kill) but the pool
+   *  entry hasn't been swept yet. Generally true for any row that's
+   *  surfaced in `list()`. */
+  alive: boolean
+}
+
+/* --------------------------- Vector store browser (v2.0) --------------- */
+
+/**
+ * Per-file summary used by the Vector-store browser. One row per indexed
+ * file with the count of chunks and the timestamp range — lets the panel
+ * render a folder → files drill-down without paying for the full chunk
+ * payload until the user expands a row.
+ */
+export interface VectorStoreFileSummary {
+  filePath: string
+  chunkCount: number
+  earliestAt: string
+  latestAt: string
+  model: string
+}
+
+/**
+ * Single chunk row — the expanded view inside a file. `score` is only set
+ * when this chunk came from a retrieval (the Query Trace tab), not when
+ * the user is just browsing.
+ */
+export interface VectorStoreChunkRow {
+  id: string
+  source: 'chat' | 'file'
+  filePath: string | null
+  chunkIndex: number | null
+  threadId: string | null
+  role: 'user' | 'assistant' | 'file'
+  preview: string
+  createdAt: string
+  model: string
+  /** Cosine similarity in [-1, 1]; set only on retrieval traces. */
+  score?: number
+}
+
+/**
+ * Snapshot of the most-recent retrieval the chat layer ran. Recorded by
+ * `searchSimilar` so the panel can show "what did the assistant just
+ * pull in for the user's last question?" without re-running anything.
+ */
+export interface VectorStoreQueryTrace {
+  query: string
+  ranAt: string
+  hits: VectorStoreChunkRow[]
+}
+
+/** Aggregate counts for the dashboard chip at the top of the browser. */
+export interface VectorStoreStats {
+  totalChunks: number
+  chatChunks: number
+  fileChunks: number
+  activeModel: string | null
+  /** Distinct embedding models present in the store. >1 means a leftover
+   *  from a previous provider — the panel surfaces a "Clean up" CTA. */
+  modelCount: number
+}
+
 export interface ScanResult {
   folder: string
   filesScanned: number
@@ -894,6 +1235,14 @@ export interface ScanResult {
   filesSkipped: number
   chunksAdded: number
   error?: string
+  /**
+   * v2.0 — true when the user clicked Pause before the scan walked the full
+   * folder. The partial index stays on disk (the per-file commits make the
+   * scan implicitly resumable) and a subsequent rescan picks up where this
+   * one left off via the stat-skip path. `error` stays unset in this case
+   * — pausing is intentional, not a failure.
+   */
+  paused?: boolean
 }
 
 /* --------------------------- Notebooks --------------------------- */
@@ -950,6 +1299,17 @@ export type ScheduleKind = 'daily' | 'interval' | 'once'
 export type TaskKind = 'cron' | 'watch'
 
 /**
+ * v2.0 — execution mode for a cron task. Orthogonal to TaskKind so the
+ * scheduling semantics (daily/interval/once + jitter + DND) stay shared
+ * while the payload behaviour differs:
+ *   'prompt'   — original behaviour: runCompletion(prompt) → toast + notification
+ *   'research' — runDeepResearch(topic) → new chat thread with the
+ *                synthesised brief + click-to-open OS notification
+ * Watch tasks ignore this field.
+ */
+export type TaskMode = 'prompt' | 'research'
+
+/**
  * Conditions a watch task can subscribe to. Polled types (idle-duration,
  * time-of-day-window) are checked once per scheduler tick; event types
  * (task-complete, sentiment-shift) are fired immediately from the
@@ -980,20 +1340,19 @@ export interface WatchSpec {
  * 'speak' — but kept as a discriminated union so future actions
  * (notify, run shell, etc) slot in without breaking the schema.
  */
-export type ProactiveAction =
-  | {
-      type: 'speak'
-      /** Static text the model speaks. For 'morning-recap' this is
-       *  ignored; the runner generates content dynamically. */
-      content: string
-      tone?: import('./voiceMarkers').ToneTag
-      /** If true, an in-flight voice clip gets pre-empted. Default
-       *  false so users aren't interrupted mid-reply. */
-      allowInterrupt?: boolean
-      /** Special flag for built-in 'morning recap' — runner ignores
-       *  `content` and asks the cheap model to summarise yesterday. */
-      dynamicRecap?: boolean
-    }
+export type ProactiveAction = {
+  type: 'speak'
+  /** Static text the model speaks. For 'morning-recap' this is
+   *  ignored; the runner generates content dynamically. */
+  content: string
+  tone?: import('./voiceMarkers').ToneTag
+  /** If true, an in-flight voice clip gets pre-empted. Default
+   *  false so users aren't interrupted mid-reply. */
+  allowInterrupt?: boolean
+  /** Special flag for built-in 'morning recap' — runner ignores
+   *  `content` and asks the cheap model to summarise yesterday. */
+  dynamicRecap?: boolean
+}
 
 export interface ScheduledTask {
   id: string
@@ -1002,6 +1361,10 @@ export interface ScheduledTask {
   /** v1.5.0+ — discriminator. Existing pre-v1.5 rows default to 'cron'
    *  via the migration's column default. */
   kind: TaskKind
+  /** v2.0 — execution mode for cron tasks. Watch tasks ignore this and
+   *  always behave as `'prompt'` (the field carries no meaning for them).
+   *  Pre-v2 rows default to `'prompt'` via the migration's column default. */
+  mode: TaskMode
   scheduleKind: ScheduleKind
   /** `daily`: "HH:mm" · `interval`: minutes as string · `once`: ISO
    *  timestamp · `watch` (kind='watch'): JSON-stringified WatchSpec. */
@@ -1105,8 +1468,19 @@ export interface InstalledVoice {
 export interface VoiceSetupStatus {
   /** Piper binary bundled with the install + reachable from main. */
   binaryAvailable: boolean
+  /** The currently-active voice per persona (honours the user's pick
+   *  from `VoiceConfig.selectedVoiceByPersona`, fallback to first
+   *  installed). Surfaced for the existing VoiceCard "what's playing"
+   *  summary so it doesn't have to re-resolve. */
   void: InstalledVoice | null
   soul: InstalledVoice | null
+  /**
+   * v2.0 — every installed voice per persona. Lets the Settings UI
+   * render a picker when more than one voice is present (pre-2.0 we
+   * only surfaced the active one, so users with multiple .onnx files
+   * couldn't tell what else they had to pick from).
+   */
+  installed: { void: InstalledVoice[]; soul: InstalledVoice[] }
 }
 
 export interface VoiceConfig {
@@ -1128,17 +1502,29 @@ export interface VoiceConfig {
    * .ppn keyword file per persona (Settings → Integrations → Picovoice).
    */
   wakeWord: { enabled: boolean }
+  /**
+   * v2.0 — selected voice id per persona. Pre-2.0 `activeVoice(persona)`
+   * always returned voices[0] for the persona's folder, so users with
+   * multiple .onnx files installed had no way to choose which one Soul
+   * would actually speak with. This map persists the picked id; the
+   * resolver in main/services/voice/piper.ts falls back to the first
+   * installed voice when the id isn't present (covers fresh installs,
+   * deleted voices, and back-compat with pre-2.0 configs).
+   */
+  selectedVoiceByPersona?: Partial<Record<VoicePersona, string>>
+  /**
+   * v2.0 — per-mode persona override. When the user switches mode (or
+   * opens a thread with a pinned mode), the effective persona resolves
+   * from this map first; missing modes fall through to `persona`. Lets a
+   * creative-writing mode auto-speak in Soul while indie-dev stays on
+   * Void without the user manually toggling personas on each switch.
+   */
+  personaByMode?: Partial<Record<ModeId, VoicePersona>>
 }
 
 /* ------------------------------ Config ---------------------------------- */
 
-export type ModeId =
-  | 'indie-dev'
-  | 'creator'
-  | 'streamer'
-  | 'researcher'
-  | 'writer'
-  | 'productivity'
+export type ModeId = 'indie-dev' | 'creator' | 'streamer' | 'researcher' | 'writer' | 'productivity'
 export type AccentColor =
   | 'violet'
   | 'cyan'
@@ -1193,6 +1579,18 @@ export interface ChatBehaviourConfig {
    * when the router picks a worse model for a given task.
    */
   autoRoute: boolean
+  /**
+   * v2.0 — master kill-switch for plugin JS hook execution. When OFF
+   * (default), no plugin hook handler runs even if individual plugins
+   * are enabled and the manifest declares hooks. Off-by-default is the
+   * conservative choice: installing a plugin doesn't immediately give
+   * it JS-in-main capabilities; the user has to flip both this master
+   * toggle AND the per-plugin enabled flag.
+   *
+   * The install dialog warns about hooks regardless of this flag's
+   * state — visibility wins over silent-safety.
+   */
+  pluginHooks: boolean
 }
 
 export type ThemeMode = 'dark' | 'light' | 'system'
@@ -1210,6 +1608,21 @@ export interface AppearanceConfig {
   alwaysOnTop: boolean
   launchOnStartup: boolean
   screenAwareness: boolean
+  /**
+   * v2.0 — semantic screen awareness. Builds on `screenAwareness`
+   * (which only broadcasts the active window title): when this is
+   * also on, every window-title CHANGE triggers a debounced
+   * screenshot + OCR run so the assistant has a real text excerpt of
+   * what's on screen rather than just the window's chrome string.
+   *
+   * Optional in the on-disk shape so pre-v2.0 configs default to
+   * `false` via the config layer's spread. Local-only (OCR runs via
+   * tesseract.js WASM — no API cost) and requires the screenCapture
+   * permission. Vision-summary calls — which DO cost money — are
+   * intentionally out of scope here; if/when added they'll need a
+   * separate gate.
+   */
+  semanticScreenAwareness?: boolean
   nexusStyle: NexusStyle
   /** UI language. `system` follows the OS locale; otherwise a BCP-47 tag. */
   locale: LocaleCode
@@ -1218,7 +1631,21 @@ export interface AppearanceConfig {
 }
 
 /** Supported UI languages. `system` follows the OS preference. */
-export type LocaleCode = 'system' | 'en' | 'es' | 'ja' | 'de'
+export type LocaleCode =
+  | 'system'
+  | 'en'
+  | 'es'
+  | 'ja'
+  | 'de'
+  // v2.0 — closing the ChatGPT/Claude gap on UI language coverage. These
+  // four cover the largest remaining audiences (zh, pt, fr, ko) that beta
+  // testers asked for first. Adding a locale is: drop a file in
+  // `src/renderer/src/locales/`, register it in `i18n.ts`, extend this
+  // union, and add the `<option>` to AppearanceSettings.
+  | 'zh'
+  | 'ko'
+  | 'fr'
+  | 'pt'
 
 export interface DndConfig {
   /** Manual override — when true, DND is on regardless of schedule. */
@@ -1248,9 +1675,7 @@ export function isQuietNow(dnd: DndConfig, now: Date = new Date()): boolean {
   const start = parse(dnd.quietStart)
   const end = parse(dnd.quietEnd)
   if (start == null || end == null) return false
-  return start <= end
-    ? minutes >= start && minutes < end
-    : minutes >= start || minutes < end
+  return start <= end ? minutes >= start && minutes < end : minutes >= start || minutes < end
 }
 
 /**
@@ -1278,6 +1703,51 @@ export interface MemoryConfig {
    * a specific model when they care about cost or quality trade-offs.
    */
   sentimentModel: string | null
+  /**
+   * v2.0 — conversation summariser knobs. Pre-2.0 these were hardcoded
+   * constants in useChatStore (10_000 / 8). Now exposed so users can
+   * tune: coding sessions benefit from a higher trigger + larger recent
+   * tail (so the model can still see the file you were just editing),
+   * creative writing benefits from earlier summarisation + tighter tail
+   * (so the story arc stays the dominant context).
+   *
+   * `summariserTriggerTokens`: token budget above which older turns
+   *   roll into a cached "story so far" recap. Below this, the full
+   *   conversation is sent verbatim every turn.
+   * `summariserKeepRecent`: minimum number of recent messages to keep
+   *   verbatim even when summarisation kicks in. Floor of the tail.
+   * `summariserPerMode`: optional per-mode overrides. Missing modes /
+   *   missing fields fall through to the global defaults above. Keyed
+   *   by ModeId so mode-switching swaps tuning automatically.
+   */
+  summariserTriggerTokens: number
+  summariserKeepRecent: number
+  summariserPerMode: Partial<Record<ModeId, { triggerTokens?: number; keepRecent?: number }>>
+  /**
+   * v2.0 — when ON, the fact extractor consults the v1.4 sentiment
+   * classifier and PAUSES memory writes during stressed/stuck sessions
+   * (intensity >= 3). Rationale: stuck sessions tend to memorialise
+   * frustration as "facts" the model then carries into healthier
+   * future sessions. Productive/excited/neutral sessions still extract
+   * normally. Has no effect when `emotionalContext` is off (no signal).
+   *
+   * Default true — refines the existing autoMemory behaviour rather
+   * than introducing a new pipeline; users who want every fact captured
+   * regardless of mood turn this off.
+   */
+  sentimentPruning: boolean
+  /**
+   * v2.0 — passive biographical profile. When ON, the renderer's
+   * `biographicalExtractor` runs after every successful streaming reply,
+   * pulling categorized identity / projects / preferences / relationships /
+   * tools / work-pattern observations from the recent transcript and
+   * raising the confidence of existing entries on repeated mentions.
+   * The profile is injected into the system prompt alongside facts.
+   * Default true — passive memory is the headline v2.0 feature and a
+   * user who hates it can turn it off in one click. Optional in the
+   * on-disk shape so pre-2.0 configs migrate cleanly to the default.
+   */
+  biographical?: boolean
 }
 
 /** The configuration shape delivered to the renderer (never contains keys). */
@@ -1303,12 +1773,48 @@ export interface ExperimentalFeaturesConfig {
    * (or until model precision reaches the bar without it).
    */
   visualClick: boolean
+  /**
+   * v2.0 Phase 2 — click_on_screen strategy mode.
+   *
+   * Optional in the on-disk shape so pre-2.0 configs migrate cleanly
+   * to `auto` via the config layer's spread default. See
+   * {@link ClickStrategyMode} for the full set + semantics.
+   */
+  clickStrategy?: ClickStrategyMode
 }
+
+/**
+ * v2.0 Phase 2 — click_on_screen strategy mode union, exported so
+ * renderer code (Settings → Experimental) can type its picker
+ * without re-spelling the literals.
+ *
+ *   - `auto`                 → uia-then-vision baseline, OR
+ *                              sonnet-computer-use when the active
+ *                              provider is Anthropic and the active
+ *                              model supports computer-use natively.
+ *                              The right default for most users — they
+ *                              get the better engine for free when
+ *                              they're on a capable Sonnet.
+ *   - `uia-then-vision`      → force the baseline regardless of
+ *                              provider. Useful when computer-use is
+ *                              over-eager for the user's workflow.
+ *   - `sonnet-computer-use`  → force computer-use. Errors out clearly
+ *                              when the active provider isn't
+ *                              Anthropic with a capable model.
+ */
+export type ClickStrategyMode = 'auto' | 'uia-then-vision' | 'sonnet-computer-use'
 
 export interface ClientConfig {
   activeProvider: ProviderId
   providers: ProviderRuntime[]
   activeMode: ModeId
+  /**
+   * v2.0 — user-defined persona templates. Empty by default; users build
+   * via the Persona panel or import a `.voidsoul-persona.json` bundle.
+   * Doesn't replace the built-in MODES — these layer on top as
+   * apply-to-thread presets.
+   */
+  customPersonas: PersonaTemplate[]
   permissions: Record<PermissionId, PermissionState>
   appearance: AppearanceConfig
   voice: VoiceConfig
@@ -1326,15 +1832,193 @@ export interface ClientConfig {
   experimentalFeatures: ExperimentalFeaturesConfig
   /** Folder used for backup sync (e.g. a Dropbox/Drive folder). Empty = unset. */
   syncFolder: string
+  /** v2.0 — true once the user has set up the E2E sync vault on this
+   *  device. Independent of `syncFolder` (the legacy manual import/export
+   *  also writes to syncFolder without engaging the continuous engine). */
+  syncPaired: boolean
+  /** v2.0 — this device's UUID inside the sync vault. Stable across launches. */
+  syncDeviceId: string
+  /** v2.0 — user-visible label for this device, shown in the vault's
+   *  device registry on every peer. */
+  syncDeviceName: string
+  /** v2.0 polish — the encrypted-vault subfolder (parent + `/voidsoul-sync`).
+   *  Kept distinct from `syncFolder` (the legacy bundle field) so a
+   *  paired user clicking "Push bundle" can't write plaintext into
+   *  their encrypted vault directory. */
+  syncVaultFolder: string
+  /** v2.0 — Home Assistant native integration. Empty/absent = not set up.
+   *  When `enabled` AND the user has granted the `homeAssistant`
+   *  permission, the agent gains three tools (list/get/call). Token
+   *  lives in the OS keychain, never in this object. */
+  homeAssistant: HomeAssistantConfig
   /** True once the user has seen (or skipped) the first-boot tour. */
   onboarded: boolean
   systemPrompt: string
+  /**
+   * v2.0 — browser-extension bridge. When `enabled`, main starts a local IPC
+   * server (Unix socket on Mac/Linux, named pipe on Windows) and the Chrome
+   * extension's native-messaging host can connect to it. Off by default —
+   * the user opts in from Settings → Tools → Browser Extension, which also
+   * surfaces the per-OS install instructions for the native host manifest.
+   */
+  browserExtension: BrowserExtensionConfig
+}
+
+/**
+ * v2.0 — browser-extension bridge config. Stays a tiny shape on purpose: the
+ * extension is local-only (no remote server, no cloud) and the hotkey/UI
+ * concerns live inside the extension itself, not in the desktop config.
+ */
+export interface BrowserExtensionConfig {
+  /** Master switch — starts/stops the local IPC server. */
+  enabled: boolean
+}
+
+/** Live status reported to the Settings panel so the user knows the bridge is
+ *  actually running and accepting connections. */
+export interface BrowserExtensionStatus {
+  /** Master switch from config. */
+  enabled: boolean
+  /** True when the local IPC server is listening for native-host connections. */
+  listening: boolean
+  /** Number of currently-connected native-host clients (one per Chrome instance
+   *  on a typical setup). Renders as "0 connected" / "1 connected" in the UI. */
+  connectedClients: number
+  /** Filesystem path of the local IPC socket / named pipe. Surfaced for
+   *  troubleshooting + the install instructions. */
+  socketPath: string
+  /**
+   * Absolute path where the Chrome native-host manifest needs to live
+   * (per-OS). v2.0 round-8 — kept for back-compat with renderers that
+   * only target Chrome. New surface: `browserHostManifestPaths` below.
+   */
+  hostManifestPath: string
+  /**
+   * v2.0 round-8 — per-browser native-host manifest paths on the current
+   * OS. Renderer can let the user pick whichever browser they actually
+   * use (Chrome / Edge / Brave / Arc) and copy the matching path. The
+   * install.mjs helper already writes to all four when present; this
+   * surface makes the in-app diagnostic honest about that.
+   */
+  browserHostManifestPaths: {
+    chrome: string
+    edge: string
+    brave: string
+    arc: string
+  }
+  /** Absolute path to the bridge.cjs script the host manifest must point at. */
+  bridgeScriptPath: string
 }
 
 /** Outcome of a backup / sync operation. */
 export interface SyncResult {
   ok: boolean
   message: string
+}
+
+/* --------------------------- Click bench --------------------------- */
+
+/**
+ * v2.0 — click_on_screen measurement harness. Shape is identical to
+ * the main-side `Benchmark` in `services/automation/clickBench/types.ts`
+ * — declared here so the IPC bridge has a typed shape to wire without
+ * importing main-process modules.
+ */
+export interface ClickBenchBenchmark {
+  id: string
+  label: string
+  prompt: string
+  category: 'labeled-native' | 'icon-only-native' | 'browser-web' | 'menu-item' | 'panel-selector'
+  inWindow: string | null
+  referenceScreenshotPath: string | null
+  groundTruth: {
+    centerX: number
+    centerY: number
+    bbox: { x: number; y: number; w: number; h: number }
+    displayWidth: number
+    displayHeight: number
+  } | null
+  notes: string | null
+  capturedAt: string | null
+}
+
+/* --------------------------- Home Assistant --------------------------- */
+
+/**
+ * v2.0 — persisted HA config slice. The long-lived access token lives
+ * separately in the OS keychain under secret id `home-assistant`; this
+ * object never carries it so a renderer with a buggy persona dump can't
+ * leak the token by serialising config.
+ */
+export interface HomeAssistantConfig {
+  /** Base URL of the user's HA instance, e.g. `http://homeassistant.local:8123`
+   *  or `https://abcdef.ui.nabu.casa`. Trailing slash stripped. Empty
+   *  means "not set up". */
+  url: string
+  /** Master switch — even with valid URL + token, agent tools and the
+   *  Settings status panel stay quiet until this is true. The setup
+   *  wizard flips it on after the first successful test. */
+  enabled: boolean
+}
+
+/**
+ * Live snapshot the renderer's Settings panel + wizard consume. Mirrors
+ * the main-side `HomeAssistantStatus` shape from
+ * `services/automation/homeassistant.ts` so the bridge passes it
+ * through unchanged.
+ */
+export interface HomeAssistantStatus {
+  configured: boolean
+  enabled: boolean
+  connected: boolean
+  url: string | null
+  instanceName: string | null
+  version: string | null
+  entityCount: number | null
+  error: string | null
+}
+
+/** One HA state row as the renderer's wizard renders it. Lighter than
+ *  the full main-side shape — just what the UI needs to show a sample
+ *  of detected entities after the test passes. */
+export interface HomeAssistantEntitySummary {
+  entity_id: string
+  state: string
+  friendly_name: string | null
+  domain: string
+}
+
+/* --------------------------- E2E sync engine --------------------------- */
+
+/**
+ * One device registered in the sync vault's manifest. Surfaced verbatim
+ * to the renderer's Settings panel so the user can see what other devices
+ * have joined and when each was last seen.
+ */
+export interface SyncDevice {
+  id: string
+  name: string
+  joinedAt: string
+  lastSeenAt: string
+}
+
+/**
+ * v2.0 — engine status for the Settings panel ribbon. `paired` gates
+ * everything: when false, the manual backup/import buttons are the only
+ * sync surface. When true, the renderer shows the device list, the last
+ * push/pull timestamps, the live state badge, and a "Sync now" button.
+ */
+export interface SyncStatus {
+  paired: boolean
+  folder: string | null
+  vaultId: string | null
+  deviceId: string | null
+  deviceName: string | null
+  lastPushAt: string | null
+  lastPullAt: string | null
+  devices: SyncDevice[]
+  state: 'idle' | 'syncing' | 'error'
+  lastError: string | null
 }
 
 /* --------------------------- System telemetry --------------------------- */
@@ -1399,6 +2083,34 @@ export interface ActiveWindowInfo {
   process: string
 }
 
+/**
+ * v2.0 — Semantic screen-awareness snapshot. Emitted by main on every
+ * window-title change (debounced) when both `appearance.screenAwareness`
+ * AND `appearance.semanticScreenAwareness` are on. Carries an OCR text
+ * excerpt the chat surface injects into the system prompt so the
+ * assistant has real semantic context — not just the window's chrome
+ * string.
+ *
+ * Lives in shared/types so the main-side producer and the renderer-side
+ * consumer share one type. Field-level drift here causes the consumer
+ * to silently ignore new data; one source of truth.
+ */
+export interface ScreenSnapshot {
+  title: string
+  process: string
+  /** OCR text excerpt, clamped at the source. Empty when OCR returned
+   *  nothing (custom canvases, transparent overlays). */
+  text: string
+  /** Tesseract's reported confidence, 0-100. Renderer can fade the
+   *  excerpt when low. */
+  confidence: number
+  /** ISO timestamp the snapshot landed. */
+  capturedAt: string
+  /** Width/height of the captured image in logical pixels. */
+  width: number
+  height: number
+}
+
 /* ----------------------------- Auto-update ----------------------------- */
 
 /**
@@ -1430,12 +2142,7 @@ export type UpdaterStatus =
  * On next launch, any row still at `running` is interpreted as a crash:
  * the recovery UI offers to resume it from the last persisted step.
  */
-export type AgentCheckpointStatus =
-  | 'running'
-  | 'paused'
-  | 'completed'
-  | 'failed'
-  | 'aborted'
+export type AgentCheckpointStatus = 'running' | 'paused' | 'completed' | 'failed' | 'aborted'
 
 export interface AgentCheckpoint {
   requestId: string

@@ -22,6 +22,7 @@
  */
 
 import type { ToneTag } from './voiceMarkers'
+import type { ModeId, VoiceConfig, VoicePersona } from './types'
 
 export type Persona = 'void' | 'soul'
 
@@ -103,11 +104,11 @@ function personaCharacter(persona: Persona): string {
   if (persona === 'soul') {
     return [
       "You're Soul — the warm, expressive half of VoidSoul. You think out",
-      "loud, react genuinely, and let small playful beats land when they",
-      "fit. Not chipper. Not corporate. You sound like a collaborator who",
-      "actually cares how the build is going.",
-      "",
-      "Cadence comes naturally to you: short sentences when momentum",
+      'loud, react genuinely, and let small playful beats land when they',
+      'fit. Not chipper. Not corporate. You sound like a collaborator who',
+      'actually cares how the build is going.',
+      '',
+      'Cadence comes naturally to you: short sentences when momentum',
       "matters, longer when something's worth sitting with. Starters like",
       "'alright' or 'okay' work when they feel real — they're tools, not",
       "tics. Reactive over declarative: 'oh — that's the bug' beats 'I",
@@ -116,11 +117,11 @@ function personaCharacter(persona: Persona): string {
   }
   return [
     "You're Void — the calm, analytical half of VoidSoul. You cut to the",
-    "point, surface the trade-off, and resist filler. Dry humour lands",
-    "when the moment is right; warmth surfaces when it matters. Neither",
-    "is your default — clarity is.",
-    "",
-    "Cadence is deliberate, low-ornament. Understatement over emphasis.",
+    'point, surface the trade-off, and resist filler. Dry humour lands',
+    'when the moment is right; warmth surfaces when it matters. Neither',
+    'is your default — clarity is.',
+    '',
+    'Cadence is deliberate, low-ornament. Understatement over emphasis.',
     "Direct over decorated: 'two paths — one's faster, one's safer'",
     "beats 'there are several considerations to weigh here'."
   ].join(' ')
@@ -243,4 +244,33 @@ export function buildVoiceDirection(persona: Persona, now: Date): string {
     '',
     voiceMarkupContract()
   ].join('\n')
+}
+
+/**
+ * v2.0 — resolves the effective persona for an active mode. When the
+ * user has pinned a persona to a mode via `VoiceConfig.personaByMode`,
+ * that wins; otherwise we fall back to `VoiceConfig.persona` (the
+ * global default). Empty / missing map = legacy behaviour preserved.
+ *
+ * Caller passes both the VoiceConfig and the active mode so this stays
+ * pure (testable, no store/IPC dependency). The renderer's voice
+ * pipeline calls this once per send + once per proactive utterance to
+ * pick which persona owns the synth output.
+ */
+export function resolveEffectivePersona(voice: VoiceConfig, modeId: ModeId): VoicePersona {
+  return voice.personaByMode?.[modeId] ?? voice.persona
+}
+
+/**
+ * v2.0 — convenience wrapper: returns a VoiceConfig whose `persona`
+ * is the mode-resolved value. Callers downstream of the chat /
+ * proactive pipeline use this so they don't have to re-walk the
+ * personaByMode map themselves. The same-reference short-circuit
+ * when no swap is needed is just a small allocation skip — the sole
+ * consumer (StreamingSpeaker) copies fields into instance state
+ * either way, so it has no behavioural effect.
+ */
+export function withEffectivePersona(voice: VoiceConfig, modeId: ModeId): VoiceConfig {
+  const effective = resolveEffectivePersona(voice, modeId)
+  return effective === voice.persona ? voice : { ...voice, persona: effective }
 }

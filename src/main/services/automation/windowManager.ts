@@ -29,11 +29,7 @@
  * first (which "releases" the foreground lock), then SetForegroundWindow.
  * `focusWindow` does both.
  */
-import {
-  runPowerShell,
-  runPowerShellCapturing,
-  DEFAULT_EXCLUDE_PROCESS_NAMES
-} from './powershell'
+import { runPowerShell, runPowerShellCapturing, DEFAULT_EXCLUDE_PROCESS_NAMES } from './powershell'
 
 const ENUM_TIMEOUT_MS = 3_000
 const FOCUS_TIMEOUT_MS = 2_000
@@ -179,8 +175,14 @@ export function parseWindowList(raw: string): WindowInfo[] {
     const y = Number(o.y)
     const w = Number(o.w)
     const h = Number(o.h)
-    if (!Number.isFinite(hwnd) || !Number.isFinite(x) || !Number.isFinite(y) ||
-        !Number.isFinite(w) || !Number.isFinite(h)) continue
+    if (
+      !Number.isFinite(hwnd) ||
+      !Number.isFinite(x) ||
+      !Number.isFinite(y) ||
+      !Number.isFinite(w) ||
+      !Number.isFinite(h)
+    )
+      continue
     out.push({
       hwnd,
       title: String(o.title ?? ''),

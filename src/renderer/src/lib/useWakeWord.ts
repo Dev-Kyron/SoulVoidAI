@@ -92,9 +92,7 @@ async function boot(): Promise<void> {
   if (!picovoiceKey) {
     const warmupNeeded = !whisperModelWarm
     if (warmupNeeded) {
-      useUiStore
-        .getState()
-        .pushToast('info', 'Preparing wake-word model (one-time download)…')
+      useUiStore.getState().pushToast('info', 'Preparing wake-word model (one-time download)…')
     }
     try {
       await vs.ai.transcribe({ pcm: new Float32Array(1600), sampleRate: 16_000 })

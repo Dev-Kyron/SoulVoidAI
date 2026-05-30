@@ -65,9 +65,10 @@ export function recordSentiment(input: {
 
   // Find the currently-open session, if any.
   const current = handle
-    .prepare<unknown[], SentimentRow>(
-      `SELECT * FROM session_sentiment WHERE session_end IS NULL ORDER BY computed_at DESC LIMIT 1`
-    )
+    .prepare<
+      unknown[],
+      SentimentRow
+    >(`SELECT * FROM session_sentiment WHERE session_end IS NULL ORDER BY computed_at DESC LIMIT 1`)
     .get()
 
   let sessionStart = now
@@ -142,9 +143,10 @@ export function recordSentiment(input: {
  */
 export function getCurrentSentiment(): SessionSentiment | null {
   const row = db()
-    .prepare<unknown[], SentimentRow>(
-      `SELECT * FROM session_sentiment WHERE session_end IS NULL ORDER BY computed_at DESC LIMIT 1`
-    )
+    .prepare<
+      unknown[],
+      SentimentRow
+    >(`SELECT * FROM session_sentiment WHERE session_end IS NULL ORDER BY computed_at DESC LIMIT 1`)
     .get()
   return row ? fromRow(row) : null
 }
@@ -155,9 +157,10 @@ export function getCurrentSentiment(): SessionSentiment | null {
  */
 export function recentSentiments(limit = 10): SessionSentiment[] {
   const rows = db()
-    .prepare<[number], SentimentRow>(
-      `SELECT * FROM session_sentiment ORDER BY computed_at DESC LIMIT ?`
-    )
+    .prepare<
+      [number],
+      SentimentRow
+    >(`SELECT * FROM session_sentiment ORDER BY computed_at DESC LIMIT ?`)
     .all(limit)
   return rows.map(fromRow)
 }
@@ -170,8 +173,6 @@ export function recentSentiments(limit = 10): SessionSentiment[] {
  */
 export function forgetRecentSentiment(days = 7): { deleted: number } {
   const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString()
-  const result = db()
-    .prepare(`DELETE FROM session_sentiment WHERE computed_at >= ?`)
-    .run(cutoff)
+  const result = db().prepare(`DELETE FROM session_sentiment WHERE computed_at >= ?`).run(cutoff)
   return { deleted: result.changes }
 }

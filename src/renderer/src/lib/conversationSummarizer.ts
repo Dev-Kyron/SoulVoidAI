@@ -19,7 +19,7 @@ const SYSTEM_PROMPT =
   '- What the user is working on (projects, goals, ongoing tasks)\n' +
   '- Key decisions, agreements or open questions\n' +
   '- Important code paths, file names, tools or commands referenced\n' +
-  '- The user\'s preferences and constraints surfaced in this chat\n\n' +
+  "- The user's preferences and constraints surfaced in this chat\n\n" +
   'Skip greetings, pleasantries, and minor back-and-forth. Be specific and factual; ' +
   'omit speculation. Write in third person ("the user", "the assistant"). No headings — ' +
   'one flowing recap paragraph is fine.'
@@ -96,12 +96,7 @@ export async function summarizeOlderTurns(messages: ChatMessage[]): Promise<stri
       messages: [{ role: 'user', content: transcript }] as ChatTurn[]
     })
     if (result.error) {
-      void vs.logs.write(
-        'warn',
-        'summarizer',
-        'Conversation summary call failed',
-        result.error
-      )
+      void vs.logs.write('warn', 'summarizer', 'Conversation summary call failed', result.error)
       return null
     }
     if (!result.text) {
@@ -193,9 +188,7 @@ function buildTurnTranscript(turns: ChatTurn[]): string {
     .map((turn) => {
       if (turn.role === 'user') return `USER: ${turn.content || '(no text)'}`
       if (turn.role === 'assistant') {
-        const tools = turn.toolCalls?.length
-          ? ` [+${turn.toolCalls.length} tool call(s)]`
-          : ''
+        const tools = turn.toolCalls?.length ? ` [+${turn.toolCalls.length} tool call(s)]` : ''
         return `ASSISTANT: ${turn.content || '(thinking)'}${tools}`
       }
       // Tool result turn — collapse to a one-line summary so the recap

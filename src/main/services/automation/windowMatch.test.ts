@@ -134,7 +134,8 @@ describe('matchWindow', () => {
 
 describe('parseWindowList', () => {
   it('parses a normal JSON array from PowerShell', () => {
-    const raw = '[{"hwnd":12345,"title":"App","process":"app","x":0,"y":0,"w":1024,"h":768,"focused":true}]'
+    const raw =
+      '[{"hwnd":12345,"title":"App","process":"app","x":0,"y":0,"w":1024,"h":768,"focused":true}]'
     const result = parseWindowList(raw)
     expect(result).toEqual([
       {
@@ -153,7 +154,8 @@ describe('parseWindowList', () => {
   it('lowercases process names from PowerShell output', () => {
     // PowerShell\'s ProcessName property preserves case; we lowercase
     // so the alias table and exclusion list don\'t need to care.
-    const raw = '[{"hwnd":1,"title":"App","process":"Discord","x":0,"y":0,"w":10,"h":10,"focused":false}]'
+    const raw =
+      '[{"hwnd":1,"title":"App","process":"Discord","x":0,"y":0,"w":10,"h":10,"focused":false}]'
     expect(parseWindowList(raw)[0].processName).toBe('discord')
   })
 
@@ -169,7 +171,8 @@ describe('parseWindowList', () => {
   })
 
   it('drops entries with non-numeric bounds or hwnd', () => {
-    const raw = '[{"hwnd":"bad","title":"X","process":"x","x":0,"y":0,"w":10,"h":10,"focused":false}]'
+    const raw =
+      '[{"hwnd":"bad","title":"X","process":"x","x":0,"y":0,"w":10,"h":10,"focused":false}]'
     expect(parseWindowList(raw)).toEqual([])
   })
 })

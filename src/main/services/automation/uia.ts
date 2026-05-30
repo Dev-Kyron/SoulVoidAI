@@ -185,6 +185,160 @@ $out | ConvertTo-Json -Depth 1 -Compress
 }
 
 /**
+ * v2.0 Phase 4 — UIA element-at-point lookup. Given screen coordinates
+ * (LOGICAL pixels — same space `enumerateClickableElements` returns
+ * and Cursor::Position takes), returns the UIA element directly under
+ * that point, or null when none / off-Windows / UIA can't reach.
+ *
+ * Used by hover-to-teach: user demonstrates a click → we capture
+ * cursor pos via Electron's `screen.getCursorScreenPoint()` → call
+ * this to identify which UI element they targeted → store
+ * (description, name, controlType, automationId) so future identical
+ * descriptions short-circuit straight to a UIA click with zero model
+ * calls.
+ *
+ * Walks UIA's TreeWalker UP from the FromPoint result until we find
+ * an element with a non-empty Name OR a recognised clickable
+ * ControlType — the leaf at the click point is often a structural
+ * Text/Image inside the actual button.
+ */
+export async function elementAtPoint(x: number, y: number): Promise<UiaElement | null> {
+  if (process.platform !== 'win32') return null
+  const script = `
+$ErrorActionPreference = 'Stop'
+try {
+  Add-Type -AssemblyName UIAutomationClient
+  Add-Type -AssemblyName UIAutomationTypes
+} catch { return }
+$point = New-Object System.Windows.Point(${Math.round(x)}, ${Math.round(y)})
+$el = $null
+try { $el = [System.Windows.Automation.AutomationElement]::FromPoint($point) } catch { return }
+if (-not $el) { return }
+$walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
+$clickable = @(
+  'Button','SplitButton','MenuItem','Hyperlink','TabItem',
+  'CheckBox','RadioButton','ListItem','TreeItem'
+)
+$current = $el
+$best = $null
+for ($i = 0; $i -lt 6; $i++) {
+  if (-not $current) { break }
+  try {
+    $ct = $current.Current.ControlType.ProgrammaticName
+    $nm = $current.Current.Name
+    $rect = $current.Current.BoundingRectangle
+    $ctShort = $ct -replace '^ControlType\\.',''
+    if ($clickable -contains $ctShort -or $nm) {
+      $best = @{
+        name = $nm
+        automationId = $current.Current.AutomationId
+        controlType = $ct
+        x = [int]$rect.X
+        y = [int]$rect.Y
+        w = [int]$rect.Width
+        h = [int]$rect.Height
+      }
+      if ($clickable -contains $ctShort) { break }
+    }
+  } catch {}
+  try { $current = $walker.GetParent($current) } catch { break }
+}
+if (-not $best) {
+  try {
+    $rect = $el.Current.BoundingRectangle
+    $best = @{
+      name = $el.Current.Name
+      automationId = $el.Current.AutomationId
+      controlType = $el.Current.ControlType.ProgrammaticName
+      x = [int]$rect.X
+      y = [int]$rect.Y
+      w = [int]$rect.Width
+      h = [int]$rect.Height
+    }
+  } catch { return }
+}
+$best | ConvertTo-Json -Compress
+`
+  try {
+    const stdout = await runPowerShellCapturing(script, {
+      timeoutMs: TIMEOUT_MS,
+      maxBuffer: 256 * 1024
+    })
+    const elements = parseUiaJson(stdout)
+    return elements[0] ?? null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * v2.0 polish — fast UIA lookup by AutomationId + ControlType. Used
+ * by the hover-to-teach short-circuit (`taughtClicks.resolveTaughtClick`)
+ * to avoid walking the full UIA tree when the taught entry has a
+ * stable AutomationId. FindFirst with a PropertyCondition is O(tree)
+ * inside the UIAClient instead of marshalling every node back through
+ * the PowerShell→JSON→TS pipe.
+ *
+ * Returns null when:
+ *  - non-Windows host
+ *  - no element matches
+ *  - PowerShell timed out / crashed
+ *  - hwnd doesn't resolve to a live window
+ */
+export async function findElementByAutomationId(args: {
+  hwnd: number | null
+  automationId: string
+  controlType: string
+}): Promise<UiaElement | null> {
+  if (process.platform !== 'win32') return null
+  if (!args.automationId) return null
+  const script = `
+$ErrorActionPreference = 'Stop'
+try {
+  Add-Type -AssemblyName UIAutomationClient
+  Add-Type -AssemblyName UIAutomationTypes
+} catch { return }
+$root = $null
+try {
+  if (${args.hwnd ?? 0} -gt 0) {
+    $root = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]${args.hwnd ?? 0})
+  } else {
+    $root = [System.Windows.Automation.AutomationElement]::RootElement
+  }
+} catch { return }
+if (-not $root) { return }
+$idCond = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::AutomationIdProperty, '${args.automationId.replace(/'/g, "''")}')
+$found = $null
+try { $found = $root.FindFirst([System.Windows.Automation.TreeScope]::Subtree, $idCond) } catch { return }
+if (-not $found) { return }
+try {
+  $ct = $found.Current.ControlType.ProgrammaticName
+  if ($ct -ne '${args.controlType.replace(/'/g, "''")}') { return }
+  $rect = $found.Current.BoundingRectangle
+  @{
+    name = $found.Current.Name
+    automationId = $found.Current.AutomationId
+    controlType = $ct
+    x = [int]$rect.X
+    y = [int]$rect.Y
+    w = [int]$rect.Width
+    h = [int]$rect.Height
+  } | ConvertTo-Json -Compress
+} catch { return }
+`
+  try {
+    const stdout = await runPowerShellCapturing(script, {
+      timeoutMs: TIMEOUT_MS,
+      maxBuffer: 64 * 1024
+    })
+    const elements = parseUiaJson(stdout)
+    return elements[0] ?? null
+  } catch {
+    return null
+  }
+}
+
+/**
  * Parses the PowerShell JSON output. Exported for unit tests. Tolerates:
  *  · empty output (no windows found)
  *  · single-object output (PowerShell ConvertTo-Json doesn't wrap 1 item in array)

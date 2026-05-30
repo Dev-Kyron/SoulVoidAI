@@ -27,11 +27,48 @@ import { vs } from './bridge'
 
 /** Same extension table as useFileDrop — kept narrow to avoid surprises. */
 const TEXT_EXTENSIONS = new Set([
-  '.txt', '.md', '.markdown', '.json', '.yaml', '.yml', '.toml', '.csv', '.log', '.xml',
-  '.html', '.css', '.scss', '.js', '.jsx', '.ts', '.tsx', '.py', '.rb', '.go', '.rs',
-  '.java', '.c', '.h', '.cpp', '.hpp', '.cs', '.swift', '.kt', '.kts', '.sh', '.bash',
-  '.zsh', '.ps1', '.bat', '.sql', '.graphql', '.proto', '.dockerfile', '.env.example',
-  '.gitignore', '.editorconfig'
+  '.txt',
+  '.md',
+  '.markdown',
+  '.json',
+  '.yaml',
+  '.yml',
+  '.toml',
+  '.csv',
+  '.log',
+  '.xml',
+  '.html',
+  '.css',
+  '.scss',
+  '.js',
+  '.jsx',
+  '.ts',
+  '.tsx',
+  '.py',
+  '.rb',
+  '.go',
+  '.rs',
+  '.java',
+  '.c',
+  '.h',
+  '.cpp',
+  '.hpp',
+  '.cs',
+  '.swift',
+  '.kt',
+  '.kts',
+  '.sh',
+  '.bash',
+  '.zsh',
+  '.ps1',
+  '.bat',
+  '.sql',
+  '.graphql',
+  '.proto',
+  '.dockerfile',
+  '.env.example',
+  '.gitignore',
+  '.editorconfig'
 ])
 
 const MAX_TEXT_BYTES = 200_000
@@ -100,9 +137,8 @@ export function useClipboardPaste(): (event: ClipboardEvent) => void {
               // Browsers often hand back a blank `name` for clipboard images
               // ("image.png" at best). Generate a timestamp-prefixed name so
               // multiple pastes in one session stay distinguishable.
-              const name = file.name && file.name !== 'image.png'
-                ? file.name
-                : clipboardImageName(file.type)
+              const name =
+                file.name && file.name !== 'image.png' ? file.name : clipboardImageName(file.type)
               addImage(name, dataUrl)
               pushToast('success', `Attached ${name}`)
               return

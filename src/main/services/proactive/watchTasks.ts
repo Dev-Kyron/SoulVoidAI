@@ -33,12 +33,7 @@ import { broadcast } from '../../events'
 import { getConfig } from '../storage/config'
 import { log } from '../logger'
 import { isQuietNow } from '@shared/types'
-import type {
-  ProactiveAction,
-  SessionSentimentLabel,
-  WatchSpec,
-  WatchTask
-} from '@shared/types'
+import type { ProactiveAction, SessionSentimentLabel, WatchSpec, WatchTask } from '@shared/types'
 import type { ToneTag } from '@shared/voiceMarkers'
 
 export type { WatchTask }
@@ -84,6 +79,36 @@ function rowToTask(row: Row): WatchTask {
 
 /* ----------------------------- CRUD ----------------------------------- */
 
+/**
+ * v2.0 round-6 perf — cached count of enabled watch tasks. The 60s
+ * scheduler tick calls `checkPolledWatchTasks` which previously did a full
+ * `SELECT * FROM scheduled_tasks WHERE kind='watch'` every minute even when
+ * NO watch tasks were enabled (the 4 built-ins ship disabled by default).
+ * That's ~1440 wasted SQLite reads/day for the majority of users who never
+ * enable a watch. Now: invalidate on every CRUD and let the tick bail
+ * early when zero.
+ *
+ * Null means "not yet computed"; positive means "at least one"; zero
+ * means "no enabled tasks, skip the read entirely".
+ */
+let enabledCountCache: number | null = null
+
+function invalidateEnabledCount(): void {
+  enabledCountCache = null
+}
+
+/** Cheap singleton-COUNT query used to skip the full listWatchTasks
+ *  walk on every tick when the user hasn't enabled anything. */
+export function hasAnyEnabledWatchTask(): boolean {
+  if (enabledCountCache === null) {
+    const row = db()
+      .prepare(`SELECT COUNT(*) AS n FROM scheduled_tasks WHERE kind = 'watch' AND enabled = 1`)
+      .get() as { n: number }
+    enabledCountCache = row.n
+  }
+  return enabledCountCache > 0
+}
+
 export function listWatchTasks(): WatchTask[] {
   const rows = db()
     .prepare(
@@ -109,6 +134,7 @@ export function addWatchTask(input: {
        VALUES (?, 'watch', ?, '', 'interval', ?, ?, ?)`
     )
     .run(id, input.name, JSON.stringify(input.spec), enabled ? 1 : 0, now)
+  invalidateEnabledCount()
   log('info', 'system', `Added watch task "${input.name}" (${input.spec.type}).`)
   const row = db()
     .prepare(
@@ -120,8 +146,10 @@ export function addWatchTask(input: {
 }
 
 export function setWatchEnabled(id: string, enabled: boolean): WatchTask | null {
-  db().prepare(`UPDATE scheduled_tasks SET enabled = ? WHERE id = ? AND kind = 'watch'`)
+  db()
+    .prepare(`UPDATE scheduled_tasks SET enabled = ? WHERE id = ? AND kind = 'watch'`)
     .run(enabled ? 1 : 0, id)
+  invalidateEnabledCount()
   const row = db()
     .prepare(
       `SELECT id, name, kind, schedule_value, enabled, created_at, last_run, last_result, last_error
@@ -133,6 +161,7 @@ export function setWatchEnabled(id: string, enabled: boolean): WatchTask | null 
 
 export function removeWatchTask(id: string): void {
   db().prepare(`DELETE FROM scheduled_tasks WHERE id = ? AND kind = 'watch'`).run(id)
+  invalidateEnabledCount()
 }
 
 function recordWatchFire(id: string, result: string, error?: string): void {
@@ -172,11 +201,7 @@ export function getIdleMinutes(): number {
  * (screen-watch in particular) can pipe through the same gates
  * without faking a DB row to call recordWatchFire against.
  */
-function gatedBroadcast(
-  taskId: string,
-  taskName: string,
-  action: ProactiveAction
-): boolean {
+function gatedBroadcast(taskId: string, taskName: string, action: ProactiveAction): boolean {
   if (action.type !== 'speak') return false
   const config = getConfig()
   if (!config.proactiveVoice.enabled) return false
@@ -210,11 +235,7 @@ function gatedBroadcast(
  * trips repeatedly, the same task can't fire again until its throttle
  * window elapses.
  */
-function speakProactive(
-  taskId: string,
-  taskName: string,
-  action: ProactiveAction
-): boolean {
+function speakProactive(taskId: string, taskName: string, action: ProactiveAction): boolean {
   const fired = gatedBroadcast(taskId, taskName, action)
   if (!fired) return false
   const content = action.type === 'speak' ? action.content?.trim() : undefined
@@ -299,11 +320,7 @@ export function parseHHMM(raw: string): number | null {
  * the supplied idle window. Event-driven watch types (task-complete,
  * sentiment-shift) always return false — they fire from emitters.
  */
-export function matchesPolledSpec(
-  spec: WatchSpec,
-  now: Date,
-  idleMinutes: number
-): boolean {
+export function matchesPolledSpec(spec: WatchSpec, now: Date, idleMinutes: number): boolean {
   const { type, params } = spec
   if (type === 'idle-duration') {
     const threshold = Number(params.minutes ?? 30)
@@ -330,8 +347,15 @@ export function matchesPolledSpec(
 
 /* ---------------------- public entry points --------------------------- */
 
-/** Called every scheduler tick (60s). Walks polled watch tasks. */
+/** Called every scheduler tick (60s). Walks polled watch tasks.
+ *
+ *  v2.0 round-6 perf — short-circuits via `hasAnyEnabledWatchTask`
+ *  when nothing is enabled, skipping the full `listWatchTasks` SQL +
+ *  row mapping. The 60s tick used to fire that read regardless,
+ *  costing 1440 unnecessary DB roundtrips/day for users on the
+ *  default-off built-in watches. */
 export function checkPolledWatchTasks(now: Date = new Date()): void {
+  if (!hasAnyEnabledWatchTask()) return
   for (const task of listWatchTasks()) {
     if (!task.enabled) continue
     if (isThrottled(task, now)) continue
@@ -351,6 +375,8 @@ export function onWatchEvent(event: {
    *  sentiment-shift: the new label. */
   payload: { durationSec?: number; sentiment?: SessionSentimentLabel }
 }): void {
+  // v2.0 round-6 perf — same gate as the polled tick.
+  if (!hasAnyEnabledWatchTask()) return
   const now = new Date()
   for (const task of listWatchTasks()) {
     if (!task.enabled) continue
@@ -385,7 +411,7 @@ const BUILT_IN_TASKS: Array<{ name: string; spec: WatchSpec }> = [
     spec: {
       type: 'idle-duration',
       params: { minutes: 30, activeFrom: '09:00', activeTo: '23:00' },
-      action: { type: 'speak', content: "Still here when you need me.", tone: 'warm' },
+      action: { type: 'speak', content: 'Still here when you need me.', tone: 'warm' },
       throttleMinutes: 60
     }
   },

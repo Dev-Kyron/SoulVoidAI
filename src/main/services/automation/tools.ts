@@ -4,4 +4,9 @@
  * routing AI tool calls — keeping the renderer's `name → actionType` lookup
  * in lockstep with what the model is told about.
  */
-export { TOOL_SPECS, toolSpecByName, type ToolSpec, type ToolParameterSchema } from '@shared/agent-tools'
+export {
+  TOOL_SPECS,
+  toolSpecByName,
+  type ToolSpec,
+  type ToolParameterSchema
+} from '@shared/agent-tools'

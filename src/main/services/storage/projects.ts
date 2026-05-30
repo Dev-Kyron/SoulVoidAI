@@ -39,17 +39,13 @@ function rowToProject(row: ProjectRow): Project {
 
 /** All projects, newest first. */
 export function listProjects(): Project[] {
-  const rows = db()
-    .prepare(`SELECT * FROM projects ORDER BY updated_at DESC`)
-    .all() as ProjectRow[]
+  const rows = db().prepare(`SELECT * FROM projects ORDER BY updated_at DESC`).all() as ProjectRow[]
   return rows.map(rowToProject)
 }
 
 /** Single project by id, or null if not found. */
 export function getProject(id: string): Project | null {
-  const row = db().prepare(`SELECT * FROM projects WHERE id = ?`).get(id) as
-    | ProjectRow
-    | undefined
+  const row = db().prepare(`SELECT * FROM projects WHERE id = ?`).get(id) as ProjectRow | undefined
   return row ? rowToProject(row) : null
 }
 
@@ -64,10 +60,12 @@ export function createProject(input: NewProjectInput): Project {
   const id = randomUUID()
   const now = new Date().toISOString()
   const name = input.name.trim() || 'New project'
-  db().prepare(
-    `INSERT INTO projects (id, name, description, instructions, created_at, updated_at)
+  db()
+    .prepare(
+      `INSERT INTO projects (id, name, description, instructions, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?)`
-  ).run(id, name, input.description ?? null, input.instructions ?? null, now, now)
+    )
+    .run(id, name, input.description ?? null, input.instructions ?? null, now, now)
   return {
     id,
     name,
@@ -95,11 +93,13 @@ export function updateProject(id: string, patch: UpdateProjectPatch): Project | 
     instructions: patch.instructions !== undefined ? patch.instructions : existing.instructions,
     updatedAt: new Date().toISOString()
   }
-  db().prepare(
-    `UPDATE projects
+  db()
+    .prepare(
+      `UPDATE projects
      SET name = ?, description = ?, instructions = ?, updated_at = ?
      WHERE id = ?`
-  ).run(next.name, next.description, next.instructions, next.updatedAt, id)
+    )
+    .run(next.name, next.description, next.instructions, next.updatedAt, id)
   return next
 }
 
@@ -117,7 +117,7 @@ export function deleteProject(id: string): void {
  * thread's updated_at so sidebar sort order reflects the move.
  */
 export function setThreadProject(threadId: string, projectId: string | null): void {
-  db().prepare(
-    `UPDATE threads SET project_id = ?, updated_at = ? WHERE id = ?`
-  ).run(projectId, new Date().toISOString(), threadId)
+  db()
+    .prepare(`UPDATE threads SET project_id = ?, updated_at = ? WHERE id = ?`)
+    .run(projectId, new Date().toISOString(), threadId)
 }

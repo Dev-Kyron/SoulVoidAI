@@ -4,8 +4,9 @@
  * fresh thread and switches to it. Designed to overlay the chat area on the
  * narrow VoidSoul panel rather than dock as a persistent sidebar.
  */
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
+import { useDialog } from '../../lib/useDialog'
 import {
   Plus,
   X,
@@ -180,11 +181,7 @@ function ThreadRow({
             className="w-full rounded border border-[var(--accent-ring)] bg-black/40 px-1.5 py-0.5 text-[11px] text-white outline-none"
           />
         ) : (
-          <button
-            type="button"
-            onClick={onClick}
-            className="block w-full text-left"
-          >
+          <button type="button" onClick={onClick} className="block w-full text-left">
             <p
               className={cn(
                 'truncate text-[11px] font-semibold',
@@ -193,9 +190,7 @@ function ThreadRow({
             >
               {thread.title}
             </p>
-            <p className="truncate text-[10px] text-slate-500">
-              {thread.preview || '(empty)'}
-            </p>
+            <p className="truncate text-[10px] text-slate-500">{thread.preview || '(empty)'}</p>
             <p className="mt-0.5 text-[9px] text-slate-600">
               {thread.messageCount} message{thread.messageCount === 1 ? '' : 's'} ·{' '}
               {relativeTime(thread.updatedAt)}
@@ -224,86 +219,86 @@ function ThreadRow({
           <Star size={11} className={thread.pinned ? 'fill-current' : undefined} />
         </button>
         <div className="flex flex-col gap-1 opacity-0 transition group-hover:opacity-100">
-        {editing ? (
-          <button
-            type="button"
-            onClick={commit}
-            title="Save"
-            aria-label="Save thread name"
-            className="text-[var(--accent)] transition hover:brightness-125"
-          >
-            <Check size={12} />
-          </button>
-        ) : (
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation()
-              setDraft(thread.title)
-              setEditing(true)
-            }}
-            title="Rename"
-            aria-label="Rename thread"
-            className="text-slate-500 transition hover:text-[var(--accent)]"
-          >
-            <Pencil size={11} />
-          </button>
-        )}
-        <div ref={exportMenuRef} className="relative">
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation()
-              setExportMenuOpen((v) => !v)
-            }}
-            disabled={exporting}
-            title="Export conversation"
-            aria-label="Export thread"
-            aria-haspopup="menu"
-            aria-expanded={exportMenuOpen}
-            className="text-slate-500 transition hover:text-[var(--accent)] disabled:opacity-40"
-          >
-            <Download size={11} />
-          </button>
-          {exportMenuOpen && (
-            // Positioned to the LEFT of the action column so it doesn't
-            // clip outside the drawer's right edge — drawer is narrow and
-            // a right-anchored menu would scroll horizontally.
-            <div
-              role="menu"
-              className="absolute right-full top-0 z-30 mr-1 w-48 rounded-lg border border-white/10 bg-[#0e0e14] py-1 shadow-xl"
-              onClick={(e) => e.stopPropagation()}
+          {editing ? (
+            <button
+              type="button"
+              onClick={commit}
+              title="Save"
+              aria-label="Save thread name"
+              className="text-[var(--accent)] transition hover:brightness-125"
             >
-              <p className="px-2.5 pb-1 pt-0.5 text-[9px] font-semibold uppercase tracking-wider text-slate-500">
-                Export as
-              </p>
-              {EXPORT_FORMATS.map((fmt) => (
-                <button
-                  key={fmt.id}
-                  type="button"
-                  role="menuitem"
-                  onClick={() => void handleExport(fmt.id)}
-                  className="block w-full px-2.5 py-1 text-left text-[11px] text-slate-200 transition hover:bg-white/5"
-                >
-                  <span className="font-semibold">{fmt.label}</span>
-                  <span className="ml-1.5 text-[9px] text-slate-500">{fmt.hint}</span>
-                </button>
-              ))}
-            </div>
+              <Check size={12} />
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                setDraft(thread.title)
+                setEditing(true)
+              }}
+              title="Rename"
+              aria-label="Rename thread"
+              className="text-slate-500 transition hover:text-[var(--accent)]"
+            >
+              <Pencil size={11} />
+            </button>
           )}
-        </div>
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation()
-            setConfirmingDelete(true)
-          }}
-          title="Delete conversation"
-          aria-label="Delete thread"
-          className="text-slate-500 transition hover:text-rose-400"
-        >
-          <Trash2 size={11} />
-        </button>
+          <div ref={exportMenuRef} className="relative">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                setExportMenuOpen((v) => !v)
+              }}
+              disabled={exporting}
+              title="Export conversation"
+              aria-label="Export thread"
+              aria-haspopup="menu"
+              aria-expanded={exportMenuOpen}
+              className="text-slate-500 transition hover:text-[var(--accent)] disabled:opacity-40"
+            >
+              <Download size={11} />
+            </button>
+            {exportMenuOpen && (
+              // Positioned to the LEFT of the action column so it doesn't
+              // clip outside the drawer's right edge — drawer is narrow and
+              // a right-anchored menu would scroll horizontally.
+              <div
+                role="menu"
+                className="absolute right-full top-0 z-30 mr-1 w-48 rounded-lg border border-white/10 bg-[#0e0e14] py-1 shadow-xl"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <p className="px-2.5 pb-1 pt-0.5 text-[9px] font-semibold uppercase tracking-wider text-slate-500">
+                  Export as
+                </p>
+                {EXPORT_FORMATS.map((fmt) => (
+                  <button
+                    key={fmt.id}
+                    type="button"
+                    role="menuitem"
+                    onClick={() => void handleExport(fmt.id)}
+                    className="block w-full px-2.5 py-1 text-left text-[11px] text-slate-200 transition hover:bg-white/5"
+                  >
+                    <span className="font-semibold">{fmt.label}</span>
+                    <span className="ml-1.5 text-[9px] text-slate-500">{fmt.hint}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              setConfirmingDelete(true)
+            }}
+            title="Delete conversation"
+            aria-label="Delete thread"
+            className="text-slate-500 transition hover:text-rose-400"
+          >
+            <Trash2 size={11} />
+          </button>
         </div>
       </div>
     </div>
@@ -319,6 +314,15 @@ export function ThreadsDrawer({ onClose }: { onClose: () => void }): JSX.Element
   const deleteThread = useChatStore((s) => s.deleteThread)
   const togglePinned = useChatStore((s) => s.togglePinned)
   const pushToast = useUiStore((s) => s.pushToast)
+  // v2.0 a11y — the drawer covers the chat surface entirely (absolute
+  // inset-0), so it behaves as a modal even though it slides rather
+  // than overlays a backdrop. useDialog gives it Esc-to-close, focus
+  // trap, and focus restoration on unmount; titleId pairs the "Conversations"
+  // heading with aria-labelledby so screen readers announce the drawer
+  // by name on open.
+  const drawerRef = useRef<HTMLDivElement>(null)
+  const titleId = useId()
+  useDialog(drawerRef, onClose)
 
   // Pinned threads float to the top; within each group we preserve the
   // newest-first order the store already maintains. Memoised so we don't
@@ -350,6 +354,10 @@ export function ThreadsDrawer({ onClose }: { onClose: () => void }): JSX.Element
 
   return (
     <motion.div
+      ref={drawerRef}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={titleId}
       className="absolute inset-0 z-40 flex flex-col bg-void-800/95 backdrop-blur"
       initial={{ x: '-100%' }}
       animate={{ x: 0 }}
@@ -357,7 +365,9 @@ export function ThreadsDrawer({ onClose }: { onClose: () => void }): JSX.Element
       transition={{ type: 'spring', stiffness: 380, damping: 32 }}
     >
       <div className="flex items-center gap-2 border-b border-white/5 px-3 py-2">
-        <span className="text-[11px] font-semibold text-slate-300">Conversations</span>
+        <span id={titleId} className="text-[11px] font-semibold text-slate-300">
+          Conversations
+        </span>
         <span className="text-[10px] text-slate-500">
           {threads.length} thread{threads.length === 1 ? '' : 's'}
         </span>
@@ -365,6 +375,7 @@ export function ThreadsDrawer({ onClose }: { onClose: () => void }): JSX.Element
           type="button"
           onClick={onClose}
           title="Close"
+          aria-label="Close conversations drawer"
           className="ml-auto text-slate-400 transition hover:text-white"
         >
           <X size={14} />

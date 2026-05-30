@@ -38,11 +38,13 @@ import {
 } from 'lucide-react'
 import { useMcpStore } from '../../store/useMcpStore'
 import { useUiStore } from '../../store/useUiStore'
+import { useConfigStore } from '../../store/useConfigStore'
 import { useDialog } from '../../lib/useDialog'
 import { vs } from '../../lib/bridge'
-import { cn } from '../../lib/utils'
+import { cn, isSafeExternalUrl } from '../../lib/utils'
 import { filterZeroConfigEntries } from '../../lib/mcpQuickStart'
 import { QuickStartDialog } from './QuickStartDialog'
+import { HomeAssistantWizardDialog } from './HomeAssistantWizardDialog'
 import type {
   McpInstallValues,
   McpRegistryArgPrompt,
@@ -75,10 +77,7 @@ export function McpMarketplaceDialog({
   // change (toggle/reconnect/add/remove from another tab) re-rendered the
   // whole dialog + re-ran `filtered`.
   const servers = useMcpStore((s) => s.servers)
-  const installedNames = useMemo(
-    () => new Set(servers.map((server) => server.name)),
-    [servers]
-  )
+  const installedNames = useMemo(() => new Set(servers.map((server) => server.name)), [servers])
   const reloadMcp = useMcpStore((s) => s.load)
   const [phase, setPhase] = useState<ListPhase>('loading')
   const [entries, setEntries] = useState<McpRegistryEntry[]>([])
@@ -94,6 +93,11 @@ export function McpMarketplaceDialog({
   >('all')
   const [sortMode, setSortMode] = useState<'recommended' | 'name' | 'category'>('recommended')
   const [configuring, setConfiguring] = useState<McpRegistryEntry | null>(null)
+  // v2.0 — builtin-handler routing. When a card with `builtin: true` is
+  // clicked, the marketplace dialog opens the matching in-app wizard
+  // instead of trying to spawn an MCP process. Currently only
+  // 'home-assistant' is wired; other handler ids fall back to a toast.
+  const [builtinSetup, setBuiltinSetup] = useState<string | null>(null)
   // v1.12.0 — Quick Start dialog overlay. Opened from the header button
   // (and the McpSettings empty-state banner). Reuses `entries` so it
   // doesn't double-fetch the marketplace.
@@ -182,11 +186,17 @@ export function McpMarketplaceDialog({
    *  fix — PulseMCP was previously dropped to the bottom of the sort even
    *  though it ranks above Smithery in dedup. */
   const sourceRank = (source: McpRegistryEntry['source']): number => {
+    // Order mirrors the user's mental trust ladder, top first:
+    // curated (studio-published)  → highest signal
+    // community (PR-reviewed, in-repo, signed alongside curated)
+    // pulsemcp / smithery / glama (external aggregators — useful for
+    // discovery, less curation behind them)
     if (source === 'curated') return 0
-    if (source === 'pulsemcp') return 1
-    if (source === 'smithery') return 2
-    if (source === 'glama') return 3
-    return 4
+    if (source === 'community') return 1
+    if (source === 'pulsemcp') return 2
+    if (source === 'smithery') return 3
+    if (source === 'glama') return 4
+    return 5
   }
 
   // Apply filters + sort. Done in a single memo so we don't pay for
@@ -218,7 +228,9 @@ export function McpMarketplaceDialog({
       // 'recommended' — source rank first, then name. Curated wins
       // because we hand-pick those; the catalogue sources tie-break
       // alphabetically for predictability.
-      sorted.sort((a, b) => sourceRank(a.source) - sourceRank(b.source) || a.name.localeCompare(b.name))
+      sorted.sort(
+        (a, b) => sourceRank(a.source) - sourceRank(b.source) || a.name.localeCompare(b.name)
+      )
     }
     return sorted
   }, [entries, filter, category, sourceFilter, sortMode])
@@ -264,10 +276,10 @@ export function McpMarketplaceDialog({
                 </span>
               )}
               {/* v1.12.0 — Quick Start button. Always present once entries
-                * load so users discover the one-click bulk install even
-                * after they've configured a server or two. Counts the
-                * zero-config eligible entries so they know the upper
-                * bound on what bulk install can grab. */}
+               * load so users discover the one-click bulk install even
+               * after they've configured a server or two. Counts the
+               * zero-config eligible entries so they know the upper
+               * bound on what bulk install can grab. */}
               {phase === 'ready' && filterZeroConfigEntries(entries).length > 0 && (
                 <button
                   type="button"
@@ -290,7 +302,7 @@ export function McpMarketplaceDialog({
             </div>
 
             {/* Toolbar — search + sort + source pills. Hidden during
-              * load/error since there's nothing meaningful to filter yet. */}
+             * load/error since there's nothing meaningful to filter yet. */}
             {phase === 'ready' && (
               <div className="flex flex-wrap items-center gap-2 border-b border-white/5 px-5 py-2.5">
                 <div className="relative min-w-[200px] flex-1">
@@ -307,9 +319,9 @@ export function McpMarketplaceDialog({
                   />
                 </div>
                 {/* Source pills — All / Curated / PulseMCP / Smithery /
-                  * Glama. v1.12.0 dropped Cline (no public JSON endpoint).
-                  * flex-wrap so the row collapses to two lines on narrow
-                  * Settings windows instead of overflowing. */}
+                 * Glama. v1.12.0 dropped Cline (no public JSON endpoint).
+                 * flex-wrap so the row collapses to two lines on narrow
+                 * Settings windows instead of overflowing. */}
                 <div className="flex flex-wrap items-center gap-1 rounded-md border border-white/10 bg-black/20 p-0.5">
                   {(
                     [
@@ -434,7 +446,29 @@ export function McpMarketplaceDialog({
                         key={entry.id}
                         entry={entry}
                         installed={installedNames.has(entry.name)}
-                        onInstall={() => setConfiguring(entry)}
+                        onInstall={() => {
+                          // v2.0 — builtin entries route to their in-app
+                          // wizard instead of the generic env-prompt +
+                          // spawn flow.
+                          if (entry.builtin) {
+                            if (entry.builtinHandlerId === 'home-assistant') {
+                              setBuiltinSetup('home-assistant')
+                            } else {
+                              // v2.0 polish — missing/unknown handler =>
+                              // surface a toast instead of silent
+                              // dead-click (was setBuiltinSetup(null)
+                              // which never matched the render check).
+                              useUiStore
+                                .getState()
+                                .pushToast(
+                                  'error',
+                                  `No setup flow available for "${entry.name}" yet — please file an issue.`
+                                )
+                            }
+                            return
+                          }
+                          setConfiguring(entry)
+                        }}
                         onEasyInstall={async () => {
                           // v1.12.0 — bypass the configure dialog for
                           // entries with no prompts. Installs immediately
@@ -446,21 +480,23 @@ export function McpMarketplaceDialog({
                               name: entry.name,
                               command: entry.command,
                               args: entry.args,
-                              ...(Object.keys(entry.env).length
-                                ? { env: entry.env }
-                                : {})
+                              ...(Object.keys(entry.env).length ? { env: entry.env } : {})
                             })
-                            useUiStore.getState().pushToast(
-                              created.connected ? 'success' : 'error',
-                              created.connected
-                                ? `${created.name} connected · ${created.tools.length} tool(s).`
-                                : `${created.name} couldn\'t start: ${created.error ?? 'unknown error'}`
-                            )
+                            useUiStore
+                              .getState()
+                              .pushToast(
+                                created.connected ? 'success' : 'error',
+                                created.connected
+                                  ? `${created.name} connected · ${created.tools.length} tool(s).`
+                                  : `${created.name} couldn't start: ${created.error ?? 'unknown error'}`
+                              )
                           } catch (err) {
-                            useUiStore.getState().pushToast(
-                              'error',
-                              `Install failed: ${err instanceof Error ? err.message : String(err)}`
-                            )
+                            useUiStore
+                              .getState()
+                              .pushToast(
+                                'error',
+                                `Install failed: ${err instanceof Error ? err.message : String(err)}`
+                              )
                           }
                         }}
                       />
@@ -502,9 +538,26 @@ export function McpMarketplaceDialog({
               />
             )}
           </AnimatePresence>
+          {/* v2.0 — builtin handler wizards. The marketplace dialog routes
+              click-on-builtin-card → the matching in-app wizard rather
+              than the spawn-MCP flow. The wizards live in their own
+              feature files for ownership clarity (HA → HomeAssistantSettings.tsx). */}
+          {builtinSetup === 'home-assistant' && (
+            <HomeAssistantWizardDialog
+              // v2.0 polish — pre-fill URL from current config so a
+              // user re-opening the marketplace card doesn't have to
+              // retype their HA address. Empty string falls through to
+              // the wizard's own placeholder.
+              initialUrl={useConfigStore.getState().config?.homeAssistant?.url ?? ''}
+              onClose={() => setBuiltinSetup(null)}
+              onDone={() => {
+                setBuiltinSetup(null)
+              }}
+            />
+          )}
           {/* v1.12.0 — Quick Start overlay. Renders inside the marketplace
-            * motion.div so closing it via backdrop click doesn't bubble
-            * up to the marketplace's close-on-backdrop handler. */}
+           * motion.div so closing it via backdrop click doesn't bubble
+           * up to the marketplace's close-on-backdrop handler. */}
           <QuickStartDialog
             open={quickStartOpen}
             onClose={() => setQuickStartOpen(false)}
@@ -533,14 +586,32 @@ function MarketplaceCard({
    *  entries with zero prompts ("Easy Add" button). */
   onEasyInstall: () => Promise<void>
 }): JSX.Element {
-  // v1.12.0 — an entry is one-click-installable when it\'s not
+  // v1.12.0 — an entry is one-click-installable when it's not
   // discovery-only AND has no prompts to fill in. Render "Easy Add"
   // instead of "Install" so users see at a glance which entries are
   // friction-free.
   const isEasyAdd =
     !entry.discoveryOnly &&
+    !entry.builtin &&
     entry.argPrompts.length === 0 &&
     entry.envPrompts.length === 0
+  // v2.0 — builtin entries route to an in-app wizard. The card surface
+  // is the same but the button reads "Set up" and the easy-add badge is
+  // suppressed (it's a guided flow, not a one-click).
+  const isBuiltin = !!entry.builtin
+  // v2.0 — memoise the per-card community-provenance derivations.
+  // The card is re-rendered when the parent list re-runs (filter
+  // changes, install completes, etc.); without memoisation we
+  // allocate a fresh Date + parse a fresh URL on every render even
+  // though the entry fields are immutable for the card's lifetime.
+  const submittedAtLabel = useMemo(
+    () => (entry.submittedAt ? new Date(entry.submittedAt).toLocaleDateString() : null),
+    [entry.submittedAt]
+  )
+  const safeRepoUrl = useMemo(
+    () => (entry.repoUrl && isSafeExternalUrl(entry.repoUrl) ? entry.repoUrl : null),
+    [entry.repoUrl]
+  )
   const [easyAdding, setEasyAdding] = useState(false)
   const handleEasyClick = async (): Promise<void> => {
     if (easyAdding) return
@@ -561,18 +632,18 @@ function MarketplaceCard({
         <Plug size={12} className="mt-0.5 shrink-0 text-[var(--accent)]" />
         <div className="min-w-0 flex-1">
           {/* v1.12.0 — badge row uses flex-wrap so a card with 4 pills
-            * (Curated + Verified + requires X + Easy Add) wraps cleanly
-            * to a second line of WHOLE PILLS instead of breaking inside
-            * one badge. Each pill carries whitespace-nowrap as a belt-
-            * and-suspenders against narrow grid columns. */}
+           * (Curated + Verified + requires X + Easy Add) wraps cleanly
+           * to a second line of WHOLE PILLS instead of breaking inside
+           * one badge. Each pill carries whitespace-nowrap as a belt-
+           * and-suspenders against narrow grid columns. */}
           <div className="flex flex-wrap items-center gap-1.5">
             <p className="text-[11px] font-semibold text-white">{entry.name}</p>
             {/* v1.11.0 — source badge. Curated picks (our reviewed
-              * registry) get a cyan badge; Smithery-sourced entries
-              * get a purple badge so users can immediately tell the
-              * community catalogue from our hand-picked list. Each
-              * source has different trust + curation properties and
-              * surfacing that upfront keeps expectations honest. */}
+             * registry) get a cyan badge; Smithery-sourced entries
+             * get a purple badge so users can immediately tell the
+             * community catalogue from our hand-picked list. Each
+             * source has different trust + curation properties and
+             * surfacing that upfront keeps expectations honest. */}
             {entry.source === 'smithery' ? (
               <span
                 title="From the Smithery.ai community catalogue."
@@ -601,12 +672,26 @@ function MarketplaceCard({
               >
                 Curated
               </span>
+            ) : entry.source === 'community' ? (
+              /* v2.0 — community-submitted via public PR. Lives in the
+                 same signed registry.json as curated entries (one
+                 Ed25519 signature covers the whole file), so it still
+                 picks up the Verified badge above. The slate styling
+                 separates "studio published" from "community
+                 published" while making clear both came through the
+                 trusted CDN path. */
+              <span
+                title="Community-submitted via public PR. Review the source link before installing."
+                className="whitespace-nowrap rounded-full border border-slate-400/30 bg-slate-500/10 px-1.5 text-[9px] text-slate-300"
+              >
+                Community
+              </span>
             ) : null}
             {/* v1.12.0 — cryptographic Verified badge. Only set when the
-              * source registry shipped a valid Ed25519 signature that
-              * verified against our bundled public key. Pre-empts the
-              * "malicious plugin owns your machine" failure mode from
-              * the security audit. Hover for context. */}
+             * source registry shipped a valid Ed25519 signature that
+             * verified against our bundled public key. Pre-empts the
+             * "malicious plugin owns your machine" failure mode from
+             * the security audit. Hover for context. */}
             {entry.verified && (
               <span
                 title="Ed25519 signature verified — this entry came from a source whose registry signature matches our bundled public key."
@@ -625,10 +710,10 @@ function MarketplaceCard({
               </span>
             )}
             {/* v1.12.0 — Easy Add badge. Mirrors the install-button label
-              * up into the card so users scanning the marketplace can
-              * spot the zero-friction entries at a glance instead of
-              * opening each install sheet to find out. Yellow Zap matches
-              * the action button so the visual language is consistent. */}
+             * up into the card so users scanning the marketplace can
+             * spot the zero-friction entries at a glance instead of
+             * opening each install sheet to find out. Yellow Zap matches
+             * the action button so the visual language is consistent. */}
             {isEasyAdd && (
               <span
                 title="No configuration needed — click Install and the server boots immediately."
@@ -640,9 +725,25 @@ function MarketplaceCard({
             )}
           </div>
           <p className="mt-0.5 text-[10px] leading-snug text-slate-400">{entry.description}</p>
-          <div className="mt-1 flex items-center gap-2 text-[9px] text-slate-500">
+          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[9px] text-slate-500">
             <span className="rounded bg-white/5 px-1.5 py-0.5">{entry.category}</span>
             {entry.author && <span>· {entry.author}</span>}
+            {/* v2.0 — community-PR provenance. Only renders when the
+                fields are populated (i.e. entry.source === 'community').
+                submittedBy goes through the same isSafeExternalUrl
+                guard we apply elsewhere when we route repoUrl through
+                window.open. */}
+            {entry.submittedBy && <span>· submitted by {entry.submittedBy}</span>}
+            {submittedAtLabel && <span>· added {submittedAtLabel}</span>}
+            {safeRepoUrl && (
+              <button
+                type="button"
+                onClick={() => window.open(safeRepoUrl, '_blank', 'noopener,noreferrer')}
+                className="inline-flex items-center gap-0.5 text-slate-500 underline-offset-2 transition hover:text-[var(--accent)] hover:underline"
+              >
+                source <ExternalLink size={8} />
+              </button>
+            )}
             {entry.docsUrl && (
               <a
                 href={entry.docsUrl}
@@ -660,12 +761,12 @@ function MarketplaceCard({
           </div>
         </div>
         {/* v1.11.4 — discovery-only entries (Glama) have no install
-          * command in the registry data we receive, so we render a
-          * "View" button that opens the entry's detail page in the
-          * user's browser instead of triggering an install flow. They
-          * can read install instructions there + paste into our Add
-          * MCP form. Honest representation of what we can actually do
-          * for the user. */}
+         * command in the registry data we receive, so we render a
+         * "View" button that opens the entry's detail page in the
+         * user's browser instead of triggering an install flow. They
+         * can read install instructions there + paste into our Add
+         * MCP form. Honest representation of what we can actually do
+         * for the user. */}
         {entry.discoveryOnly ? (
           <button
             type="button"
@@ -687,9 +788,11 @@ function MarketplaceCard({
             title={
               installed
                 ? 'Already installed.'
-                : isEasyAdd
-                  ? 'No configuration needed — click to install and start the server immediately.'
-                  : 'Open the configure-and-install sheet.'
+                : isBuiltin
+                  ? 'Built-in integration — opens the in-app setup wizard.'
+                  : isEasyAdd
+                    ? 'No configuration needed — click to install and start the server immediately.'
+                    : 'Open the configure-and-install sheet.'
             }
             className={cn(
               'flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[10px] font-semibold transition disabled:cursor-not-allowed',
@@ -699,10 +802,12 @@ function MarketplaceCard({
             )}
           >
             {/* v1.12.0 — button label is always "Install" for installable
-              * entries; the badge row above carries the Easy Add cue.
-              * Two "Easy Add" labels on the same card read as duplication.
-              * The Zap icon stays for easy entries — quiet visual cue that
-              * this one boots without a configure dialog. */}
+             * entries; the badge row above carries the Easy Add cue.
+             * Two "Easy Add" labels on the same card read as duplication.
+             * The Zap icon stays for easy entries — quiet visual cue that
+             * this one boots without a configure dialog.
+             * v2.0 — builtin entries get "Set up" instead since the
+             * outcome is a guided wizard, not a one-click install. */}
             {installed ? (
               <>
                 <Check size={11} />
@@ -712,6 +817,11 @@ function MarketplaceCard({
               <>
                 <Loader2 size={11} className="animate-spin" />
                 Adding…
+              </>
+            ) : isBuiltin ? (
+              <>
+                <Plug size={11} />
+                Set up
               </>
             ) : (
               <>

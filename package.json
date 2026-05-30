@@ -1,6 +1,7 @@
 {
   "name": "voidsoul-ai-companion",
-  "version": "1.13.5",
+  "productName": "VoidSoul AI Companion",
+  "version": "2.0.0",
   "description": "A local-first AI companion for creators and developers — voice-first, multi-provider, runs on Ollama out of the box.",
   "author": {
     "name": "Void Soul Studio",
@@ -27,6 +28,7 @@
   "scripts": {
     "icons": "node scripts/generate-icons.mjs",
     "piper": "node scripts/download-piper.mjs",
+    "piper:all": "node scripts/download-piper.mjs --all-platforms",
     "dev": "electron-vite dev",
     "start": "electron-vite preview",
     "build": "npm run typecheck && electron-vite build",
@@ -39,6 +41,7 @@
     "format:check": "prettier --check \"src/**/*.{ts,tsx,json,css,md}\"",
     "format": "prettier --write \"src/**/*.{ts,tsx,json,css,md}\"",
     "package": "npm run build && electron-builder --dir",
+    "predist": "npm run piper:all",
     "dist": "npm run build && electron-builder",
     "postinstall": "electron-builder install-app-deps"
   },

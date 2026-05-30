@@ -101,10 +101,7 @@ export const geminiProvider: AIProvider = {
 
     const contents = opts.messages.map((m) => ({
       role: m.role === 'assistant' ? 'model' : 'user',
-      parts: [
-        ...(m.images ?? []).map(inlineData),
-        { text: m.content }
-      ]
+      parts: [...(m.images ?? []).map(inlineData), { text: m.content }]
     }))
 
     const url = `${opts.baseUrl}/v1beta/models/${opts.model}:streamGenerateContent?alt=sse`

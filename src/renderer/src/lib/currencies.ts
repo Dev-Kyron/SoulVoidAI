@@ -75,11 +75,7 @@ export function localToUsd(local: number, usdRate: number): number {
  *  symbol placement (€1.23, ¥123, R$1,23). The `digits` param caps the
  *  fraction; some currencies (JPY) have zero by default but we honour
  *  the caller for sub-unit precision (e.g. tiny per-call costs). */
-export function formatLocal(
-  amount: number,
-  currency: CurrencyCode,
-  digits: number = 2
-): string {
+export function formatLocal(amount: number, currency: CurrencyCode, digits: number = 2): string {
   try {
     return new Intl.NumberFormat(undefined, {
       style: 'currency',
@@ -98,11 +94,7 @@ export function formatLocal(
  *  tiny costs don't read as "$0.00". Mirrors the dollar helper that
  *  already exists in UsageSettings; centralised so other panels can
  *  reuse the same rules. */
-export function formatUsdAsLocal(
-  usd: number,
-  currency: CurrencyCode,
-  usdRate: number
-): string {
+export function formatUsdAsLocal(usd: number, currency: CurrencyCode, usdRate: number): string {
   const local = usdToLocal(usd, usdRate)
   if (local === 0) return formatLocal(0, currency, 2)
   // Sub-one-cent values: show with more precision so per-call rows

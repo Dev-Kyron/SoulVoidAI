@@ -100,7 +100,8 @@ export function ChatSearch({ onClose, onJumpTo }: ChatSearchProps): JSX.Element 
                 >
                   <span className="text-[8px] font-semibold uppercase tracking-[0.16em] text-slate-500">
                     {m.role}
-                    {m.createdAt && ` · ${new Date(m.createdAt).toLocaleDateString([], { day: 'numeric', month: 'short' })}`}
+                    {m.createdAt &&
+                      ` · ${new Date(m.createdAt).toLocaleDateString([], { day: 'numeric', month: 'short' })}`}
                   </span>
                   <span className="text-[11px] leading-snug text-slate-300">
                     {buildSnippet(m.content, tokens)}

@@ -116,7 +116,10 @@ export function initUpdater(): void {
       typeof info.releaseNotes === 'string'
         ? info.releaseNotes
         : Array.isArray(info.releaseNotes)
-          ? info.releaseNotes.map((n) => n.note).filter(Boolean).join('\n')
+          ? info.releaseNotes
+              .map((n) => n.note)
+              .filter(Boolean)
+              .join('\n')
           : null
     setStatus({ kind: 'available', version: info.version, releaseNotes: notes })
     log('info', 'system', `Update available: v${info.version}`)

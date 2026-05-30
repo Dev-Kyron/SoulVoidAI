@@ -9,6 +9,7 @@
       "author": "VoidSoul Studio",
       "description": "Quick links to the documentation sites devs hit constantly — MDN, Stack Overflow, GitHub, npm, Caniuse, regex101.",
       "tags": ["productivity", "developer"],
+      "source": "curated",
       "quickActions": [
         {
           "id": "mdn",
@@ -67,6 +68,7 @@
       "author": "VoidSoul Studio",
       "description": "One-tap access to the major AI research surfaces — Anthropic, OpenAI, Hugging Face, arXiv, Papers with Code.",
       "tags": ["ai", "research"],
+      "source": "curated",
       "quickActions": [
         {
           "id": "anthropic",
@@ -117,13 +119,14 @@
       "author": "VoidSoul Studio",
       "description": "Streamer / YouTuber starter pack — opens OBS, Discord, the YouTube Studio dashboard, and Streamlabs.",
       "tags": ["creator", "streaming"],
+      "source": "curated",
       "quickActions": [
         {
           "id": "obs",
           "label": "OBS",
           "icon": "Camera",
           "description": "Launch OBS Studio.",
-          "requires": "app",
+          "requires": "appControl",
           "action": { "type": "open-app", "params": { "name": "obs64" } }
         },
         {
@@ -131,7 +134,7 @@
           "label": "Discord",
           "icon": "MessageSquare",
           "description": "Launch Discord.",
-          "requires": "app",
+          "requires": "appControl",
           "action": { "type": "open-app", "params": { "name": "discord" } }
         },
         {

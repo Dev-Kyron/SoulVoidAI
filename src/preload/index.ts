@@ -31,12 +31,12 @@ const bridge: VoidSoulBridge = {
     setPrivateChat: (enabled) => invoke('config:set-private-chat', enabled),
     setRagEnabled: (enabled) => invoke('config:set-rag-enabled', enabled),
     setAutoRoute: (enabled) => invoke('config:set-auto-route', enabled),
+    setPluginHooks: (enabled) => invoke('config:set-plugin-hooks', enabled),
     setMemory: (patch) => invoke('config:set-memory', patch),
     setProactiveVoice: (patch) => invoke('config:set-proactive-voice', patch),
     setScreenWatch: (patch) => invoke('config:set-screen-watch', patch),
     setExperimentalFeatures: (patch) => invoke('config:set-experimental-features', patch),
-    setEmbeddingProvider: (provider) =>
-      invoke('config:set-embedding-provider', provider),
+    setEmbeddingProvider: (provider) => invoke('config:set-embedding-provider', provider),
     setOnboarded: (value) => invoke('config:set-onboarded', value),
     setApiKey: (provider, key) => invoke('config:set-api-key', provider, key)
   },
@@ -57,11 +57,9 @@ const bridge: VoidSoulBridge = {
     undo: (undoId) => invoke('automation:undo', undoId),
     list: () => invoke('automation:list')
   },
-  screen: {
-    capture: () => invoke('screen:capture'),
-    ocr: (source) => invoke('screen:ocr', source),
-    activeWindow: () => invoke('screen:active-window')
-  },
+  // v2.0 round-5 cleanup — `vs.screen.*` namespace removed. Nobody in the
+  // renderer ever invoked these; semantic awareness runs entirely main-side
+  // and pushes its results via `events.onActiveWindow` / `onScreenSnapshot`.
   memory: {
     get: () => invoke('memory:get'),
     rememberProject: (path) => invoke('memory:remember-project', path),
@@ -78,12 +76,16 @@ const bridge: VoidSoulBridge = {
     setFactModes: (id, modes) => invoke('memory:set-fact-modes', id, modes),
     removeFact: (id) => invoke('memory:remove-fact', id),
     clearFacts: () => invoke('memory:clear-facts'),
+    bioMerge: (updates) => invoke('memory:bio-merge', updates),
+    bioRemove: (id) => invoke('memory:bio-remove', id),
+    bioClear: () => invoke('memory:bio-clear'),
     // v1.4.0 emotional context — see services/memory/sentiment*.
     onUserMessage: (threadId, recentMessages) =>
       invoke('memory:on-user-message', threadId, recentMessages),
     emotionalContext: () => invoke('memory:emotional-context'),
     sentimentPromptBlock: () => invoke('memory:sentiment-prompt-block'),
-    recentSentiments: (limit) => invoke('memory:recent-sentiments', limit),
+    // v2.0 round-5 cleanup — `recentSentiments` removed (read main-side
+    // by the prompt composer only; renderer never needed it).
     forgetRecentSentiment: (days) => invoke('memory:forget-recent-sentiment', days)
   },
   proactive: {
@@ -120,8 +122,7 @@ const bridge: VoidSoulBridge = {
     setActiveThread: (id) => invoke('history:set-active-thread', id),
     setPinned: (id, pinned) => invoke('history:set-pinned', id, pinned),
     setThreadMode: (id, mode) => invoke('history:set-thread-mode', id, mode),
-    setThreadSystemPrompt: (id, prompt) =>
-      invoke('history:set-thread-system-prompt', id, prompt),
+    setThreadSystemPrompt: (id, prompt) => invoke('history:set-thread-system-prompt', id, prompt),
     clearThread: (id) => invoke('history:clear-thread', id),
     clearAll: () => invoke('history:clear-all')
   },
@@ -149,8 +150,7 @@ const bridge: VoidSoulBridge = {
     get: (id) => invoke('secrets:get', id)
   },
   share: {
-    saveFile: (title, content, extension) =>
-      invoke('share:save-file', title, content, extension),
+    saveFile: (title, content, extension) => invoke('share:save-file', title, content, extension),
     gist: (title, content, isPublic, extension) =>
       invoke('share:gist', title, content, isPublic, extension)
   },
@@ -183,7 +183,56 @@ const bridge: VoidSoulBridge = {
     removeFolder: (folder) => invoke('files-rag:remove-folder', folder),
     rescan: (folder) => invoke('files-rag:rescan', folder),
     rescanAll: () => invoke('files-rag:rescan-all'),
-    scanStatus: () => invoke('files-rag:scan-status')
+    // v2.0 round-5 cleanup — `scanStatus` removed (replaced by push-based
+    // `files-rag:progress` event subscription).
+    stopScan: (folder) => invoke('files-rag:stop-scan', folder)
+  },
+  browserExtension: {
+    status: () => invoke('extension:status'),
+    setEnabled: (enabled) => invoke('extension:set-enabled', enabled)
+  },
+  clickBench: {
+    list: () => invoke('clickbench:list'),
+    run: (opts) => invoke('clickbench:run', opts),
+    abort: () => invoke('clickbench:abort'),
+    saveBenchmark: (benchmark) => invoke('clickbench:save-benchmark', benchmark),
+    captureScreenshot: () => invoke('clickbench:capture-screenshot')
+  },
+  taughtClicks: {
+    list: () => invoke('taught-clicks:list'),
+    remove: (id) => invoke('taught-clicks:remove', id),
+    save: (input) => invoke('taught-clicks:save', input),
+    startCapture: () => invoke('taught-clicks:start-capture'),
+    cancelCapture: () => invoke('taught-clicks:cancel-capture')
+  },
+  homeAssistant: {
+    status: () => invoke('home-assistant:status'),
+    refresh: () => invoke('home-assistant:refresh'),
+    test: (opts) => invoke('home-assistant:test', opts),
+    configure: (opts) => invoke('home-assistant:configure', opts),
+    disable: () => invoke('home-assistant:disable'),
+    clear: () => invoke('home-assistant:clear')
+  },
+  vectorStore: {
+    stats: () => invoke('vector-store:stats'),
+    listFiles: (folderPrefix) => invoke('vector-store:list-files', folderPrefix),
+    listChunks: (filePath) => invoke('vector-store:list-chunks', filePath),
+    queryTrace: () => invoke('vector-store:query-trace'),
+    clearTrace: () => invoke('vector-store:clear-trace'),
+    explain: (query, options) => invoke('vector-store:explain', query, options),
+    exclude: (ids) => invoke('vector-store:exclude', ids)
+  },
+  pythonSandbox: {
+    list: () => invoke('python-sandbox:list'),
+    restart: (threadId) => invoke('python-sandbox:restart', threadId),
+    dispose: (threadId) => invoke('python-sandbox:dispose', threadId)
+  },
+  personas: {
+    upsert: (persona) => invoke('personas:upsert', persona),
+    remove: (id) => invoke('personas:remove', id),
+    exportToFile: (bundle, defaultFilename) =>
+      invoke('personas:export-to-file', bundle, defaultFilename),
+    importFromFile: () => invoke('personas:import-from-file')
   },
   plugins: {
     list: () => invoke('plugins:list'),
@@ -223,7 +272,14 @@ const bridge: VoidSoulBridge = {
     chooseFolder: () => invoke('sync:choose-folder'),
     clearFolder: () => invoke('sync:clear-folder'),
     push: () => invoke('sync:push'),
-    pull: () => invoke('sync:pull')
+    pull: () => invoke('sync:pull'),
+    pickVaultFolder: () => invoke('sync:pick-vault-folder'),
+    status: () => invoke('sync:status'),
+    setupNew: (opts) => invoke('sync:setup-new', opts),
+    join: (opts) => invoke('sync:join', opts),
+    unpair: () => invoke('sync:unpair'),
+    syncNow: () => invoke('sync:now'),
+    getMnemonic: () => invoke('sync:get-mnemonic')
   },
   threadExport: {
     save: (args) => invoke('thread:export', args)
@@ -232,7 +288,9 @@ const bridge: VoidSoulBridge = {
     setExpanded: (expanded) => invoke('window:set-expanded', expanded),
     moveBy: (dx, dy) => invoke('window:move-by', dx, dy),
     hide: () => invoke('window:hide'),
-    setAlwaysOnTop: (value) => invoke('window:always-on-top', value),
+    // v2.0 round-5 cleanup — `setAlwaysOnTop` removed (tray.ts calls the
+    // main-side helper directly; renderer's appearance toggle flows
+    // through `setAppearance` and main reacts to the config change).
     openSettings: () => invoke('window:open-settings'),
     closeSettings: () => invoke('window:close-settings'),
     openGlobalSearch: () => invoke('window:open-global-search')
@@ -243,7 +301,9 @@ const bridge: VoidSoulBridge = {
     quitAndInstall: () => invoke('updater:quit-and-install')
   },
   wakeWord: {
-    keywordDir: () => invoke('wake-word:keyword-dir'),
+    // v2.0 round-5 cleanup — `keywordDir` removed (zero callers; the
+    // dir is opened directly via `openFolder` which shell-opens the
+    // path in the OS file manager).
     openFolder: () => invoke('wake-word:open-folder'),
     keywordBytes: (persona) => invoke('wake-word:keyword-bytes', persona)
   },
@@ -278,6 +338,7 @@ const bridge: VoidSoulBridge = {
     onLog: (cb) => subscribe('log:new', cb),
     onLogCleared: (cb) => subscribe('log:cleared', () => cb()),
     onActiveWindow: (cb) => subscribe('screen:active-window', cb),
+    onScreenSnapshot: (cb) => subscribe('screen:snapshot', cb),
     onSummon: (cb) => subscribe('widget:summon', cb),
     onOpenGlobalSearch: (cb) => subscribe('widget:open-global-search', () => cb()),
     onUpdaterStatus: (cb) => subscribe('updater:status', cb),
@@ -292,9 +353,18 @@ const bridge: VoidSoulBridge = {
     onTrayOpenTab: (cb) => subscribe('tray:open-tab', cb),
     onTrayRunPrompt: (cb) => subscribe('tray:run-prompt', cb),
     onScheduledTaskRan: (cb) => subscribe('scheduler:task-ran', cb),
+    onSchedulerOpenBrief: (cb) => subscribe('scheduler:open-brief', cb),
+    onSyncStatus: (cb) => subscribe('sync:status', cb),
     onFlushPending: (cb) => subscribe('app:flush-pending', cb),
     onQuickAiOpen: (cb) => subscribe('quick-ai:open', cb),
-    onVisualClickFailure: (cb) => subscribe('visual-click:failure', cb)
+    onVisualClickFailure: (cb) => subscribe('visual-click:failure', cb),
+    onClickBenchProgress: (cb) => subscribe('clickbench:progress', cb),
+    onTaughtClicksEvent: (cb) => subscribe('taught-clicks:event', cb),
+    /** v2.0 — browser-extension bridge status changes (listening flag,
+     *  connected-client count). Settings panel subscribes to keep the
+     *  chip live without polling. */
+    onExtensionStatus: (cb) => subscribe('extension:status', cb),
+    onConversationToggle: (cb) => subscribe('conversation:toggle', () => cb())
   }
 }
 

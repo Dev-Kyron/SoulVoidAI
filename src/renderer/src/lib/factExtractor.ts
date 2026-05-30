@@ -23,7 +23,7 @@ const KNOWN_MODE_IDS = new Set<ModeId>(MODES.map((m) => m.id))
 function buildSystemPrompt(activeMode: ModeId): string {
   const modeList = MODES.map((m) => `  - "${m.id}" (${m.name})`).join('\n')
   return (
-    'You extract durable user facts from conversation snippets for an AI assistant\'s long-term memory.\n' +
+    "You extract durable user facts from conversation snippets for an AI assistant's long-term memory.\n" +
     'Output JSON only, with this exact shape:\n' +
     '  {"facts": [{"text": "fact one", "modes": ["indie-dev"]}, {"text": "fact two", "modes": null}]}\n\n' +
     'Include only facts worth remembering ACROSS future sessions:\n' +
@@ -89,6 +89,39 @@ export async function extractFacts(
   const transcript = buildTranscript(messages)
   if (!transcript) return 0
 
+  // v2.0 — sentiment-aware pruning. If the user is currently in a
+  // stressed / stuck session (intensity >= 3) and pruning is on,
+  // skip extraction entirely so we don't memorialise frustration as
+  // "durable facts" that bleed into future, healthier sessions.
+  // The force path (manual Remember button) bypasses this — the user
+  // explicitly asked, so we honour it. Has no effect when the
+  // sentiment classifier is off, since there's no signal to read.
+  if (!options.force && config.memory.sentimentPruning && config.memory.emotionalContext) {
+    try {
+      const snapshot = await vs.memory.emotionalContext()
+      const current = snapshot.current
+      if (
+        current &&
+        (current.sentiment === 'stressed' || current.sentiment === 'stuck') &&
+        current.intensity >= 3
+      ) {
+        // Quiet info log — not a warning. Visible if the user wonders
+        // "why didn't anything get remembered?", but doesn't read as
+        // an error in normal scanning.
+        void vs.logs.write(
+          'info',
+          'memory',
+          `Skipped fact extraction — current session sentiment is "${current.sentiment}" (intensity ${current.intensity}). Toggle in Settings → AI → Memory.`
+        )
+        return 0
+      }
+    } catch {
+      // Snapshot fetch failed — don't block extraction over it. We
+      // fall through to the normal path; one bad IPC isn't a reason
+      // to skip writing facts.
+    }
+  }
+
   const knownFacts = useMemoryStore.getState().data?.facts ?? []
   const known = knownFacts.length
     ? '\n\nAlready known (do NOT repeat these):\n' +
@@ -110,12 +143,7 @@ export async function extractFacts(
       messages: [{ role: 'user', content: transcript }] as ChatTurn[]
     })
     if (result.error) {
-      void vs.logs.write(
-        'warn',
-        'memory',
-        'Fact extraction call failed',
-        result.error
-      )
+      void vs.logs.write('warn', 'memory', 'Fact extraction call failed', result.error)
       return 0
     }
     if (!result.text) {
@@ -145,11 +173,7 @@ export async function extractFacts(
       return 0
     }
     if (!Array.isArray(parsed.facts)) {
-      void vs.logs.write(
-        'warn',
-        'memory',
-        'Fact extractor reply missing `facts` array'
-      )
+      void vs.logs.write('warn', 'memory', 'Fact extractor reply missing `facts` array')
       return 0
     }
 

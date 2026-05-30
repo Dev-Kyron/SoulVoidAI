@@ -25,6 +25,7 @@ import { useAccentTheme, useConfigBroadcastSync } from './lib/useConfigBridge'
 import { useTheme } from './lib/useTheme'
 import { useGlobalSearchHotkey } from './lib/useGlobalSearchHotkey'
 import { isQuietNow } from '@shared/types'
+import { resolveEffectivePersona } from '@shared/voicePersona'
 
 export default function App(): JSX.Element {
   const load = useConfigStore((s) => s.load)
@@ -37,6 +38,7 @@ export default function App(): JSX.Element {
   const loadChat = useChatStore((s) => s.load)
   const loadProjects = useProjectsStore((s) => s.load)
   const setActiveWindow = useUiStore((s) => s.setActiveWindow)
+  const setScreenSnapshot = useUiStore((s) => s.setScreenSnapshot)
 
   useEffect(() => {
     void load()
@@ -56,6 +58,14 @@ export default function App(): JSX.Element {
 
   // Subscribe to screen-awareness updates from the main process.
   useEffect(() => vs.events.onActiveWindow(setActiveWindow), [setActiveWindow])
+
+  // v2.0 — semantic screen-awareness snapshots. Holds the latest OCR
+  // text excerpt + window context in the UI store so the chat composer
+  // can inject it into the system prompt. Without this subscription
+  // the broadcast is dead-letter — main pays the OCR cost for nothing
+  // and the system prompt's promise that the model "sees your screen
+  // text" is empty. (Bug-sweep #196 fix.)
+  useEffect(() => vs.events.onScreenSnapshot(setScreenSnapshot), [setScreenSnapshot])
 
   // Streaming-chunks handler — inside useEffect so HMR doesn't stack
   // duplicate listeners on every renderer reload.
@@ -95,10 +105,12 @@ export default function App(): JSX.Element {
         void useConfigStore.getState().load()
         const count = models.length
         const preview = models.slice(0, 2).join(', ') + (count > 2 ? `, +${count - 2}` : '')
-        useUiStore.getState().pushToast(
-          'success',
-          `✨ ${count} new ${provider} model${count === 1 ? '' : 's'}: ${preview}`
-        )
+        useUiStore
+          .getState()
+          .pushToast(
+            'success',
+            `✨ ${count} new ${provider} model${count === 1 ? '' : 's'}: ${preview}`
+          )
       }),
     []
   )
@@ -120,10 +132,12 @@ export default function App(): JSX.Element {
         if (status.kind === 'available') {
           if (lastNotifiedUpdate.current.available === status.version) return
           lastNotifiedUpdate.current.available = status.version
-          useUiStore.getState().pushToast(
-            'info',
-            `✨ Update v${status.version} available — downloading in the background.`
-          )
+          useUiStore
+            .getState()
+            .pushToast(
+              'info',
+              `✨ Update v${status.version} available — downloading in the background.`
+            )
         } else if (status.kind === 'downloaded') {
           if (lastNotifiedUpdate.current.downloaded === status.version) return
           lastNotifiedUpdate.current.downloaded = status.version
@@ -132,10 +146,12 @@ export default function App(): JSX.Element {
           // an action button, but mentioning the path in the copy gives
           // the user a concrete next step. Settings → About has the
           // restart button wired already (UpdaterRow.tsx).
-          useUiStore.getState().pushToast(
-            'success',
-            `🚀 Update v${status.version} ready. Open Settings → About to restart and install.`
-          )
+          useUiStore
+            .getState()
+            .pushToast(
+              'success',
+              `🚀 Update v${status.version} ready. Open Settings → About to restart and install.`
+            )
         }
       }),
     []
@@ -154,10 +170,12 @@ export default function App(): JSX.Element {
           : reason.length > 80
             ? `${reason.slice(0, 77)}…`
             : reason
-        useUiStore.getState().pushToast(
-          'info',
-          `${fromLabel} unavailable (${shortReason}) — replied via ${toLabel} instead.`
-        )
+        useUiStore
+          .getState()
+          .pushToast(
+            'info',
+            `${fromLabel} unavailable (${shortReason}) — replied via ${toLabel} instead.`
+          )
       }),
     []
   )
@@ -179,13 +197,14 @@ export default function App(): JSX.Element {
           ? "Morning. I'll have a proper recap for you in the next update."
           : content
         if (!spoken) return
-        enqueueSpeak(
-          spoken,
-          config.voice.persona,
-          config.voice.rate,
-          config.voice.volume,
-          tone
-        )
+        // v2.0 — pick the persona via the active mode's per-mode
+        // override so proactive nudges speak in the same voice the
+        // current chat session would. Without this the proactive
+        // subsystem always used the global persona regardless of
+        // mode, which breaks the user's "switch from Soul to Void
+        // mid-chat" expectation.
+        const persona = resolveEffectivePersona(config.voice, config.activeMode)
+        enqueueSpeak(spoken, persona, config.voice.rate, config.voice.volume, tone)
         useUiStore.getState().pushToast('info', `Proactive nudge: ${taskName}`)
       }),
     []
@@ -198,14 +217,82 @@ export default function App(): JSX.Element {
   // locally in case quiet hours rolled over between the fire and the event.
   useEffect(
     () =>
-      vs.events.onScheduledTaskRan(({ name, ok, output, suppressed }) => {
+      vs.events.onScheduledTaskRan(({ name, ok, output, suppressed, threadId }) => {
+        // Research-mode briefs sidebar-refresh even under DND so the new
+        // thread is visible the moment the user returns from quiet hours
+        // — the toast is suppressed, not the persistence. A sidebar-only
+        // refresh (not the full `load(true)`) preserves any in-flight
+        // streaming on the currently-active thread; otherwise a brief
+        // landing mid-reply would clobber `streaming` + `pendingRequestId`.
+        if (ok && threadId) {
+          void vs.history.summaries().then(({ summaries }) => {
+            useChatStore.setState({ threads: summaries })
+          })
+        }
         if (suppressed) return
         const cfg = useConfigStore.getState().config
         if (cfg && isQuietNow(cfg.appearance.dnd)) return
-        useUiStore.getState().pushToast(
-          ok ? 'success' : 'error',
-          ok ? `Scheduled "${name}" ran` : `Scheduled "${name}" failed: ${output.slice(0, 120)}`
-        )
+        useUiStore
+          .getState()
+          .pushToast(
+            ok ? 'success' : 'error',
+            ok
+              ? threadId
+                ? `Brief ready for "${name}" — see the new thread`
+                : `Scheduled "${name}" ran`
+              : `Scheduled "${name}" failed: ${output.slice(0, 120)}`
+          )
+      }),
+    []
+  )
+
+  // OS notification click → deep-link to the freshly-saved research thread.
+  // The toast above also fires on the same event but doesn't auto-switch
+  // threads (that would be disruptive mid-conversation). This handler only
+  // runs when the user explicitly clicks the notification, signalling
+  // intent to see the brief NOW. switchThread early-returns mid-stream;
+  // we surface a toast in that case so the click isn't silently dropped.
+  useEffect(
+    () =>
+      vs.events.onSchedulerOpenBrief(({ threadId, taskName }) => {
+        // The subscribe layer doesn't await async handlers, so a throw
+        // anywhere in the chain (history IPC rejects during main quit,
+        // switchThread races a thread deletion) becomes an unhandled
+        // rejection with no toast and only a devtools console warning.
+        // Wrap in an explicit catch so the failure mode is at least
+        // visible to the user.
+        void (async () => {
+          try {
+            // Sidebar may be stale (the brief just landed); refresh first
+            // so switchThread can find the new threadId in state.threads.
+            // Sidebar-only refresh — same reasoning as the task-ran handler:
+            // a full load(true) would nuke an in-flight stream on the
+            // currently-active thread.
+            const { summaries } = await vs.history.summaries()
+            useChatStore.setState({ threads: summaries })
+            const widget = useWidgetStore.getState()
+            if (!widget.expanded) await widget.expand()
+            widget.setTab('chat')
+            const chat = useChatStore.getState()
+            if (chat.streaming) {
+              useUiStore
+                .getState()
+                .pushToast(
+                  'info',
+                  `Brief for "${taskName}" is in the sidebar — finish the current reply to open it.`
+                )
+              return
+            }
+            await chat.switchThread(threadId)
+          } catch (err) {
+            useUiStore
+              .getState()
+              .pushToast(
+                'error',
+                `Couldn't open the brief for "${taskName}" — ${err instanceof Error ? err.message : String(err)}`
+              )
+          }
+        })()
       }),
     []
   )
@@ -278,10 +365,22 @@ export default function App(): JSX.Element {
         if (progress) {
           useUiStore.getState().pushToast('info', reason)
         } else {
-          useUiStore
-            .getState()
-            .pushToast('error', `Couldn't click "${description}" — ${reason}`)
+          useUiStore.getState().pushToast('error', `Couldn't click "${description}" — ${reason}`)
         }
+      }),
+    []
+  )
+
+  // v2.0 — Conversation-mode global hotkey. Toggles in/out of the
+  // hands-free voice loop. Lazily imports the store so users who never
+  // use the hotkey don't pay the cost of constructing the controller.
+  useEffect(
+    () =>
+      vs.events.onConversationToggle(async () => {
+        const widget = useWidgetStore.getState()
+        if (!widget.expanded) await widget.expand()
+        const { useConversationStore } = await import('./store/useConversationStore')
+        void useConversationStore.getState().toggle()
       }),
     []
   )

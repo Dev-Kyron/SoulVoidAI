@@ -4,7 +4,7 @@
  */
 import { create } from 'zustand'
 import { uid } from '../lib/utils'
-import type { ActiveWindowInfo, AgentCheckpoint } from '@shared/types'
+import type { ActiveWindowInfo, AgentCheckpoint, ScreenSnapshot } from '@shared/types'
 import type { PermissionId } from '@shared/permissions'
 
 export type ToastKind = 'info' | 'success' | 'error'
@@ -60,8 +60,32 @@ interface WriteApprovalPrompt {
   resolve: (approved: boolean) => void
 }
 
+/**
+ * v2.0 — screen-reader announcement payload. `seq` increments on every
+ * call so a `<LiveRegion>` keyed on it remounts the announcement text
+ * even when the same string is announced twice in a row (e.g. two
+ * "Saved." toasts in succession). Without the seq trick AT engines see
+ * the live region's DOM text as unchanged and skip the re-read.
+ *
+ * Two channels:
+ *  - polite: queued behind whatever the user is doing (toasts, stream
+ *    completion, status updates). Default for almost everything.
+ *  - assertive: interrupts. Reserved for error toasts and modal opens
+ *    where the user needs to know NOW.
+ */
+export interface LiveAnnouncement {
+  text: string
+  seq: number
+}
+
+export type AnnouncePriority = 'polite' | 'assertive'
+
 interface UiState {
   toasts: ToastItem[]
+  /** v2.0 — last polite announcement pushed to the global LiveRegion. */
+  announcePolite: LiveAnnouncement | null
+  /** v2.0 — last assertive announcement pushed to the global LiveRegion. */
+  announceAssertive: LiveAnnouncement | null
   /** The currently-displayed permission prompt — head of the FIFO queue. */
   permissionPrompt: PermissionPrompt | null
   /**
@@ -80,6 +104,11 @@ interface UiState {
   /** FIFO queue of pending write approvals. */
   writeApprovalQueue: WriteApprovalPrompt[]
   activeWindow: ActiveWindowInfo | null
+  /** v2.0 — latest semantic screen snapshot. Emitted by main when both
+   *  `screenAwareness` and `semanticScreenAwareness` are on. Cleared
+   *  when either toggle goes off so a stale OCR excerpt can't leak
+   *  into the system prompt after the user opted out. */
+  screenSnapshot: ScreenSnapshot | null
   paletteOpen: boolean
   addActionOpen: boolean
   helpOpen: boolean
@@ -103,9 +132,26 @@ interface UiState {
    * each one. Empty array = banner is hidden.
    */
   staleCheckpoints: AgentCheckpoint[]
+  /**
+   * v2.0 polish — number of "do not close the window mid-flow" critical
+   * operations in progress. Currently used by UnlockEverythingDialog to
+   * tell SettingsRoot's Esc handler "don't kill me while I'm halfway
+   * through granting 8 permissions + enabling 6 features + iterating
+   * every MCP server". Use enter/exit symmetrically; > 0 blocks Esc.
+   */
+  criticalBusyCount: number
 
   pushToast: (kind: ToastKind, message: string, undoId?: string) => void
   dismissToast: (id: string) => void
+  /**
+   * v2.0 — push a short string to the global `<LiveRegion>` so screen
+   * readers announce it. Polite by default (queued behind whatever
+   * the user is doing); assertive interrupts and is reserved for
+   * error toasts + critical modal opens. `pushToast` already calls
+   * this internally — direct callers are for non-toast events like
+   * "Reply ready" on stream completion.
+   */
+  announce: (message: string, priority?: AnnouncePriority) => void
   promptPermission: (permission: PermissionId, actionLabel: string) => Promise<boolean>
   resolvePermission: (granted: boolean) => void
   /** v1.12.3 — pop the shell approval modal and await the user's decision. */
@@ -128,6 +174,8 @@ interface UiState {
    */
   cancelAllPrompts: () => void
   setActiveWindow: (info: ActiveWindowInfo) => void
+  /** v2.0 — install latest screen snapshot. Null clears (toggle off). */
+  setScreenSnapshot: (snapshot: ScreenSnapshot | null) => void
   setPalette: (open: boolean) => void
   setAddActionOpen: (open: boolean) => void
   setHelpOpen: (open: boolean) => void
@@ -138,10 +186,20 @@ interface UiState {
   setActionToDelete: (target: { id: string; label: string } | null) => void
   setStaleCheckpoints: (checkpoints: AgentCheckpoint[]) => void
   removeStaleCheckpoint: (requestId: string) => void
+  /** v2.0 polish — bump on entering a critical flow, drop on exit. */
+  enterCriticalFlow: () => void
+  exitCriticalFlow: () => void
 }
+
+// v2.0 — module-local monotonic seq for live-region announcements. Lives
+// outside the store so we don't churn React subscribers on every toast
+// (the increment doesn't need to flow through any selector).
+let announceSeq = 0
 
 export const useUiStore = create<UiState>((set, get) => ({
   toasts: [],
+  announcePolite: null,
+  announceAssertive: null,
   permissionPrompt: null,
   permissionQueue: [],
   shellApproval: null,
@@ -149,6 +207,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   writeApproval: null,
   writeApprovalQueue: [],
   activeWindow: null,
+  screenSnapshot: null,
   paletteOpen: false,
   addActionOpen: false,
   helpOpen: false,
@@ -158,14 +217,28 @@ export const useUiStore = create<UiState>((set, get) => ({
   canvasContent: null,
   actionToDelete: null,
   staleCheckpoints: [],
+  criticalBusyCount: 0,
 
   pushToast: (kind, message, undoId) => {
     const id = uid()
     set((state) => ({ toasts: [...state.toasts, { id, kind, message, undoId }] }))
     window.setTimeout(() => get().dismissToast(id), undoId ? 9000 : 5000)
+    // v2.0 — mirror every toast into the live-region announcer so screen
+    // reader users hear the same status updates sighted users see. Errors
+    // get assertive priority (interrupt whatever's being read); info /
+    // success stay polite so they queue behind in-flight announcements.
+    get().announce(message, kind === 'error' ? 'assertive' : 'polite')
   },
 
   dismissToast: (id) => set((state) => ({ toasts: state.toasts.filter((t) => t.id !== id) })),
+
+  announce: (message, priority = 'polite') => {
+    const text = message.trim()
+    if (!text) return
+    announceSeq += 1
+    const payload: LiveAnnouncement = { text, seq: announceSeq }
+    set(priority === 'assertive' ? { announceAssertive: payload } : { announcePolite: payload })
+  },
 
   promptPermission: (permission, actionLabel) =>
     // v1.12.3 — enqueue instead of overwriting. If no prompt is visible,
@@ -187,9 +260,7 @@ export const useUiStore = create<UiState>((set, get) => ({
     // Promote the next queued prompt (if any) to the visible slot.
     set((state) => {
       const [head, ...rest] = state.permissionQueue
-      return head
-        ? { permissionPrompt: head, permissionQueue: rest }
-        : { permissionPrompt: null }
+      return head ? { permissionPrompt: head, permissionQueue: rest } : { permissionPrompt: null }
     })
   },
 
@@ -209,9 +280,7 @@ export const useUiStore = create<UiState>((set, get) => ({
     prompt.resolve(approved)
     set((state) => {
       const [head, ...rest] = state.shellApprovalQueue
-      return head
-        ? { shellApproval: head, shellApprovalQueue: rest }
-        : { shellApproval: null }
+      return head ? { shellApproval: head, shellApprovalQueue: rest } : { shellApproval: null }
     })
   },
 
@@ -231,9 +300,7 @@ export const useUiStore = create<UiState>((set, get) => ({
     prompt.resolve(approved)
     set((state) => {
       const [head, ...rest] = state.writeApprovalQueue
-      return head
-        ? { writeApproval: head, writeApprovalQueue: rest }
-        : { writeApproval: null }
+      return head ? { writeApproval: head, writeApprovalQueue: rest } : { writeApproval: null }
     })
   },
 
@@ -259,6 +326,8 @@ export const useUiStore = create<UiState>((set, get) => ({
 
   setActiveWindow: (info) => set({ activeWindow: info }),
 
+  setScreenSnapshot: (snapshot) => set({ screenSnapshot: snapshot }),
+
   setPalette: (open) => set({ paletteOpen: open }),
 
   setAddActionOpen: (open) => set({ addActionOpen: open }),
@@ -280,5 +349,10 @@ export const useUiStore = create<UiState>((set, get) => ({
   removeStaleCheckpoint: (requestId) =>
     set((state) => ({
       staleCheckpoints: state.staleCheckpoints.filter((c) => c.requestId !== requestId)
-    }))
+    })),
+
+  enterCriticalFlow: () => set((state) => ({ criticalBusyCount: state.criticalBusyCount + 1 })),
+
+  exitCriticalFlow: () =>
+    set((state) => ({ criticalBusyCount: Math.max(0, state.criticalBusyCount - 1) }))
 }))

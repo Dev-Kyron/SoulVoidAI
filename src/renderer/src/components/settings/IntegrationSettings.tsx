@@ -86,7 +86,9 @@ function SecretField({
         {signupUrl && (
           <button
             type="button"
-            onClick={() => void vs.automation.execute({ type: 'open-url', params: { url: signupUrl } })}
+            onClick={() =>
+              void vs.automation.execute({ type: 'open-url', params: { url: signupUrl } })
+            }
             className="ml-auto flex items-center gap-1 text-[9px] text-slate-500 transition hover:text-[var(--accent)]"
           >
             get a key <ExternalLink size={9} />
@@ -97,9 +99,7 @@ function SecretField({
         <div
           className={cn(
             'flex items-baseline gap-1.5 rounded-md border px-2 py-1 text-[10px]',
-            stored
-              ? 'border-emerald-400/30 bg-emerald-400/5'
-              : 'border-cyan-400/20 bg-cyan-400/5'
+            stored ? 'border-emerald-400/30 bg-emerald-400/5' : 'border-cyan-400/20 bg-cyan-400/5'
           )}
         >
           <span

@@ -62,7 +62,16 @@ const PROCESS_ALIASES: Record<string, string[]> = {
 }
 
 const HINT_STOPWORDS = new Set([
-  'the', 'a', 'an', 'my', 'in', 'on', 'window', 'app', 'application', 'browser'
+  'the',
+  'a',
+  'an',
+  'my',
+  'in',
+  'on',
+  'window',
+  'app',
+  'application',
+  'browser'
 ])
 
 function tokenise(hint: string): string[] {
@@ -114,10 +123,7 @@ function scoreWindow(window: WindowInfo, hintLower: string, tokens: string[]): n
   return score
 }
 
-export function matchWindow(
-  windows: WindowInfo[],
-  hint: string
-): WindowMatch | null {
+export function matchWindow(windows: WindowInfo[], hint: string): WindowMatch | null {
   if (windows.length === 0) return null
   const hintLower = hint.toLowerCase().trim()
   if (!hintLower) return null
@@ -149,9 +155,8 @@ export function matchWindow(
   // usually right.
   const normalised = Math.min(0.95, 0.55 + (top.score - MIN_ABSOLUTE_SCORE) * 0.04)
 
-  const titlePreview = top.window.title.length > 40
-    ? `${top.window.title.slice(0, 37)}…`
-    : top.window.title
+  const titlePreview =
+    top.window.title.length > 40 ? `${top.window.title.slice(0, 37)}…` : top.window.title
   const reason = `window match: "${titlePreview}" (${top.window.processName})`
 
   return { window: top.window, confidence: normalised, reason }

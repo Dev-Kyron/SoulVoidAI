@@ -27,6 +27,11 @@ interface MemoryStore {
   setFactModes: (id: string, modes: ModeId[]) => Promise<void>
   removeFact: (id: string) => Promise<void>
   clearFacts: () => Promise<void>
+  /** v2.0 — passive biographical profile. Per-entry delete + bulk clear
+   *  for the Settings UI. Merge is invoked by the extractor (not the
+   *  store) so the extractor owns the dedup + confidence semantics. */
+  removeBiographical: (id: string) => Promise<void>
+  clearBiographical: () => Promise<void>
 }
 
 export const useMemoryStore = create<MemoryStore>((set, get) => ({
@@ -121,5 +126,17 @@ export const useMemoryStore = create<MemoryStore>((set, get) => ({
     const facts = await vs.memory.clearFacts()
     const data = get().data
     if (data) set({ data: { ...data, facts } })
+  },
+
+  removeBiographical: async (id) => {
+    const biographical = await vs.memory.bioRemove(id)
+    const data = get().data
+    if (data) set({ data: { ...data, biographical } })
+  },
+
+  clearBiographical: async () => {
+    const biographical = await vs.memory.bioClear()
+    const data = get().data
+    if (data) set({ data: { ...data, biographical } })
   }
 }))

@@ -17,14 +17,7 @@
  * highlighter just colourises the rendered text. Links still route to the
  * system browser instead of navigating the Electron renderer.
  */
-import {
-  memo,
-  useEffect,
-  useRef,
-  useState,
-  type ReactElement,
-  type ReactNode
-} from 'react'
+import { memo, useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
@@ -280,9 +273,7 @@ function CodeBlock({ children }: { children: ReactNode }): JSX.Element {
       <div className="flex items-center justify-between border-b border-white/10 px-2.5 py-1">
         <span className="text-[9px] uppercase tracking-wide text-slate-400">
           {language || 'code'}
-          {expandable && (
-            <span className="ml-1.5 text-slate-600">· {lineCount} lines</span>
-          )}
+          {expandable && <span className="ml-1.5 text-slate-600">· {lineCount} lines</span>}
         </span>
         <div className="flex items-center gap-2.5">
           {expandable && (
@@ -313,48 +304,49 @@ function CodeBlock({ children }: { children: ReactNode }): JSX.Element {
   )
 }
 
-export function Markdown({ children }: { children: string }): JSX.Element {
+// v2.0 round-5 perf — hoist the plugin arrays and `components` map to
+// module-level constants and wrap Markdown in React.memo. Previously the
+// arrays + object literal were freshly allocated on every render, so
+// ReactMarkdown couldn't memoize its plugin pipeline; per-token streaming
+// re-parsed remark-gfm + remark-math + rehype-katex over the entire growing
+// reply. Now non-streaming bubbles never re-parse, and the streaming bubble
+// at least skips React-tree reconciliation when `children` hasn't changed.
+const REMARK_PLUGINS = [remarkGfm, remarkMath]
+const REHYPE_PLUGINS = [rehypeKatex]
+const MARKDOWN_COMPONENTS = {
+  pre: ({ children }: { children?: ReactNode }) => <CodeBlock>{children}</CodeBlock>,
+  // v1.12.7 — fix unclickable links in chat. Three changes from the old
+  // anchor: target="_blank" + rel for fallback open, cursor-pointer +
+  // underline for affordance, and route through vs.automation.execute so
+  // the browser permission gate runs.
+  a: ({ href, children }: { href?: string; children?: ReactNode }) => (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="cursor-pointer text-[var(--accent)] underline underline-offset-2 hover:brightness-110"
+      onClick={(event) => {
+        if (!href) return
+        event.preventDefault()
+        void vs.automation.execute({
+          type: 'open-url',
+          params: { url: href }
+        })
+      }}
+    >
+      {children}
+    </a>
+  )
+}
+
+export const Markdown = memo(function Markdown({ children }: { children: string }): JSX.Element {
   return (
     <ReactMarkdown
-      remarkPlugins={[remarkGfm, remarkMath]}
-      rehypePlugins={[rehypeKatex]}
-      components={{
-        pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
-        // v1.12.7 — fix unclickable links in chat. Three changes from the
-        // old anchor:
-        //   1) `target="_blank"` + `rel="noopener noreferrer"` so the
-        //      browser's window-open handler is a fallback when the JS
-        //      onClick is eaten by text-selection (the parent bubble has
-        //      `selectable` → `user-select: text`, which routes mousedown
-        //      → mouseup with even 1px drift to selection, not click).
-        //   2) `cursor-pointer` + `underline` so the link visually reads
-        //      as clickable instead of inheriting the text cursor from
-        //      `.selectable`.
-        //   3) Route the actual open through `vs.automation.execute` so
-        //      the browser permission gate runs and the action lands in
-        //      Logs — matches the rest of the app's external-link path
-        //      (ShareDialog, About, plugin/MCP docs links).
-        a: ({ href, children }) => (
-          <a
-            href={href}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="cursor-pointer text-[var(--accent)] underline underline-offset-2 hover:brightness-110"
-            onClick={(event) => {
-              if (!href) return
-              event.preventDefault()
-              void vs.automation.execute({
-                type: 'open-url',
-                params: { url: href }
-              })
-            }}
-          >
-            {children}
-          </a>
-        )
-      }}
+      remarkPlugins={REMARK_PLUGINS}
+      rehypePlugins={REHYPE_PLUGINS}
+      components={MARKDOWN_COMPONENTS}
     >
       {children}
     </ReactMarkdown>
   )
-}
+})

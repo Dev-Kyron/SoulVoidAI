@@ -1,0 +1,9 @@
+{
+  "name": "dev.kyron.voidsoul",
+  "description": "VoidSoul AI Companion — local bridge for the browser extension",
+  "path": "__BRIDGE_PATH__",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://__EXTENSION_ID__/"
+  ]
+}

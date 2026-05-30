@@ -52,6 +52,31 @@ export function basename(path: string): string {
 }
 
 /**
+ * Defence-in-depth URL protocol guard for any external link rendered from
+ * community-submitted registry data (plugin or MCP). The PR validators
+ * enforce http(s) at submission time, but a stale bundled fallback or a
+ * CDN cache could surface an older entry — belt-and-braces is cheap and
+ * blocks `javascript:` / `data:` / `file:` / `vbscript:` URLs that
+ * would otherwise execute attacker-controlled code in the renderer if
+ * `window.open` raced ahead of `setWindowOpenHandler` (Electron does
+ * intercept those, but we don't want to depend on the host's
+ * interception for safety).
+ *
+ * Centralised here so a future protocol-allowlist tweak (e.g. add
+ * `mailto:`) lands in one place. Returns false on parse failure so a
+ * malformed URL silently disappears from the UI rather than rendering
+ * a tempting button that does nothing.
+ */
+export function isSafeExternalUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url)
+    return parsed.protocol === 'https:' || parsed.protocol === 'http:'
+  } catch {
+    return false
+  }
+}
+
+/**
  * `React.lazy` adapter for modules that export a named component instead of
  * a default — saves the `.then(m => ({ default: m.X }))` ceremony at every
  * lazy boundary.

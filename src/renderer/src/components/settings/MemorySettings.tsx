@@ -2,7 +2,7 @@
  * Memory manager: reusable custom prompts, favourite apps (quick-launch) and
  * recently opened project folders.
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   Plus,
   Play,
@@ -15,7 +15,9 @@ import {
   Pencil,
   Check,
   MessageSquarePlus,
-  Heart
+  Heart,
+  Search,
+  X
 } from 'lucide-react'
 import { useMemoryStore } from '../../store/useMemoryStore'
 import { useChatStore } from '../../store/useChatStore'
@@ -30,6 +32,8 @@ import { SectionLabel, Toggle } from '../common/ui'
 import { CollapsibleSection } from './CollapsibleSection'
 import { MODES } from '@shared/modes'
 import type {
+  BiographicalCategory,
+  BiographicalEntry,
   CustomActionKind,
   EmotionalContextSnapshot,
   ModeId
@@ -63,9 +67,7 @@ function ModeChips({
             key={mode.id}
             type="button"
             onClick={() => onToggle(mode.id)}
-            title={
-              active ? `Scoped to ${mode.name}` : `Add ${mode.name} to this fact's scope`
-            }
+            title={active ? `Scoped to ${mode.name}` : `Add ${mode.name} to this fact's scope`}
             className={cn(
               'rounded-full border px-2 py-0.5 text-[9px] font-medium uppercase tracking-wide transition',
               active
@@ -77,13 +79,10 @@ function ModeChips({
           </button>
         )
       })}
-      <span
-        className={cn(
-          'ml-1 text-[9px] italic',
-          global ? 'text-slate-400' : 'text-slate-600'
-        )}
-      >
-        {global ? 'all modes' : `${selected.length}/${MODES.length} mode${selected.length === 1 ? '' : 's'}`}
+      <span className={cn('ml-1 text-[9px] italic', global ? 'text-slate-400' : 'text-slate-600')}>
+        {global
+          ? 'all modes'
+          : `${selected.length}/${MODES.length} mode${selected.length === 1 ? '' : 's'}`}
       </span>
     </div>
   )
@@ -96,12 +95,37 @@ function AssistantFacts(): JSX.Element {
   const setFactModes = useMemoryStore((s) => s.setFactModes)
   const removeFact = useMemoryStore((s) => s.removeFact)
   const clearFacts = useMemoryStore((s) => s.clearFacts)
+  const pushToast = useUiStore((s) => s.pushToast)
   const autoMemory = useConfigStore((s) => s.config?.chat.autoMemory ?? true)
   const setAutoMemory = useConfigStore((s) => s.setAutoMemory)
   const [text, setText] = useState('')
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editText, setEditText] = useState('')
   const [newFactModes, setNewFactModes] = useState<ModeId[]>([])
+  // v2.0 — filter input. With 50 facts the list scrolls long and "find
+  // the one fact that's wrong" is a needle-in-haystack. Filter matches
+  // case-insensitive substring against fact text — the simplest filter
+  // that's still useful at this scale. Empty filter = full list.
+  const [filter, setFilter] = useState('')
+  // v2.0 — two-stage "Forget all" confirm. First click flips the button
+  // into "Tap to confirm" red mode for 4s; second click within the window
+  // actually wipes everything. Avoids the catastrophic single-misclick on
+  // a button that nukes long-term memory. The timer id lives in a ref so
+  // (a) we can cancel it on unmount and avoid setState-on-unmounted, and
+  // (b) a rapid second arm-click cancels the prior timer instead of
+  // letting two parallel timers race to reset the state.
+  const [confirmingClear, setConfirmingClear] = useState(false)
+  const confirmingClearTimer = useRef<number | null>(null)
+  useEffect(
+    () => () => {
+      if (confirmingClearTimer.current) window.clearTimeout(confirmingClearTimer.current)
+    },
+    []
+  )
+
+  const filtered = filter.trim()
+    ? facts.filter((f) => f.text.toLowerCase().includes(filter.toLowerCase()))
+    : facts
 
   const submit = async (): Promise<void> => {
     if (!text.trim()) return
@@ -116,11 +140,13 @@ function AssistantFacts(): JSX.Element {
     )
   }
 
-  const toggleFactMode = (factId: string, currentModes: ModeId[] | undefined, mode: ModeId): void => {
+  const toggleFactMode = (
+    factId: string,
+    currentModes: ModeId[] | undefined,
+    mode: ModeId
+  ): void => {
     const current = currentModes ?? []
-    const next = current.includes(mode)
-      ? current.filter((m) => m !== mode)
-      : [...current, mode]
+    const next = current.includes(mode) ? current.filter((m) => m !== mode) : [...current, mode]
     void setFactModes(factId, next)
   }
 
@@ -157,12 +183,48 @@ function AssistantFacts(): JSX.Element {
         {facts.length > 0 && (
           <button
             type="button"
-            onClick={() => void clearFacts()}
-            title="Forget every long-term memory"
-            className="flex shrink-0 items-center gap-1 rounded-lg border border-white/10 px-2 py-1 text-[10px] font-semibold text-slate-400 transition hover:border-rose-400/40 hover:text-rose-400"
+            onClick={async () => {
+              // Two-click guard: first click arms the button (red), second
+              // click within 4s actually clears. Resets if the user lets
+              // the window expire — no accidental wipe on stale hovers.
+              if (!confirmingClear) {
+                // Cancel any prior arm-timer so re-arming restarts the
+                // 4s window cleanly instead of inheriting a stale one.
+                if (confirmingClearTimer.current) {
+                  window.clearTimeout(confirmingClearTimer.current)
+                }
+                setConfirmingClear(true)
+                confirmingClearTimer.current = window.setTimeout(() => {
+                  setConfirmingClear(false)
+                  confirmingClearTimer.current = null
+                }, 4000)
+                return
+              }
+              if (confirmingClearTimer.current) {
+                window.clearTimeout(confirmingClearTimer.current)
+                confirmingClearTimer.current = null
+              }
+              setConfirmingClear(false)
+              await clearFacts()
+              pushToast(
+                'info',
+                `Forgot ${facts.length} long-term memor${facts.length === 1 ? 'y' : 'ies'}.`
+              )
+            }}
+            title={
+              confirmingClear
+                ? "Tap again within 4 seconds to confirm — this can't be undone."
+                : 'Forget every long-term memory'
+            }
+            className={cn(
+              'flex shrink-0 items-center gap-1 rounded-lg border px-2 py-1 text-[10px] font-semibold transition',
+              confirmingClear
+                ? 'border-rose-400/60 bg-rose-500/15 text-rose-300'
+                : 'border-white/10 text-slate-400 hover:border-rose-400/40 hover:text-rose-400'
+            )}
           >
             <Trash2 size={11} />
-            Forget all
+            {confirmingClear ? 'Tap to confirm' : 'Forget all'}
           </button>
         )}
       </div>
@@ -175,6 +237,27 @@ function AssistantFacts(): JSX.Element {
         </div>
         <Toggle checked={autoMemory} onChange={(value) => void setAutoMemory(value)} />
       </div>
+      {facts.length > 3 && (
+        <div className="relative mb-1.5">
+          <Search
+            size={10}
+            className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-slate-500"
+          />
+          <input
+            type="text"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            placeholder={`Filter ${facts.length} memories…`}
+            className="w-full rounded-md border border-white/10 bg-black/30 py-1 pl-6 pr-2 text-[10px] text-slate-200 placeholder:text-slate-600 outline-none focus:border-[var(--accent-ring)]"
+            aria-label="Filter remembered facts"
+          />
+          {filter.trim() && (
+            <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[9px] text-slate-500">
+              {filtered.length}/{facts.length}
+            </span>
+          )}
+        </div>
+      )}
       <div className="space-y-1.5">
         {facts.length === 0 && (
           <p className="text-[10px] text-slate-500">
@@ -182,7 +265,12 @@ function AssistantFacts(): JSX.Element {
             your own below.
           </p>
         )}
-        {facts.map((fact) => {
+        {facts.length > 0 && filtered.length === 0 && (
+          <p className="text-[10px] italic text-slate-500">
+            No facts match "{filter.trim()}". Clear the filter to see all {facts.length}.
+          </p>
+        )}
+        {filtered.map((fact) => {
           const editing = editingId === fact.id
           return (
             <div
@@ -285,6 +373,201 @@ function AssistantFacts(): JSX.Element {
   )
 }
 
+/**
+ * v2.0 — summariser knobs. Pre-2.0 these were hardcoded in useChatStore
+ * (SUMMARIZE_TRIGGER_TOKENS=10_000, KEEP_RECENT_MIN=8). A coding session
+ * benefits from a higher trigger + larger recent tail (still see the
+ * file being edited); creative writing benefits from earlier rolling
+ * summarisation (keep the arc dominant). Per-mode overrides stack on
+ * top of the global defaults — modes without an override fall back.
+ */
+function SummariserKnobs(): JSX.Element {
+  const config = useConfigStore((s) => s.config)
+  const setMemory = useConfigStore((s) => s.setMemory)
+  const [editingMode, setEditingMode] = useState<ModeId | null>(null)
+
+  if (!config) return <></>
+
+  const memory = config.memory
+  const overrides = memory.summariserPerMode ?? {}
+  const overrideCount = Object.values(overrides).filter(
+    (v) => v && (v.triggerTokens !== undefined || v.keepRecent !== undefined)
+  ).length
+
+  const updateGlobal = (patch: {
+    summariserTriggerTokens?: number
+    summariserKeepRecent?: number
+  }): void => {
+    void setMemory(patch)
+  }
+
+  const updateMode = (
+    mode: ModeId,
+    patch: { triggerTokens?: number | null; keepRecent?: number | null }
+  ): void => {
+    const next = { ...overrides }
+    const current = { ...(next[mode] ?? {}) }
+    if (patch.triggerTokens === null) delete current.triggerTokens
+    else if (patch.triggerTokens !== undefined) current.triggerTokens = patch.triggerTokens
+    if (patch.keepRecent === null) delete current.keepRecent
+    else if (patch.keepRecent !== undefined) current.keepRecent = patch.keepRecent
+    if (Object.keys(current).length === 0) delete next[mode]
+    else next[mode] = current
+    void setMemory({ summariserPerMode: next })
+  }
+
+  return (
+    <section>
+      <SectionLabel hint="When a conversation gets long, VoidSoul rolls older turns into a 'story so far' recap and only sends the recent tail verbatim. Tune the cutoff and tail size per mode if you find context cuts at a bad place.">
+        Conversation Summariser
+      </SectionLabel>
+
+      <div className="space-y-2">
+        <div className="rounded-lg border border-white/10 bg-black/20 px-2.5 py-2">
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+            Defaults (all modes)
+          </p>
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            <label className="flex flex-col gap-1">
+              <span className="text-[10px] text-slate-400">
+                Summarise after{' '}
+                <span className="text-slate-200">
+                  {memory.summariserTriggerTokens.toLocaleString()}
+                </span>{' '}
+                tokens
+              </span>
+              <input
+                type="range"
+                min={2_000}
+                max={50_000}
+                step={1_000}
+                value={memory.summariserTriggerTokens}
+                onChange={(e) => updateGlobal({ summariserTriggerTokens: Number(e.target.value) })}
+                className="w-full accent-[var(--accent)]"
+              />
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-[10px] text-slate-400">
+                Keep last <span className="text-slate-200">{memory.summariserKeepRecent}</span>{' '}
+                messages verbatim
+              </span>
+              <input
+                type="range"
+                min={2}
+                max={40}
+                step={1}
+                value={memory.summariserKeepRecent}
+                onChange={(e) => updateGlobal({ summariserKeepRecent: Number(e.target.value) })}
+                className="w-full accent-[var(--accent)]"
+              />
+            </label>
+          </div>
+        </div>
+
+        <div>
+          <div className="mb-1 flex items-center justify-between">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+              Per-mode overrides
+            </p>
+            <p className="text-[9px] text-slate-500">
+              {overrideCount === 0
+                ? 'all modes use defaults'
+                : `${overrideCount} override${overrideCount === 1 ? '' : 's'}`}
+            </p>
+          </div>
+          <div className="space-y-1">
+            {MODES.map((mode) => {
+              const override = overrides[mode.id]
+              const hasOverride =
+                override &&
+                (override.triggerTokens !== undefined || override.keepRecent !== undefined)
+              const editing = editingMode === mode.id
+              return (
+                <div
+                  key={mode.id}
+                  className={cn(
+                    'rounded-md border px-2 py-1.5 transition',
+                    hasOverride
+                      ? 'border-[var(--accent-ring)] bg-[var(--accent-soft)]/40'
+                      : 'border-white/5 bg-black/10'
+                  )}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setEditingMode(editing ? null : mode.id)}
+                      className="flex flex-1 items-center justify-between gap-2 text-left"
+                    >
+                      <span className="text-[11px] font-medium text-white">{mode.name}</span>
+                      <span className="text-[9px] text-slate-500">
+                        {hasOverride
+                          ? `${(override?.triggerTokens ?? memory.summariserTriggerTokens).toLocaleString()} tok · keep ${override?.keepRecent ?? memory.summariserKeepRecent}`
+                          : 'default'}
+                      </span>
+                    </button>
+                    {hasOverride && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          updateMode(mode.id, { triggerTokens: null, keepRecent: null })
+                        }
+                        title={`Reset ${mode.name} to defaults`}
+                        className="text-slate-500 transition hover:text-rose-400"
+                      >
+                        <Trash2 size={11} />
+                      </button>
+                    )}
+                  </div>
+                  {editing && (
+                    <div className="mt-2 grid grid-cols-2 gap-2">
+                      <label className="flex flex-col gap-1">
+                        <span className="text-[9px] text-slate-500">
+                          Trigger:{' '}
+                          {(
+                            override?.triggerTokens ?? memory.summariserTriggerTokens
+                          ).toLocaleString()}{' '}
+                          tokens
+                        </span>
+                        <input
+                          type="range"
+                          min={2_000}
+                          max={50_000}
+                          step={1_000}
+                          value={override?.triggerTokens ?? memory.summariserTriggerTokens}
+                          onChange={(e) =>
+                            updateMode(mode.id, { triggerTokens: Number(e.target.value) })
+                          }
+                          className="w-full accent-[var(--accent)]"
+                        />
+                      </label>
+                      <label className="flex flex-col gap-1">
+                        <span className="text-[9px] text-slate-500">
+                          Keep: {override?.keepRecent ?? memory.summariserKeepRecent}
+                        </span>
+                        <input
+                          type="range"
+                          min={2}
+                          max={40}
+                          step={1}
+                          value={override?.keepRecent ?? memory.summariserKeepRecent}
+                          onChange={(e) =>
+                            updateMode(mode.id, { keepRecent: Number(e.target.value) })
+                          }
+                          className="w-full accent-[var(--accent)]"
+                        />
+                      </label>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      </div>
+    </section>
+  )
+}
+
 interface RagStatusShape {
   available: boolean
   indexed: number
@@ -343,9 +626,8 @@ function LongTermRecall(): JSX.Element {
   }
 
   const progress = status.backfill
-  const progressPct = progress && progress.total > 0
-    ? Math.round((progress.done / progress.total) * 100)
-    : null
+  const progressPct =
+    progress && progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : null
 
   return (
     <section>
@@ -365,9 +647,7 @@ function LongTermRecall(): JSX.Element {
         <span>
           {status.indexed.toLocaleString()} message{status.indexed === 1 ? '' : 's'} indexed
         </span>
-        {!status.available && (
-          <span className="text-amber-400">Needs OpenAI or Ollama</span>
-        )}
+        {!status.available && <span className="text-amber-400">Needs OpenAI or Ollama</span>}
       </div>
       {progress && (
         <div className="mt-1.5 rounded-lg border border-white/10 bg-black/20 px-2.5 py-1.5">
@@ -432,10 +712,15 @@ function CustomPrompts(): JSX.Element {
       </SectionLabel>
       <div className="space-y-1.5">
         {prompts.length === 0 && (
-          <p className="text-[10px] text-slate-500">No saved prompts — add reusable instructions below.</p>
+          <p className="text-[10px] text-slate-500">
+            No saved prompts — add reusable instructions below.
+          </p>
         )}
         {prompts.map((prompt) => (
-          <div key={prompt.id} className="glass-soft flex items-start gap-2 rounded-lg px-2.5 py-1.5">
+          <div
+            key={prompt.id}
+            className="glass-soft flex items-start gap-2 rounded-lg px-2.5 py-1.5"
+          >
             <Sparkles size={12} className="mt-0.5 shrink-0 text-[var(--accent)]" />
             <div className="min-w-0 flex-1">
               <p className="text-[11px] font-medium text-white">{prompt.label}</p>
@@ -476,7 +761,12 @@ function CustomPrompts(): JSX.Element {
           placeholder="Prompt text — insert it into chat from the composer"
           className={`${FIELD} resize-none`}
         />
-        <button type="button" onClick={() => void submit()} disabled={!label.trim() || !text.trim()} className={ADD_BUTTON}>
+        <button
+          type="button"
+          onClick={() => void submit()}
+          disabled={!label.trim() || !text.trim()}
+          className={ADD_BUTTON}
+        >
           <Plus size={12} />
           Save prompt
         </button>
@@ -511,27 +801,46 @@ function FavoriteApps(): JSX.Element {
     )
   }
 
+  // v2.0 round-7 multi-platform — `Import taskbar` only does anything on
+  // Windows (taskbar.ts returns [] elsewhere). Hide the button and adjust
+  // the hint copy + placeholder examples on mac/linux instead of showing
+  // a button that produces a confusing "No new taskbar apps to import."
+  // toast. The detection uses userAgent because we don't have a
+  // process.platform bridge in the renderer; substring is good enough
+  // (Electron sets a stable UA string).
+  const isWindows = typeof navigator !== 'undefined' && /Windows/i.test(navigator.userAgent)
+  const isMac = typeof navigator !== 'undefined' && /Mac OS X|Macintosh/i.test(navigator.userAgent)
+  const sectionHint = isWindows
+    ? 'Apps you pin for one-click launch. Import them straight from your Windows taskbar.'
+    : 'Apps you pin for one-click launch.'
+  const placeholderExamples = isMac
+    ? ['Safari', 'Terminal']
+    : isWindows
+      ? ['code', 'notepad']
+      : ['gnome-terminal', 'firefox']
+
   return (
     <section>
       <div className="mb-2 flex items-center justify-between">
-        <SectionLabel hint="Apps you pin for one-click launch. Import them straight from your Windows taskbar.">
-          Favourite Apps
-        </SectionLabel>
-        <button
-          type="button"
-          onClick={() => void handleImport()}
-          title="Import apps pinned to your Windows taskbar"
-          className="flex items-center gap-1.5 rounded-lg border border-[var(--accent-ring)] bg-[var(--accent-soft)] px-2.5 py-1 text-[10px] font-semibold text-[var(--accent)] shadow-glow transition hover:bg-[var(--accent)] hover:text-white"
-        >
-          <Download size={12} />
-          Import taskbar
-        </button>
+        <SectionLabel hint={sectionHint}>Favourite Apps</SectionLabel>
+        {isWindows && (
+          <button
+            type="button"
+            onClick={() => void handleImport()}
+            title="Import apps pinned to your Windows taskbar"
+            className="flex items-center gap-1.5 rounded-lg border border-[var(--accent-ring)] bg-[var(--accent-soft)] px-2.5 py-1 text-[10px] font-semibold text-[var(--accent)] shadow-glow transition hover:bg-[var(--accent)] hover:text-white"
+          >
+            <Download size={12} />
+            Import taskbar
+          </button>
+        )}
       </div>
       <div className="space-y-1.5">
         {apps.length === 0 && (
           <p className="text-[10px] text-slate-500">
-            Pin apps by name or path — e.g. <span className="text-slate-400">code</span>,{' '}
-            <span className="text-slate-400">notepad</span>.
+            Pin apps by name or path — e.g.{' '}
+            <span className="text-slate-400">{placeholderExamples[0]}</span>,{' '}
+            <span className="text-slate-400">{placeholderExamples[1]}</span>.
           </p>
         )}
         {apps.map((app) => (
@@ -543,7 +852,9 @@ function FavoriteApps(): JSX.Element {
             </div>
             <button
               type="button"
-              onClick={() => void runAction({ type: 'open-app', params: { app: app.target } }, app.label)}
+              onClick={() =>
+                void runAction({ type: 'open-app', params: { app: app.target } }, app.label)
+              }
               title="Launch"
               className="shrink-0 text-slate-400 transition hover:text-[var(--accent)]"
             >
@@ -572,7 +883,12 @@ function FavoriteApps(): JSX.Element {
           placeholder="App name or path"
           className={`${FIELD} flex-[1.4]`}
         />
-        <button type="button" onClick={() => void submit()} disabled={!label.trim() || !target.trim()} className={ADD_BUTTON}>
+        <button
+          type="button"
+          onClick={() => void submit()}
+          disabled={!label.trim() || !target.trim()}
+          className={ADD_BUTTON}
+        >
           <Plus size={12} />
         </button>
       </div>
@@ -624,7 +940,10 @@ function RecentProjects(): JSX.Element {
             <button
               type="button"
               onClick={async () => {
-                await runAction({ type: 'open-folder', params: { dir: project.path } }, project.name)
+                await runAction(
+                  { type: 'open-folder', params: { dir: project.path } },
+                  project.name
+                )
                 await rememberProject(project.path)
               }}
               title="Open folder"
@@ -672,9 +991,7 @@ function NexusActions(): JSX.Element {
       </SectionLabel>
       <div className="space-y-1.5">
         {actions.length === 0 && (
-          <p className="text-[10px] text-slate-500">
-            Add your own shortcuts to the Nexus circle.
-          </p>
+          <p className="text-[10px] text-slate-500">Add your own shortcuts to the Nexus circle.</p>
         )}
         {actions.map((action) => {
           const Icon = resolveIcon(action.icon)
@@ -837,13 +1154,11 @@ function EmotionalContext(): JSX.Element {
         </span>
       </SectionLabel>
       <p className="mt-1 text-[10px] leading-relaxed text-slate-500">
-        VoidSoul periodically reads recent exchanges through a small fast
-        model to track session mood (stressed / productive / stuck /
-        excited / neutral). The result is added as soft context to the
-        system prompt so she can adapt tone — never quoted back to you
-        verbatim. Stored locally in the same SQLite as everything else;
-        nothing leaves your machine except the classifier call itself,
-        which goes through your active AI provider.
+        VoidSoul periodically reads recent exchanges through a small fast model to track session
+        mood (stressed / productive / stuck / excited / neutral). The result is added as soft
+        context to the system prompt so she can adapt tone — never quoted back to you verbatim.
+        Stored locally in the same SQLite as everything else; nothing leaves your machine except the
+        classifier call itself, which goes through your active AI provider.
       </p>
 
       <div className="mt-2 flex items-center justify-between rounded-lg border border-white/5 bg-black/20 px-2.5 py-2">
@@ -858,6 +1173,25 @@ function EmotionalContext(): JSX.Element {
 
       {enabled && (
         <>
+          {/* v2.0 — sentiment-aware memory pruning. Only useful when the
+              classifier is on (no signal otherwise), so it lives nested
+              inside this conditional. */}
+          <div className="mt-2 flex items-center justify-between rounded-lg border border-white/5 bg-black/20 px-2.5 py-2">
+            <div>
+              <p className="text-[11px] font-semibold text-slate-200">
+                Pause memory in stuck sessions
+              </p>
+              <p className="text-[10px] text-slate-500">
+                Skip fact extraction when sentiment is "stressed" or "stuck" with intensity 3+.
+                Stops the assistant memorialising friction.
+              </p>
+            </div>
+            <Toggle
+              checked={config.memory.sentimentPruning}
+              onChange={(v) => void setMemory({ sentimentPruning: v })}
+            />
+          </div>
+
           <div className="mt-2 rounded-lg border border-[var(--accent-ring)] bg-[var(--accent-soft)] px-2.5 py-2">
             <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
               Current session
@@ -871,9 +1205,7 @@ function EmotionalContext(): JSX.Element {
                   </span>
                 </p>
                 {current.summary && (
-                  <p className="mt-0.5 text-[10px] italic text-slate-300">
-                    "{current.summary}"
-                  </p>
+                  <p className="mt-0.5 text-[10px] italic text-slate-300">"{current.summary}"</p>
                 )}
                 <p className="mt-1 text-[9px] text-slate-500">
                   Computed {relativeTime(current.computedAt)}
@@ -935,7 +1267,9 @@ export function MemorySettings(): JSX.Element {
         {tab === 'memory' && (
           <>
             <AssistantFacts />
+            <BiographicalProfile />
             <EmotionalContext />
+            <SummariserKnobs />
             <LongTermRecall />
           </>
         )}
@@ -953,5 +1287,196 @@ export function MemorySettings(): JSX.Element {
         )}
       </div>
     </CollapsibleSection>
+  )
+}
+
+/* ------------------------ biographical profile (v2.0) ------------------ */
+
+const BIO_CATEGORY_LABEL: Record<BiographicalCategory, string> = {
+  identity: 'Identity',
+  projects: 'Projects',
+  preferences: 'Preferences',
+  relationships: 'People',
+  tools: 'Tools',
+  'work-patterns': 'Work patterns'
+}
+
+const BIO_CATEGORY_ORDER: BiographicalCategory[] = [
+  'identity',
+  'projects',
+  'preferences',
+  'relationships',
+  'tools',
+  'work-patterns'
+]
+
+/**
+ * v2.0 — passive biographical profile panel. Surfaces three concerns:
+ *   1. The master toggle (off = skip the extractor, suppress the
+ *      system-prompt block, but KEEP whatever was learned so flipping
+ *      back on resumes with the existing profile).
+ *   2. A grouped, read-only browse view so the user can see exactly
+ *      what the assistant believes about them.
+ *   3. Per-entry delete (X icon) + bulk "Forget profile" — the
+ *      transparency hook that makes passive memory not creepy.
+ */
+function BiographicalProfile(): JSX.Element {
+  const config = useConfigStore((s) => s.config)
+  const setMemory = useConfigStore((s) => s.setMemory)
+  const entries = useMemoryStore((s) => s.data?.biographical ?? [])
+  const removeBio = useMemoryStore((s) => s.removeBiographical)
+  const clearBio = useMemoryStore((s) => s.clearBiographical)
+  const pushToast = useUiStore((s) => s.pushToast)
+
+  if (!config) return <></>
+  // v2.0 polish — `!== false` mirrors the gate in `useChatStore.ts` so the
+  // toggle visual, the extractor, and the system-prompt injection are all
+  // ON by default and only OFF when the user has explicitly toggled.
+  // The previous `?? true` form also defaulted to ON visually but the
+  // runtime sites checked `if (config.memory.biographical)` which treated
+  // undefined as OFF — UI/runtime divergence the polish pass closed.
+  const enabled = config.memory.biographical !== false
+
+  const grouped = new Map<BiographicalCategory, BiographicalEntry[]>()
+  for (const entry of entries) {
+    const bucket = grouped.get(entry.category) ?? []
+    bucket.push(entry)
+    grouped.set(entry.category, bucket)
+  }
+  // Within each group: highest confidence first, then most-recently-seen.
+  for (const bucket of grouped.values()) {
+    bucket.sort((a, b) => {
+      if (b.confidence !== a.confidence) return b.confidence - a.confidence
+      return Date.parse(b.lastSeenAt) - Date.parse(a.lastSeenAt)
+    })
+  }
+
+  const handleClearAll = async (): Promise<void> => {
+    if (entries.length === 0) return
+    if (
+      !window.confirm(
+        `Forget every entry in your passive profile (${entries.length} item${entries.length === 1 ? '' : 's'})? This can't be undone.`
+      )
+    ) {
+      return
+    }
+    await clearBio()
+    pushToast('info', 'Passive profile cleared.')
+  }
+
+  return (
+    <div>
+      <div className="mb-2 flex items-start justify-between gap-3 rounded-lg border border-white/5 bg-black/20 px-2.5 py-2">
+        <div className="min-w-0">
+          <p className="text-[11px] font-semibold text-slate-200">
+            Passive profile{' '}
+            <span className="rounded-sm bg-[var(--accent-soft)] px-1 py-px text-[8px] uppercase tracking-wider text-[var(--accent)]">
+              v2.0
+            </span>
+          </p>
+          <p className="mt-0.5 text-[10px] leading-snug text-slate-500">
+            After every reply, VoidSoul extracts a categorized profile — identity, projects,
+            preferences, relationships, tools, work patterns — and weights repeated mentions. Off =
+            no extraction, no profile in the system prompt. Existing entries are kept either way so
+            you can flip back without losing them.
+          </p>
+        </div>
+        <Toggle
+          checked={enabled}
+          onChange={(v) => void setMemory({ biographical: v })}
+          label="Passive biographical profile"
+        />
+      </div>
+
+      {entries.length > 0 ? (
+        <>
+          <div className="space-y-3">
+            {BIO_CATEGORY_ORDER.map((category) => {
+              const bucket = grouped.get(category)
+              if (!bucket || bucket.length === 0) return null
+              return (
+                <div key={category}>
+                  <p className="mb-1 text-[9px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                    {BIO_CATEGORY_LABEL[category]} · {bucket.length}
+                  </p>
+                  <ul className="space-y-1">
+                    {bucket.map((entry) => (
+                      <BiographicalRow
+                        key={entry.id}
+                        entry={entry}
+                        onRemove={() => void removeBio(entry.id)}
+                      />
+                    ))}
+                  </ul>
+                </div>
+              )
+            })}
+          </div>
+          <button
+            type="button"
+            onClick={() => void handleClearAll()}
+            className="mt-3 flex items-center gap-1.5 rounded-md border border-rose-500/30 px-2 py-1 text-[10px] text-rose-300 transition hover:bg-rose-500/10"
+          >
+            <Trash2 size={11} />
+            Forget profile ({entries.length})
+          </button>
+        </>
+      ) : (
+        <p className="text-[10px] italic leading-snug text-slate-500">
+          {enabled
+            ? 'No observations yet — have a few conversations and the profile will start to fill in.'
+            : 'Disabled. No profile is being built; existing entries (if any) are preserved.'}
+        </p>
+      )}
+    </div>
+  )
+}
+
+/**
+ * One row in the biographical browse view. Shows the text, a small
+ * confidence pip, and an X delete button. The pip's width encodes
+ * confidence visually so the user can tell at a glance which entries
+ * the assistant is most sure about.
+ */
+function BiographicalRow({
+  entry,
+  onRemove
+}: {
+  entry: BiographicalEntry
+  onRemove: () => void
+}): JSX.Element {
+  // Confidence rendered as a 0-100% width on a thin bar — quick visual
+  // for "how sure is the assistant about this". Width clamps to a
+  // sensible min so even very-low entries are visible.
+  const widthPct = Math.max(8, Math.round(entry.confidence * 100))
+  return (
+    <li className="group flex items-center gap-2 rounded-md border border-white/5 bg-black/20 px-2 py-1">
+      <div className="min-w-0 flex-1">
+        <p className="text-[11px] text-slate-100">{entry.text}</p>
+        <div className="mt-0.5 flex items-center gap-2 text-[9px] text-slate-500">
+          <div className="h-1 w-12 overflow-hidden rounded-full bg-white/10">
+            <div
+              className="h-full bg-[var(--accent)]"
+              style={{ width: `${widthPct}%` }}
+              aria-hidden="true"
+            />
+          </div>
+          <span
+            title={`Confidence ${widthPct}% · observed ${entry.observations} session${entry.observations === 1 ? '' : 's'}`}
+          >
+            {widthPct}% · ×{entry.observations}
+          </span>
+        </div>
+      </div>
+      <button
+        type="button"
+        onClick={onRemove}
+        title="Forget this entry"
+        aria-label={`Forget: ${entry.text}`}
+        className="rounded p-1 text-slate-500 opacity-0 transition group-hover:opacity-100 hover:bg-rose-500/15 hover:text-rose-300"
+      >
+        <X size={11} />
+      </button>
+    </li>
   )
 }

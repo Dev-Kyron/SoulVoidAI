@@ -99,7 +99,7 @@ describe('formatUsdAsLocal', () => {
     expect(out).toMatch(/92/)
   })
 
-  it('expands digits for sub-cent costs so they don\'t read as zero', () => {
+  it("expands digits for sub-cent costs so they don't read as zero", () => {
     // 0.003 USD × 1 = 0.003 — must render with 3+ digits, not "$0.00"
     const out = formatUsdAsLocal(0.003, 'USD', 1)
     expect(out).toMatch(/0\.003/)

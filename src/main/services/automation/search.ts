@@ -139,7 +139,9 @@ function decodeEntities(s: string): string {
 
 /** Strips HTML tags from a DDG result fragment, collapsing whitespace. */
 function stripTags(html: string): string {
-  return decodeEntities(html.replace(/<[^>]+>/g, '')).replace(/\s+/g, ' ').trim()
+  return decodeEntities(html.replace(/<[^>]+>/g, ''))
+    .replace(/\s+/g, ' ')
+    .trim()
 }
 
 /** v1.12.1 — default fetch budget for the DDG endpoint. The caller's
@@ -159,8 +161,13 @@ async function duckduckgoSearch(
   // a hanging DDG response can't block the agent forever. AbortSignal.any
   // (Node 20+) merges multiple signals; aborts on whichever fires first.
   const timeoutCtl = new AbortController()
-  const timer = setTimeout(() => timeoutCtl.abort(new Error('DuckDuckGo timed out')), DDG_TIMEOUT_MS)
-  const merged: AbortSignal = signal ? AbortSignal.any([signal, timeoutCtl.signal]) : timeoutCtl.signal
+  const timer = setTimeout(
+    () => timeoutCtl.abort(new Error('DuckDuckGo timed out')),
+    DDG_TIMEOUT_MS
+  )
+  const merged: AbortSignal = signal
+    ? AbortSignal.any([signal, timeoutCtl.signal])
+    : timeoutCtl.signal
   let res: Response
   try {
     res = await fetch(url, {

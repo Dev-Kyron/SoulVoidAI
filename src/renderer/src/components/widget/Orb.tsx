@@ -64,9 +64,7 @@ export function Orb({ size, state, animated = true, dnd = false }: OrbProps): JS
           filter: 'blur(10px)',
           opacity: 0.65
         }}
-        animate={
-          animated ? { scale: tempo.glowScale, opacity: [0.5, 0.82, 0.5] } : undefined
-        }
+        animate={animated ? { scale: tempo.glowScale, opacity: [0.5, 0.82, 0.5] } : undefined}
         transition={{ duration: tempo.glowDuration, repeat: Infinity, ease: 'easeInOut' }}
       />
 

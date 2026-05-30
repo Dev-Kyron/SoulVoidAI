@@ -71,12 +71,9 @@ export async function runPowerShell(
   script: string,
   options: RunPowerShellOptions = {}
 ): Promise<void> {
-  await execAsync(
-    `powershell -NoProfile -NonInteractive -EncodedCommand ${psEncoded(script)}`,
-    {
-      timeout: options.timeoutMs ?? 4_000,
-      maxBuffer: options.maxBuffer ?? 1024 * 1024,
-      windowsHide: true
-    }
-  )
+  await execAsync(`powershell -NoProfile -NonInteractive -EncodedCommand ${psEncoded(script)}`, {
+    timeout: options.timeoutMs ?? 4_000,
+    maxBuffer: options.maxBuffer ?? 1024 * 1024,
+    windowsHide: true
+  })
 }

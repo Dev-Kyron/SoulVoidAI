@@ -13,24 +13,58 @@ import type {
   ModeId,
   QuickAction,
   RecentProject,
-  UserFact
+  UserFact,
+  BiographicalCategory,
+  BiographicalEntry
 } from '@shared/types'
 
 const MAX_RECENT = 12
 const MAX_NEXUS_ACTIONS = 8
 const MAX_FACTS = 50
+/**
+ * v2.0 — biographical profile cap. 100 entries is comfortable for a
+ * year+ of conversation history (rough budget: ~6 categories × ~15
+ * stable entries each). Above the cap we evict lowest-(confidence ×
+ * recency) entries so a one-off mention from months ago can't crowd
+ * out a current project.
+ */
+const MAX_BIO_ENTRIES = 100
+/** Initial confidence assigned on first observation (one mention seen).
+ *  Stays below MIN_BIO_CONFIDENCE so a single mention sits in the store
+ *  for later promotion but doesn't yet reach the system prompt. */
+const INITIAL_BIO_CONFIDENCE = 0.5
+/**
+ * Per-observation confidence raise. With INITIAL = 0.5 and STEP = 0.125
+ * the curve is:
+ *   observations = 1 → 0.5    (first mention, hidden)
+ *   observations = 2 → 0.625  (one re-confirmation, still hidden)
+ *   observations = 3 → 0.75   (two re-confirmations, NOW visible — at
+ *                              MIN_BIO_CONFIDENCE)
+ *   observations = 7 → 1.0    (six re-confirmations, capped)
+ * So "trusted" requires THREE distinct mentions: the initial sighting
+ * plus two re-confirmations. Tuned so memorable recurring details
+ * stabilise inside a typical week of conversation while one-off
+ * quirks stay uncertain until the user actually repeats them.
+ */
+const BIO_CONFIDENCE_STEP = 0.125
 
 const DEFAULT_MEMORY: MemoryState = {
   recentProjects: [],
   favoriteApps: [],
   customPrompts: [],
   customActions: [],
-  facts: []
+  facts: [],
+  biographical: []
 }
 
 const ACTION_KIND: Record<
   CustomActionKind,
-  { type: QuickAction['action']['type']; param: string; icon: string; requires: QuickAction['requires'] }
+  {
+    type: QuickAction['action']['type']
+    param: string
+    icon: string
+    requires: QuickAction['requires']
+  }
 > = {
   app: { type: 'open-app', param: 'app', icon: 'Box', requires: 'appControl' },
   url: { type: 'open-url', param: 'url', icon: 'Globe', requires: 'browser' },
@@ -47,14 +81,21 @@ export function getMemory(): MemoryState {
   return store().get()
 }
 
-/** Replaces the entire memory state (used by backup import). */
+/** Replaces the entire memory state (used by backup import / sync). */
 export function replaceMemory(state: MemoryState): MemoryState {
   return store().replace({
     recentProjects: state.recentProjects ?? [],
     favoriteApps: state.favoriteApps ?? [],
     customPrompts: state.customPrompts ?? [],
     customActions: state.customActions ?? [],
-    facts: state.facts ?? []
+    facts: state.facts ?? [],
+    // v2.0 — carry the passive biographical profile through backup
+    // import / sync. Without this branch a restore wiped the entire
+    // profile (the `replace()` payload literally omitted the field, so
+    // the persisted memory file lost it) and cross-machine sync was
+    // one-way-deleting on the receiving end. `?? []` covers pre-2.0
+    // backup files that don't include this key.
+    biographical: state.biographical ?? []
   })
 }
 
@@ -83,10 +124,7 @@ export function forgetProject(path: string): RecentProject[] {
 }
 
 export function addFavoriteApp(label: string, target: string): FavoriteApp[] {
-  const favoriteApps = [
-    ...store().get().favoriteApps,
-    { id: randomUUID(), label, target }
-  ]
+  const favoriteApps = [...store().get().favoriteApps, { id: randomUUID(), label, target }]
   store().set({ favoriteApps })
   return favoriteApps
 }
@@ -112,10 +150,7 @@ export function importFavoriteApps(apps: Array<{ name: string; target: string }>
 }
 
 export function addCustomPrompt(label: string, prompt: string): CustomPrompt[] {
-  const customPrompts = [
-    ...store().get().customPrompts,
-    { id: randomUUID(), label, prompt }
-  ]
+  const customPrompts = [...store().get().customPrompts, { id: randomUUID(), label, prompt }]
   store().set({ customPrompts })
   return customPrompts
 }
@@ -242,10 +277,7 @@ export function setFactModes(id: string, modes: ModeId[]): UserFact[] {
 }
 
 /** Widens the scope from `current` to include `incoming`'s modes. */
-function widenScope(
-  current?: ModeId[],
-  incoming?: ModeId[]
-): ModeId[] | undefined {
+function widenScope(current?: ModeId[], incoming?: ModeId[]): ModeId[] | undefined {
   // Either side global → the result is global.
   if (!current || current.length === 0) return undefined
   if (!incoming || incoming.length === 0) return undefined
@@ -283,4 +315,143 @@ export function removeFact(id: string): UserFact[] {
 export function clearFacts(): UserFact[] {
   store().set({ facts: [] })
   return []
+}
+
+/* ----------------------- biographical profile (v2.0) ------------------- */
+
+/**
+ * Payload the renderer-side extractor hands to `mergeBiographical`. We
+ * deliberately don't accept full `BiographicalEntry` objects from the
+ * renderer — the extractor only knows the SEMANTIC content (category +
+ * text). Confidence + observation count + timestamps are storage-layer
+ * concerns: the merge applies them so a malicious or buggy extractor
+ * can't backdate or over-confidence an entry through the IPC surface.
+ */
+export interface BiographicalUpdate {
+  category: BiographicalCategory
+  text: string
+}
+
+/**
+ * Merge a batch of newly-extracted observations into the stored profile.
+ * Each update either:
+ *   1. Matches an existing entry by `(category, normalisedText)` —
+ *      raises confidence (capped at 1.0), increments observations,
+ *      bumps lastSeenAt. Text stays as-stored so a slightly different
+ *      phrasing on re-observation doesn't churn the entry.
+ *   2. Is new — inserts at INITIAL_BIO_CONFIDENCE with observations=1.
+ *
+ * On overflow (post-merge size > MAX_BIO_ENTRIES), we evict by lowest
+ * `confidence * recencyScore` so a high-confidence stale entry CAN be
+ * pushed out by accumulating fresh ones, but a fresh one-mention guess
+ * can't displace a long-running stable entry. Recency score decays
+ * smoothly from 1.0 (today) to ~0.3 (a year old).
+ *
+ * Returns the post-merge entry list so the caller can update its store
+ * snapshot without a second fetch.
+ */
+export function mergeBiographical(updates: BiographicalUpdate[]): BiographicalEntry[] {
+  if (updates.length === 0) {
+    return store().get().biographical ?? []
+  }
+  const now = new Date().toISOString()
+  const existing = (store().get().biographical ?? []).slice()
+  // Key on category + a normalised form of the text so casing /
+  // punctuation / "the" prefixes don't double-count.
+  const indexByKey = new Map<string, number>()
+  for (let i = 0; i < existing.length; i++) {
+    indexByKey.set(bioKey(existing[i].category, existing[i].text), i)
+  }
+  for (const update of updates) {
+    const trimmed = update.text.trim()
+    if (!trimmed || trimmed.length > 240) continue
+    const key = bioKey(update.category, trimmed)
+    const at = indexByKey.get(key)
+    if (at !== undefined) {
+      const prev = existing[at]
+      existing[at] = {
+        ...prev,
+        confidence: Math.min(1, prev.confidence + BIO_CONFIDENCE_STEP),
+        observations: prev.observations + 1,
+        lastSeenAt: now
+      }
+    } else {
+      const entry: BiographicalEntry = {
+        id: randomUUID(),
+        category: update.category,
+        text: trimmed,
+        confidence: INITIAL_BIO_CONFIDENCE,
+        observations: 1,
+        firstSeenAt: now,
+        lastSeenAt: now
+      }
+      indexByKey.set(key, existing.length)
+      existing.push(entry)
+    }
+  }
+  // Evict lowest-score entries past the cap. Confidence × recency keeps
+  // fresh-but-uncertain and stale-but-confident entries roughly equally
+  // weighted, so neither category dominates the eviction queue.
+  if (existing.length > MAX_BIO_ENTRIES) {
+    const nowMs = Date.now()
+    const scored = existing.map((entry) => ({
+      entry,
+      score: entry.confidence * recencyScore(entry.lastSeenAt, nowMs)
+    }))
+    scored.sort((a, b) => b.score - a.score)
+    const trimmed = scored.slice(0, MAX_BIO_ENTRIES).map((s) => s.entry)
+    store().set({ biographical: trimmed })
+    return trimmed
+  }
+  store().set({ biographical: existing })
+  return existing
+}
+
+/** Removes one entry by id. Returns the post-mutation list. */
+export function removeBiographical(id: string): BiographicalEntry[] {
+  const next = (store().get().biographical ?? []).filter((b) => b.id !== id)
+  store().set({ biographical: next })
+  return next
+}
+
+/** Drops every biographical entry — Settings "Clear profile" button. */
+export function clearBiographical(): BiographicalEntry[] {
+  store().set({ biographical: [] })
+  return []
+}
+
+/**
+ * Normalises text for the `(category, text)` dedup key.
+ *
+ * Covers: casing, whitespace collapse, leading articles (the / a / an),
+ * trailing periods. So `"Working on VoidSoul."` and
+ * `"working on voidsoul"` merge cleanly.
+ *
+ * Does NOT cover: phrasing variants where the same idea is rendered
+ * with different content words. `"Working on VoidSoul"` and
+ * `"Working on the VoidSoul project"` will be treated as two distinct
+ * entries — both will then get confidence-promoted in parallel and
+ * eventually both land in the system prompt. Accepted as a v1 limit;
+ * a smarter dedup needs semantic matching (embedding similarity)
+ * which is a follow-up.
+ */
+function bioKey(category: BiographicalCategory, text: string): string {
+  const normalised = text
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, ' ')
+    .replace(/^(the|a|an) /, '')
+    .replace(/\.$/, '')
+  return `${category}::${normalised}`
+}
+
+/** Smooth decay from 1.0 (today) to ~0.3 (a year old). Chosen so a
+ *  high-confidence entry from yesterday outscores a low-confidence
+ *  one from today, but year-old confident entries don't permanently
+ *  block fresh observations. */
+function recencyScore(lastSeenAt: string, nowMs: number): number {
+  const ageMs = Math.max(0, nowMs - Date.parse(lastSeenAt))
+  const ageDays = ageMs / (24 * 60 * 60 * 1000)
+  // Half-life ~120 days. Exponential decay.
+  return 0.3 + 0.7 * Math.exp(-ageDays / 120)
 }

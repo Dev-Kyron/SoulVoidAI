@@ -19,12 +19,7 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import {
-  classifyTask,
-  pickProvider,
-  deriveBudgetState,
-  type AvailableProvider
-} from './router'
+import { classifyTask, pickProvider, deriveBudgetState, type AvailableProvider } from './router'
 
 /* ------------------------- task classifier --------------------------- */
 
@@ -36,7 +31,11 @@ describe('classifyTask', () => {
   })
 
   it('flags tool-heavy when agent mode is on (without image)', () => {
-    const t = classifyTask({ prompt: 'refactor the auth module', hasImages: false, agentMode: true })
+    const t = classifyTask({
+      prompt: 'refactor the auth module',
+      hasImages: false,
+      agentMode: true
+    })
     expect(t.kind).toBe('tool-heavy')
     expect(t.requiresToolUse).toBe(true)
   })
@@ -52,7 +51,9 @@ describe('classifyTask', () => {
   it('classifies reasoning from keyword density + length', () => {
     const t = classifyTask({
       prompt:
-        'analyse this carefully and reason step by step about whether the proof is valid. '.repeat(8),
+        'analyse this carefully and reason step by step about whether the proof is valid. '.repeat(
+          8
+        ),
       hasImages: false,
       agentMode: false
     })
@@ -69,7 +70,11 @@ describe('classifyTask', () => {
   })
 
   it('flags fast when the user asks for a short answer', () => {
-    const t = classifyTask({ prompt: 'tldr: what is electron-builder?', hasImages: false, agentMode: false })
+    const t = classifyTask({
+      prompt: 'tldr: what is electron-builder?',
+      hasImages: false,
+      agentMode: false
+    })
     expect(t.kind).toBe('fast')
   })
 
@@ -86,7 +91,7 @@ describe('classifyTask', () => {
   })
 
   it('routes short conversational openers to fast', () => {
-    const t = classifyTask({ prompt: 'hey what\'s up', hasImages: false, agentMode: false })
+    const t = classifyTask({ prompt: "hey what's up", hasImages: false, agentMode: false })
     expect(t.kind).toBe('fast')
     expect(t.label).toContain('greeting')
   })
@@ -306,10 +311,7 @@ describe('pickProvider', () => {
       prompt: 'hi there',
       hasImages: false,
       agentMode: false,
-      available: [
-        provider('anthropic', 'claude-sonnet-4-5'),
-        provider('openai', 'gpt-4o')
-      ],
+      available: [provider('anthropic', 'claude-sonnet-4-5'), provider('openai', 'gpt-4o')],
       activeProviderId: 'anthropic'
     })
     expect(result).not.toBeNull()
@@ -340,10 +342,7 @@ describe('pickProvider', () => {
       prompt: longPrompt,
       hasImages: false,
       agentMode: false,
-      available: [
-        provider('anthropic', 'claude-sonnet-4-5'),
-        provider('openai', 'o1-preview')
-      ],
+      available: [provider('anthropic', 'claude-sonnet-4-5'), provider('openai', 'o1-preview')],
       activeProviderId: 'anthropic'
     })
     // Reasoning won — should prefer the extended-thinking model.

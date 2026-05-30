@@ -16,6 +16,7 @@ import { uid, basename } from '../lib/utils'
 import { runAgentTool } from '../lib/actions'
 import { detectArtifact } from '../lib/artifactDetector'
 import { extractFacts } from '../lib/factExtractor'
+import { extractBiographical, MIN_BIO_CONFIDENCE } from '../lib/biographicalExtractor'
 import {
   summarizeOlderTurns,
   estimateTokens,
@@ -31,7 +32,7 @@ import {
 } from '../lib/router'
 import { getMode } from '@shared/modes'
 import { modelHasVision } from '@shared/modelCapabilities'
-import { buildVoiceDirection } from '@shared/voicePersona'
+import { buildVoiceDirection, withEffectivePersona } from '@shared/voicePersona'
 import { useConfigStore } from './useConfigStore'
 import { useWidgetStore } from './useWidgetStore'
 import { useUiStore } from './useUiStore'
@@ -72,10 +73,37 @@ import {
  * if they actually want to.
  */
 const MAX_AGENT_STEPS = 60
+/**
+ * Pre-2.0 these were hardcoded constants. v2.0 promotes them to
+ * configurable settings (per-mode overrides on top of global defaults).
+ * Kept as fallback constants for the unconfigured / partially-migrated
+ * case so the code never reads `undefined` out of MemoryConfig.
+ */
 /** Token estimate above which older turns roll into a "story so far" recap. */
-const SUMMARIZE_TRIGGER_TOKENS = 10_000
+const SUMMARIZE_TRIGGER_TOKENS_FALLBACK = 10_000
 /** Minimum recent messages to keep verbatim once a summary is in play. */
-const KEEP_RECENT_MIN = 8
+const KEEP_RECENT_MIN_FALLBACK = 8
+
+/**
+ * v2.0 — resolves the effective summariser knobs for the active mode.
+ * Per-mode override wins over global config; global config wins over the
+ * pre-2.0 fallback constants. Single read-and-merge so callers never
+ * have to walk the fallback chain themselves.
+ */
+function resolveSummariserSettings(): { triggerTokens: number; keepRecent: number } {
+  const config = useConfigStore.getState().config
+  const memory = config?.memory
+  const activeThread = activeThreadSummary()
+  const activeMode = activeThread?.pinnedMode ?? config?.activeMode
+  const perMode = activeMode ? memory?.summariserPerMode?.[activeMode] : undefined
+  return {
+    triggerTokens:
+      perMode?.triggerTokens ??
+      memory?.summariserTriggerTokens ??
+      SUMMARIZE_TRIGGER_TOKENS_FALLBACK,
+    keepRecent: perMode?.keepRecent ?? memory?.summariserKeepRecent ?? KEEP_RECENT_MIN_FALLBACK
+  }
+}
 /** Default placeholder titles that get auto-replaced after the first user turn. */
 const PLACEHOLDER_TITLES = new Set(['New chat', 'Untitled', ''])
 
@@ -127,7 +155,7 @@ const REFUSAL_COACHING_MESSAGE =
   'Wait — you do have those tools. You have built-in `read_file`, ' +
   '`write_file`, and `list_files` tools that work on ANY local file path ' +
   'on my machine (no folder allowlist), and I have filesystem permission ' +
-  'granted in Settings. Don\'t describe what you would do — actually call ' +
+  "granted in Settings. Don't describe what you would do — actually call " +
   'the tool now with the path I gave you. If you tried the MCP filesystem ' +
   'server and it refused because the path was outside its sandbox, retry ' +
   'with the built-in `read_file` / `list_files` instead.'
@@ -259,6 +287,65 @@ function buildSystemPrompt(historySummary?: string): string {
       relevantFacts.map((f) => `- ${f.text}`).join('\n')
   }
 
+  // v2.0 — passive biographical profile, grouped by category. Filtered
+  // by confidence (MIN_BIO_CONFIDENCE) so single-mention guesses don't
+  // bias the model until repeated observations confirm them. The block
+  // is suppressed when the master toggle is off OR no entries pass the
+  // floor, so an empty profile doesn't bloat the system prompt with
+  // an "About the user" header followed by nothing.
+  //
+  // The `!== false` gate treats undefined as ON to match the Settings
+  // UI's `?? true` default. Treating undefined as OFF here would cause
+  // the toggle to read on while the injection silently stayed off, a
+  // confusing dual-state pre-2.0 configs would hit on first load.
+  //
+  // Order: facts → biographical → sentiment → summary. Facts come
+  // first because they're user-curated and the most authoritative;
+  // biographical is the passive inference layer that supports them.
+  if (config.memory.biographical !== false) {
+    const allBio = useMemoryStore.getState().data?.biographical ?? []
+    const trusted = allBio.filter((e) => e.confidence >= MIN_BIO_CONFIDENCE)
+    if (trusted.length > 0) {
+      // Group by category so the model reads cleanly grouped sections
+      // rather than 30 mixed bullets. Sort within each group by
+      // confidence so the most-confirmed details lead.
+      const byCategory = new Map<string, typeof trusted>()
+      for (const entry of trusted) {
+        const bucket = byCategory.get(entry.category) ?? []
+        bucket.push(entry)
+        byCategory.set(entry.category, bucket)
+      }
+      const CATEGORY_ORDER = [
+        'identity',
+        'projects',
+        'preferences',
+        'relationships',
+        'tools',
+        'work-patterns'
+      ] as const
+      const CATEGORY_LABEL: Record<string, string> = {
+        identity: 'Identity',
+        projects: 'Projects',
+        preferences: 'Preferences',
+        relationships: 'People + relationships',
+        tools: 'Tools they use',
+        'work-patterns': 'Work patterns'
+      }
+      const sections: string[] = []
+      for (const category of CATEGORY_ORDER) {
+        const bucket = byCategory.get(category)
+        if (!bucket || bucket.length === 0) continue
+        bucket.sort((a, b) => b.confidence - a.confidence)
+        sections.push(
+          `${CATEGORY_LABEL[category]}:\n` + bucket.map((e) => `- ${e.text}`).join('\n')
+        )
+      }
+      if (sections.length > 0) {
+        prompt += '\n\nWhat you know about the user (passive profile):\n\n' + sections.join('\n\n')
+      }
+    }
+  }
+
   // v1.4.0 emotional context — sentiment of the current session +
   // most recent win/friction. Cached value refreshed via IPC on send
   // and after each classifier run. Block is empty when the subsystem
@@ -270,17 +357,38 @@ function buildSystemPrompt(historySummary?: string): string {
   // Story so far — recap of the older portion of a long conversation that no
   // longer fits in the model's window. Lets the assistant keep continuity.
   if (historySummary) {
-    prompt +=
-      '\n\nStory so far (earlier conversation summarised for context):\n' + historySummary
+    prompt += '\n\nStory so far (earlier conversation summarised for context):\n' + historySummary
   }
 
   // Screen context honours both the awareness toggle AND private mode — a
   // private chat must not leak which window the user has focused.
-  const active = useUiStore.getState().activeWindow
+  const ui = useUiStore.getState()
+  const active = ui.activeWindow
   if (config.appearance.screenAwareness && !config.chat.private && active?.title) {
     prompt += `\n\nScreen context: the user currently has "${active.title}" focused (${
       active.process || 'unknown process'
     }).`
+    // v2.0 — when semantic awareness is on, the latest OCR snapshot
+    // carries a text excerpt of what's actually visible. Inject it so
+    // the model can answer "what am I looking at?" with the real
+    // content rather than guessing from the window title. The system
+    // prompt promises this — without injecting here it'd be a lie.
+    // Snapshot only fires when both awareness toggles are on AND the
+    // permission is granted, so no extra gate needed here.
+    const snap = ui.screenSnapshot
+    if (
+      config.appearance.semanticScreenAwareness &&
+      snap &&
+      snap.text &&
+      // Stale snapshots from a prior window confuse the model — only
+      // inject when the snapshot's title matches the currently-active
+      // window. The 3s debounce in main means transitions briefly fall
+      // out of sync; better to skip than mis-inject.
+      snap.title === active.title
+    ) {
+      const excerpt = snap.text.length > 800 ? `${snap.text.slice(0, 800)}…` : snap.text
+      prompt += `\n\nOn-screen text excerpt (OCR, ${snap.confidence}% confidence): "${excerpt}"`
+    }
   }
   if (config.chat.agent) {
     prompt +=
@@ -294,7 +402,7 @@ function buildSystemPrompt(historySummary?: string): string {
       '\n\nYou also have three Code-Interpreter-class tools:\n' +
       '- `web_search` — live web search for current events, recent docs, or anything you might not know. Returns a quick summary plus source links. Prefer this over guessing.\n' +
       '- `web_fetch` — pull a specific URL and read its main content. Use after `web_search` to actually open a result, or when the user pastes a link.\n' +
-      '- `run_python` — execute Python in a sandboxed temp dir (system interpreter). Use for data crunching, math, file generation, scripting one-offs.\n' +
+      "- `run_python` — execute Python in this thread's PERSISTENT sandbox. Variables, imports, and generated files survive across calls within this thread (Jupyter-style). Use for multi-step data work — load once, analyse across follow-ups; the CSV you write in one call can be read in the next.\n" +
       '- `generate_image` — generate an image from a prompt via DALL·E 3. Saves a PNG to disk and returns the path.\n\n' +
       'When the user asks you to DO something, call the right tool instead of only explaining. ' +
       'Every tool call is permission-gated and logged — the user explicitly approves anything ' +
@@ -305,7 +413,7 @@ function buildSystemPrompt(historySummary?: string): string {
       // carries this since v1.13.2 — that block only applies to fresh
       // installs; this build-time addendum catches everyone.
       '\n\nFile-access fallback: when reading or writing any file by ' +
-      'absolute path on the user\'s machine, PREFER the built-in ' +
+      "absolute path on the user's machine, PREFER the built-in " +
       '`read_file` / `write_file` / `list_files` tools — they work on ' +
       'any path with filesystem permission. The MCP filesystem server ' +
       '(if installed) is sandboxed to a specific folder and will refuse ' +
@@ -371,14 +479,19 @@ async function prepareConversation(
   let sentMessages: ChatMessage[]
 
   const totalTokens = estimateTokens(all)
-  if (totalTokens <= SUMMARIZE_TRIGGER_TOKENS || all.length <= KEEP_RECENT_MIN) {
+  // v2.0 — per-mode / global summariser knobs (with pre-2.0 fallbacks
+  // baked into the resolver). Read once per prepareConversation call
+  // so a mode switch between turns picks up new settings on the next
+  // send without restarting.
+  const { triggerTokens, keepRecent } = resolveSummariserSettings()
+  if (totalTokens <= triggerTokens || all.length <= keepRecent) {
     sentMessages = all
   } else {
     const cached = useChatStore.getState().summary
-    const reuse = canReuseSummary(cached, all, KEEP_RECENT_MIN)
+    const reuse = canReuseSummary(cached, all, keepRecent)
 
     summaryText = reuse ? cached!.text : null
-    const cutoffIdx = reuse ? reuse.cutoffIdx : all.length - KEEP_RECENT_MIN
+    const cutoffIdx = reuse ? reuse.cutoffIdx : all.length - keepRecent
 
     if (!reuse) {
       const older = all.slice(0, cutoffIdx)
@@ -430,8 +543,7 @@ async function prepareConversation(
               return `- [${fileName}#${h.chunkIndex ?? 0}] ${h.preview.trim()}`
             })
             .join('\n')
-          system +=
-            '\n\nPossibly relevant snippets from your indexed files:\n' + snippets
+          system += '\n\nPossibly relevant snippets from your indexed files:\n' + snippets
         }
       } catch (err) {
         void vs.logs.write(
@@ -482,11 +594,7 @@ function snapshotForActive(): PendingSave | null {
 }
 
 async function writeSlot(slot: SaveSlot): Promise<void> {
-  await vs.history.saveThread(
-    slot.payload.threadId,
-    slot.payload.messages,
-    slot.payload.summary
-  )
+  await vs.history.saveThread(slot.payload.threadId, slot.payload.messages, slot.payload.summary)
 }
 
 function scheduleHistorySave(): void {
@@ -605,7 +713,14 @@ interface ChatState {
   pendingTool: { name: string; args: Record<string, unknown> } | null
   pendingInsert: string | null
 
-  send: (text: string) => Promise<void>
+  /**
+   * Send a user turn. `conversationMode` (v2.0) forces the streaming
+   * (non-agent) path and a speak-all TTS so the back-and-forth feels
+   * Jarvis-natural — tools take too long for that rhythm. Resolves
+   * after the assistant reply has FULLY streamed + finished speaking,
+   * so the conversation controller knows when to re-arm the mic.
+   */
+  send: (text: string, options?: { conversationMode?: boolean }) => Promise<void>
   stop: () => void
   /** Wipes the active thread's messages (the thread itself stays listed). */
   clear: () => void
@@ -698,7 +813,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   pendingTool: null,
   pendingInsert: null,
 
-  send: async (text) => {
+  send: async (text, options) => {
     const content = text.trim()
     const { attachments, streaming, messages } = get()
     if (streaming) return
@@ -706,6 +821,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // user dismissed the canvas during the previous reply.
     streamArtifactDismissed = false
     if (!content && attachments.length === 0) return
+    // v2.0 — conversation-mode flag. Forces the streaming path (no agent
+    // tools), turns on the speak-all TTS, and disables the auto-router so
+    // the round-trip stays in the "feels natural" range a voice
+    // conversation depends on. Captured into a local so the long body
+    // below can read it without an extra optional-chain at every site.
+    const conversationMode = options?.conversationMode === true
 
     const config = useConfigStore.getState().config
     if (!config) {
@@ -753,7 +874,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // when the active provider is used as-is (per-thread override OR
     // auto-route off OR router didn't reroute).
     let routingReason: string | null = null
-    if (!override && config.chat.autoRoute) {
+    // v2.0 polish — conversation mode also disables the auto-router.
+    // The router fetches usage summary + budget over IPC (Promise.all
+    // below), which adds 50-300 ms per turn — bad for voice rhythm.
+    // The user's active provider is the right pick for a back-and-
+    // forth voice session; if they want a vision model or a stronger
+    // reasoner for a specific question, they can drop out of conv mode
+    // and type it.
+    if (!override && config.chat.autoRoute && !conversationMode) {
       const available = config.providers.map<AvailableProvider>((p) => ({
         id: p.id,
         model: p.model,
@@ -768,10 +896,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // turning the cost bias into a no-op.
       let budget: { nearCap: boolean } | undefined
       try {
-        const [summary, budgetCfg] = await Promise.all([
-          vs.usage.summary(),
-          vs.usage.getBudget()
-        ])
+        const [summary, budgetCfg] = await Promise.all([vs.usage.summary(), vs.usage.getBudget()])
         budget = deriveBudgetState(summary.totalCost, budgetCfg.monthlyUsd)
       } catch (err) {
         if (!usageIpcFailureLogged) {
@@ -859,8 +984,23 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // / agent-step feeders no-op out.
     activeSpeaker = null
     if (config.voice.enabled && !isQuietNow(config.appearance.dnd)) {
+      // v2.0 — resolve the effective persona from the active mode's
+      // per-mode override (falls back to the global persona). Lets a
+      // creative-writing mode auto-speak in Soul while indie-dev stays
+      // on Void without manually toggling. Computed at send time so the
+      // speaker locks in the right persona for the whole reply even if
+      // the mode changes mid-stream.
+      const activeMode = activeThreadSummary()?.pinnedMode ?? config.activeMode
+      const effectiveVoice = withEffectivePersona(config.voice, activeMode)
+      // v2.0 — conversation mode flips the speaker to `speakAll: true`,
+      // bypassing the <voice>...</voice> markup extractor and speaking
+      // every sentence of the reply. Outside conv mode the voice layer
+      // is curated by the model (it wraps speakable portions in voice
+      // tags so code blocks / long lists stay silent); inside conv mode
+      // the user IS listening to the whole reply, so silence on
+      // untagged text would feel broken.
       activeSpeaker = {
-        speaker: new StreamingSpeaker(config.voice),
+        speaker: new StreamingSpeaker(effectiveVoice, { speakAll: conversationMode }),
         requestId
       }
     }
@@ -939,235 +1079,244 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // summary and only sends the recent tail verbatim — keeping
       // continuity without us silently dropping the front of the
       // conversation.
-      const { system, turns: baseTurns } = await prepareConversation([
-        ...messages,
-        userMessage
-      ])
+      const { system, turns: baseTurns } = await prepareConversation([...messages, userMessage])
 
-      if (config.chat.agent) {
-      const turns: ChatTurn[] = [...baseTurns]
-      const invocations: ToolInvocation[] = []
+      // v2.0 — conversation mode forces the streaming path. The agent
+      // loop's tool calls (web fetch, run python, etc.) routinely take
+      // 10-30 s, which kills the back-and-forth rhythm voice mode lives
+      // on. Users who want tool-using replies can drop out of conv mode
+      // and ask the same question typed.
+      if (config.chat.agent && !conversationMode) {
+        const turns: ChatTurn[] = [...baseTurns]
+        const invocations: ToolInvocation[] = []
 
-      // Track WHY the loop exited so the user always sees a reason. Without
-      // this distinction, hitting MAX_AGENT_STEPS, the model returning empty
-      // tools, and a clean completion all looked identical in the UI.
-      let exitReason: 'completed' | 'step-cap' | 'aborted' | 'error' = 'completed'
-      let step = 0
-      // v1.13.5 — one-shot guard for the tool-less-refusal auto-retry.
-      // Allowing more than one retry per send would defeat the model's
-      // genuine refusals (it could refuse for a real reason on turn 3 and
-      // we'd badger it forever). Flipped to true the first time we coach,
-      // never reset within the loop.
-      let refusalRetryUsed = false
-      const promptHasFilepath = looksLikeFilepath(content)
+        // Track WHY the loop exited so the user always sees a reason. Without
+        // this distinction, hitting MAX_AGENT_STEPS, the model returning empty
+        // tools, and a clean completion all looked identical in the UI.
+        let exitReason: 'completed' | 'step-cap' | 'aborted' | 'error' = 'completed'
+        let step = 0
+        // v1.13.5 — one-shot guard for the tool-less-refusal auto-retry.
+        // Allowing more than one retry per send would defeat the model's
+        // genuine refusals (it could refuse for a real reason on turn 3 and
+        // we'd badger it forever). Flipped to true the first time we coach,
+        // never reset within the loop.
+        let refusalRetryUsed = false
+        const promptHasFilepath = looksLikeFilepath(content)
 
-      // Persistent checkpoint of the agent run — survives panel close,
-      // app restart, and process crash. Best-effort: a checkpoint write
-      // failure is logged but never blocks the loop (the loop's own
-      // in-memory state is the source of truth at runtime; checkpoints
-      // exist for crash recovery only).
-      //
-      // Skipped in private mode — private threads leave no trace on disk
-      // and that includes the checkpoint table. Also skipped when there
-      // is no active thread (rare edge case).
-      const checkpointThreadId = get().activeThreadId
-      const checkpointEnabled =
-        !config.chat.private && checkpointThreadId !== null
-      if (checkpointEnabled) {
-        void vs.agentCheckpoint
-          .create({
-            requestId,
-            threadId: checkpointThreadId,
-            userMessageId: userMessage.id,
-            assistantMessageId: assistantId,
-            providerId: provider.id,
-            modelId: effectiveModel,
-            systemPrompt: system,
-            turns: sanitiseTurnsForCheckpoint(baseTurns)
-          })
-          .catch((err) => {
-            void vs.logs.write(
-              'warn',
-              'system',
-              'Agent checkpoint create failed',
-              err instanceof Error ? err.message : String(err)
-            )
-          })
-      }
-
-      for (; step < MAX_AGENT_STEPS; step++) {
-        if (!isActive()) {
-          exitReason = 'aborted'
-          break
-        }
-        // Rolling-summary compaction. If the agent has accumulated
-        // enough context to threaten the model's window, fold the
-        // older turns into a STORY-SO-FAR recap before this step's
-        // invoke. No-op when we're well under the budget — cheap
-        // token estimate gates the actual LLM call so the per-step
-        // overhead is just a character count on the turns array.
+        // Persistent checkpoint of the agent run — survives panel close,
+        // app restart, and process crash. Best-effort: a checkpoint write
+        // failure is logged but never blocks the loop (the loop's own
+        // in-memory state is the source of truth at runtime; checkpoints
+        // exist for crash recovery only).
         //
-        // Provider override is the ROUTED-TO provider, not
-        // config.activeProvider. Stops the summariser from picking
-        // a provider whose key the user doesn't have configured
-        // when the router has moved this loop to a different one.
-        const compaction = await compactTurnsIfNeeded(
-          turns,
-          effectiveModel,
-          !provider.needsKey,
-          { providerId: provider.id, modelId: effectiveModel }
-        )
-        if (compaction.compacted) {
-          turns.splice(0, turns.length, ...compaction.turns)
-        }
-        const result = await vs.ai.invoke({
-          requestId,
-          provider: provider.id,
-          model: effectiveModel,
-          system,
-          messages: turns
-        })
-        if (result.error) {
-          if (result.error !== 'aborted') {
-            failure = result.error
-            exitReason = 'error'
-          } else {
-            exitReason = 'aborted'
-          }
-          break
-        }
-
-        // v1.13.5 — tool-less refusal auto-retry. Before this hook, gpt-4o-mini
-        // (and other weaker models) would respond to "read C:\foo\bar.ts" with
-        // "I can't access that folder directly" — no tool call, just a flat
-        // refusal — and the agent loop would dutifully treat the refusal as a
-        // completed answer. Here we detect the refusal pattern, push a
-        // coaching user turn into the conversation, and let the loop run one
-        // more step. Usually flips the model into actually calling the tool.
-        // Hard guard at one retry per send via refusalRetryUsed — a second
-        // refusal is treated as genuine and surfaced to the user.
-        if (
-          !refusalRetryUsed &&
-          result.toolCalls.length === 0 &&
-          promptHasFilepath &&
-          looksLikeToolLessRefusal(result.text)
-        ) {
-          refusalRetryUsed = true
-          // Push the refusal into `turns` (so the coaching turn lands in
-          // proper conversational order) BUT skip `finalText` / `patch()`
-          // updates: if the next step succeeds we don't want a flash of
-          // "I can't access that" appearing in the user-facing bubble
-          // before being overwritten by the actual answer. If the next
-          // step ALSO refuses, that second refusal will land normally
-          // through the regular append path on the following iteration.
-          turns.push({ role: 'assistant', content: result.text })
-          turns.push({ role: 'user', content: REFUSAL_COACHING_MESSAGE })
-          void vs.logs.write(
-            'info',
-            'ai',
-            `Tool-less refusal detected from ${effectiveModel} on filepath prompt — auto-retrying with coaching turn.`
-          )
-          continue
-        }
-
-        if (result.text.trim()) {
-          finalText = finalText ? `${finalText}\n\n${result.text}` : result.text
-        }
-        patch({ content: finalText, toolCalls: invocations.length ? [...invocations] : undefined })
-        // Streaming TTS for the agent path. Each step's text lands all
-        // at once (invoke is non-streaming, unlike chat), so feed the
-        // accumulated finalText after every step. The speaker tracks
-        // its own spokenIndex so already-spoken content isn't repeated.
-        if (activeSpeaker && activeSpeaker.requestId === requestId && result.text.trim()) {
-          activeSpeaker.speaker.feed(finalText)
-        }
-        if (result.toolCalls.length === 0) {
-          exitReason = 'completed'
-          break
-        }
-
-        turns.push({ role: 'assistant', content: result.text, toolCalls: result.toolCalls })
-        const toolResults: Array<{ id: string; name: string; content: string }> = []
-        const newImages: string[] = []
-        for (const call of result.toolCalls) {
-          if (!isActive()) break
-          // Surface a live "Running …" line while the tool is in-flight so
-          // the user has feedback during slow calls (web search, run_python,
-          // long shell commands). Cleared as soon as the result lands.
-          set({ pendingTool: { name: call.name, args: call.args } })
-          // Pass the agent loop's requestId so the tool's abort controller
-          // registers against the same key the LLM call uses — Stop then
-          // kills in-flight tool fetch / subprocess too, not just the LLM.
-          const invocation = await runAgentTool(call, requestId)
-          set({ pendingTool: null })
-          invocations.push(invocation)
-          toolResults.push({ id: call.id, name: call.name, content: invocation.result })
-          if (invocation.image) newImages.push(invocation.image)
-          patch({ toolCalls: [...invocations] })
-        }
-        turns.push({ role: 'tool', content: '', toolResults })
-        // If a tool produced screenshots, follow up with a synthetic user
-        // turn carrying the images so vision-capable models can actually look.
-        if (newImages.length > 0) {
-          turns.push({
-            role: 'user',
-            content:
-              newImages.length === 1
-                ? 'Here is the current screen for you to look at.'
-                : `Here are ${newImages.length} screenshots for you to look at.`,
-            images: newImages
-          })
-        }
-
-        // Persist the step. Fire-and-forget — a write failure here
-        // doesn't kill the loop; the next step's write will catch up.
-        // The +1 captures "step just completed" so a crash after this
-        // write resumes at the right boundary.
+        // Skipped in private mode — private threads leave no trace on disk
+        // and that includes the checkpoint table. Also skipped when there
+        // is no active thread (rare edge case).
+        const checkpointThreadId = get().activeThreadId
+        const checkpointEnabled = !config.chat.private && checkpointThreadId !== null
         if (checkpointEnabled) {
           void vs.agentCheckpoint
-            .update(requestId, {
-              step: step + 1,
-              turns: sanitiseTurnsForCheckpoint(turns),
-              invocations: sanitiseInvocationsForCheckpoint(invocations)
+            .create({
+              requestId,
+              threadId: checkpointThreadId,
+              userMessageId: userMessage.id,
+              assistantMessageId: assistantId,
+              providerId: provider.id,
+              modelId: effectiveModel,
+              systemPrompt: system,
+              turns: sanitiseTurnsForCheckpoint(baseTurns)
             })
             .catch((err) => {
               void vs.logs.write(
                 'warn',
                 'system',
-                'Agent checkpoint update failed',
+                'Agent checkpoint create failed',
                 err instanceof Error ? err.message : String(err)
               )
             })
         }
-      }
-      // Step cap hit while the model still wanted more tools — that's an
-      // incomplete run, NOT a successful one. Surface it as a PAUSE
-      // (recoverable) rather than an ERROR (failed). Typing "continue"
-      // resumes the work because the conversation history already has
-      // the tool-call breadcrumbs and the agent re-orients from there.
-      if (step >= MAX_AGENT_STEPS && exitReason === 'completed') {
-        exitReason = 'step-cap'
-        isPause = true
-        failure = `Reached the ${MAX_AGENT_STEPS}-step agent ceiling before finishing — type "continue" to keep going.`
-      }
 
-      // Finalise the checkpoint row — terminal status, no more writes.
-      // Maps the loop's exitReason onto the canonical AgentCheckpointStatus.
-      // `step-cap` → `paused` (recoverable via "continue"), everything
-      // else maps 1:1. Aborted loops still finalise so the crash-recovery
-      // UI doesn't pick them up as candidates.
-      if (checkpointEnabled) {
-        const status: 'paused' | 'completed' | 'failed' | 'aborted' =
-          exitReason === 'step-cap'
-            ? 'paused'
-            : exitReason === 'aborted'
-              ? 'aborted'
-              : exitReason === 'error'
-                ? 'failed'
-                : 'completed'
-        void vs.agentCheckpoint
-          .finalize(requestId, status, failure)
-          .catch((err) => {
+        for (; step < MAX_AGENT_STEPS; step++) {
+          if (!isActive()) {
+            exitReason = 'aborted'
+            break
+          }
+          // Rolling-summary compaction. If the agent has accumulated
+          // enough context to threaten the model's window, fold the
+          // older turns into a STORY-SO-FAR recap before this step's
+          // invoke. No-op when we're well under the budget — cheap
+          // token estimate gates the actual LLM call so the per-step
+          // overhead is just a character count on the turns array.
+          //
+          // Provider override is the ROUTED-TO provider, not
+          // config.activeProvider. Stops the summariser from picking
+          // a provider whose key the user doesn't have configured
+          // when the router has moved this loop to a different one.
+          const compaction = await compactTurnsIfNeeded(turns, effectiveModel, !provider.needsKey, {
+            providerId: provider.id,
+            modelId: effectiveModel
+          })
+          if (compaction.compacted) {
+            turns.splice(0, turns.length, ...compaction.turns)
+          }
+          const result = await vs.ai.invoke({
+            requestId,
+            provider: provider.id,
+            model: effectiveModel,
+            system,
+            messages: turns
+          })
+          if (result.error) {
+            if (result.error !== 'aborted') {
+              failure = result.error
+              exitReason = 'error'
+            } else {
+              exitReason = 'aborted'
+            }
+            break
+          }
+
+          // v1.13.5 — tool-less refusal auto-retry. Before this hook, gpt-4o-mini
+          // (and other weaker models) would respond to "read C:\foo\bar.ts" with
+          // "I can't access that folder directly" — no tool call, just a flat
+          // refusal — and the agent loop would dutifully treat the refusal as a
+          // completed answer. Here we detect the refusal pattern, push a
+          // coaching user turn into the conversation, and let the loop run one
+          // more step. Usually flips the model into actually calling the tool.
+          // Hard guard at one retry per send via refusalRetryUsed — a second
+          // refusal is treated as genuine and surfaced to the user.
+          if (
+            !refusalRetryUsed &&
+            result.toolCalls.length === 0 &&
+            promptHasFilepath &&
+            looksLikeToolLessRefusal(result.text)
+          ) {
+            refusalRetryUsed = true
+            // Push the refusal into `turns` (so the coaching turn lands in
+            // proper conversational order) BUT skip `finalText` / `patch()`
+            // updates: if the next step succeeds we don't want a flash of
+            // "I can't access that" appearing in the user-facing bubble
+            // before being overwritten by the actual answer. If the next
+            // step ALSO refuses, that second refusal will land normally
+            // through the regular append path on the following iteration.
+            turns.push({ role: 'assistant', content: result.text })
+            turns.push({ role: 'user', content: REFUSAL_COACHING_MESSAGE })
+            void vs.logs.write(
+              'info',
+              'ai',
+              `Tool-less refusal detected from ${effectiveModel} on filepath prompt — auto-retrying with coaching turn.`
+            )
+            continue
+          }
+
+          if (result.text.trim()) {
+            finalText = finalText ? `${finalText}\n\n${result.text}` : result.text
+          }
+          patch({
+            content: finalText,
+            toolCalls: invocations.length ? [...invocations] : undefined
+          })
+          // Streaming TTS for the agent path. Each step's text lands all
+          // at once (invoke is non-streaming, unlike chat), so feed the
+          // accumulated finalText after every step. The speaker tracks
+          // its own spokenIndex so already-spoken content isn't repeated.
+          if (activeSpeaker && activeSpeaker.requestId === requestId && result.text.trim()) {
+            activeSpeaker.speaker.feed(finalText)
+          }
+          if (result.toolCalls.length === 0) {
+            exitReason = 'completed'
+            break
+          }
+
+          turns.push({ role: 'assistant', content: result.text, toolCalls: result.toolCalls })
+          const toolResults: Array<{ id: string; name: string; content: string }> = []
+          const newImages: string[] = []
+          // v2.0 — thread id for stateful tools (persistent Python sandbox).
+          // Suppressed in private mode so a private chat doesn't leak state
+          // onto disk via the per-thread workspace dir. Null when there's
+          // no active thread yet (first message in a fresh session).
+          const toolThreadId = !config.chat.private
+            ? (get().activeThreadId ?? undefined)
+            : undefined
+          for (const call of result.toolCalls) {
+            if (!isActive()) break
+            // Surface a live "Running …" line while the tool is in-flight so
+            // the user has feedback during slow calls (web search, run_python,
+            // long shell commands). Cleared as soon as the result lands.
+            set({ pendingTool: { name: call.name, args: call.args } })
+            // Pass the agent loop's requestId so the tool's abort controller
+            // registers against the same key the LLM call uses — Stop then
+            // kills in-flight tool fetch / subprocess too, not just the LLM.
+            // Pass threadId so stateful tools route through their per-thread
+            // pool (Python kernel, future shell sessions).
+            const invocation = await runAgentTool(call, requestId, toolThreadId)
+            set({ pendingTool: null })
+            invocations.push(invocation)
+            toolResults.push({ id: call.id, name: call.name, content: invocation.result })
+            if (invocation.image) newImages.push(invocation.image)
+            patch({ toolCalls: [...invocations] })
+          }
+          turns.push({ role: 'tool', content: '', toolResults })
+          // If a tool produced screenshots, follow up with a synthetic user
+          // turn carrying the images so vision-capable models can actually look.
+          if (newImages.length > 0) {
+            turns.push({
+              role: 'user',
+              content:
+                newImages.length === 1
+                  ? 'Here is the current screen for you to look at.'
+                  : `Here are ${newImages.length} screenshots for you to look at.`,
+              images: newImages
+            })
+          }
+
+          // Persist the step. Fire-and-forget — a write failure here
+          // doesn't kill the loop; the next step's write will catch up.
+          // The +1 captures "step just completed" so a crash after this
+          // write resumes at the right boundary.
+          if (checkpointEnabled) {
+            void vs.agentCheckpoint
+              .update(requestId, {
+                step: step + 1,
+                turns: sanitiseTurnsForCheckpoint(turns),
+                invocations: sanitiseInvocationsForCheckpoint(invocations)
+              })
+              .catch((err) => {
+                void vs.logs.write(
+                  'warn',
+                  'system',
+                  'Agent checkpoint update failed',
+                  err instanceof Error ? err.message : String(err)
+                )
+              })
+          }
+        }
+        // Step cap hit while the model still wanted more tools — that's an
+        // incomplete run, NOT a successful one. Surface it as a PAUSE
+        // (recoverable) rather than an ERROR (failed). Typing "continue"
+        // resumes the work because the conversation history already has
+        // the tool-call breadcrumbs and the agent re-orients from there.
+        if (step >= MAX_AGENT_STEPS && exitReason === 'completed') {
+          exitReason = 'step-cap'
+          isPause = true
+          failure = `Reached the ${MAX_AGENT_STEPS}-step agent ceiling before finishing — type "continue" to keep going.`
+        }
+
+        // Finalise the checkpoint row — terminal status, no more writes.
+        // Maps the loop's exitReason onto the canonical AgentCheckpointStatus.
+        // `step-cap` → `paused` (recoverable via "continue"), everything
+        // else maps 1:1. Aborted loops still finalise so the crash-recovery
+        // UI doesn't pick them up as candidates.
+        if (checkpointEnabled) {
+          const status: 'paused' | 'completed' | 'failed' | 'aborted' =
+            exitReason === 'step-cap'
+              ? 'paused'
+              : exitReason === 'aborted'
+                ? 'aborted'
+                : exitReason === 'error'
+                  ? 'failed'
+                  : 'completed'
+          void vs.agentCheckpoint.finalize(requestId, status, failure).catch((err) => {
             void vs.logs.write(
               'warn',
               'system',
@@ -1175,60 +1324,66 @@ export const useChatStore = create<ChatState>((set, get) => ({
               err instanceof Error ? err.message : String(err)
             )
           })
-      }
+        }
 
-      // Preserve whatever the agent had already produced (multi-step finalText
-      // or anything streamed in) if abort/error wipes the new finalText.
-      // Gate the final write on the request still being active — `clear()`
-      // or a thread switch mid-loop nulls `pendingRequestId`, and we must
-      // NOT retro-write into a placeholder bubble that no longer belongs to
-      // the current chat.
-      if (isActive()) {
-        const currentAgent = get().messages.find((m) => m.id === assistantId)?.content ?? ''
-        const failureContent = isPause
-          ? `${finalText || currentAgent ? `${finalText || currentAgent}\n\n` : ''}${formatPauseContent(failure!)}`
-          : formatErrorContent(failure ?? '')
-        patch({
-          streaming: false,
-          // Pause is NOT an error — bubble keeps its normal styling and
-          // the orb won't flash red downstream.
-          error: Boolean(failure) && !isPause,
-          content: failure
-            ? failureContent
-            : finalText || currentAgent || CHAT_STRINGS.noResponse,
-          toolCalls: invocations.length ? invocations : undefined
-        })
+        // Preserve whatever the agent had already produced (multi-step finalText
+        // or anything streamed in) if abort/error wipes the new finalText.
+        // Gate the final write on the request still being active — `clear()`
+        // or a thread switch mid-loop nulls `pendingRequestId`, and we must
+        // NOT retro-write into a placeholder bubble that no longer belongs to
+        // the current chat.
+        if (isActive()) {
+          const currentAgent = get().messages.find((m) => m.id === assistantId)?.content ?? ''
+          const failureContent = isPause
+            ? `${finalText || currentAgent ? `${finalText || currentAgent}\n\n` : ''}${formatPauseContent(failure!)}`
+            : formatErrorContent(failure ?? '')
+          patch({
+            streaming: false,
+            // Pause is NOT an error — bubble keeps its normal styling and
+            // the orb won't flash red downstream.
+            error: Boolean(failure) && !isPause,
+            // v2.0 — stamp the pause flag so MessageBubble can render a
+            // Resume button. Without this, the user had to read the bubble
+            // body and type the literal word "continue" — easy to miss
+            // and friction we don't need given the checkpoint infra is
+            // already there.
+            paused: isPause,
+            content: failure
+              ? failureContent
+              : finalText || currentAgent || CHAT_STRINGS.noResponse,
+            toolCalls: invocations.length ? invocations : undefined
+          })
+        }
+      } else {
+        let done: { text: string; error?: string }
+        try {
+          done = await vs.ai.chat({
+            requestId,
+            provider: provider.id,
+            model: effectiveModel,
+            system,
+            messages: baseTurns
+          })
+        } catch (err) {
+          done = { text: '', error: err instanceof Error ? err.message : String(err) }
+        }
+        failure = done.error && done.error !== 'aborted' ? done.error : null
+        finalText = done.text
+        // Same guard as the agent path — don't write into a cleared/switched chat.
+        if (isActive()) {
+          // The streaming slot holds the tokens accumulated by `applyChunk`;
+          // fold it into the message now and let the bubble read directly
+          // from `content` once the slot is reset below.
+          const streamed = get().streamingContent
+          patch({
+            streaming: false,
+            error: Boolean(failure),
+            content: failure
+              ? streamed || formatErrorContent(done.error ?? 'Request failed')
+              : done.text || streamed || CHAT_STRINGS.noResponse
+          })
+        }
       }
-    } else {
-      let done: { text: string; error?: string }
-      try {
-        done = await vs.ai.chat({
-          requestId,
-          provider: provider.id,
-          model: effectiveModel,
-          system,
-          messages: baseTurns
-        })
-      } catch (err) {
-        done = { text: '', error: err instanceof Error ? err.message : String(err) }
-      }
-      failure = done.error && done.error !== 'aborted' ? done.error : null
-      finalText = done.text
-      // Same guard as the agent path — don't write into a cleared/switched chat.
-      if (isActive()) {
-        // The streaming slot holds the tokens accumulated by `applyChunk`;
-        // fold it into the message now and let the bubble read directly
-        // from `content` once the slot is reset below.
-        const streamed = get().streamingContent
-        patch({
-          streaming: false,
-          error: Boolean(failure),
-          content: failure
-            ? streamed || formatErrorContent(done.error ?? 'Request failed')
-            : done.text || streamed || CHAT_STRINGS.noResponse
-        })
-      }
-    }
     } catch (err) {
       // Uncaught throw from prepareConversation, the agent loop, a tool
       // runner, or somewhere in the response handler. Without this guard
@@ -1272,15 +1427,32 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // Pause keeps the orb neutral (success) — the work is intact and
     // recoverable via "continue", so flashing the red error state would
     // misrepresent the situation. Real failures still flash red.
-    useWidgetStore
-      .getState()
-      .setOrbState(failure && !isPause ? 'error' : 'success')
+    useWidgetStore.getState().setOrbState(failure && !isPause ? 'error' : 'success')
     if (failure && !isPause) {
       useUiStore.getState().pushToast('error', failure)
     } else if (failure && isPause) {
       // Pauses get an info toast — visible but non-alarming.
       useUiStore.getState().pushToast('info', failure)
     } else {
+      // v2.0 — screen-reader announcement on successful stream completion.
+      // Sighted users see the assistant bubble fill in; SR users need an
+      // explicit "I'm done" cue with enough preview text to know whether
+      // to read the full reply. Capped at ~140 chars — longer announcements
+      // hijack the SR for the whole sentence and frustrate users navigating
+      // back to the bubble themselves. The toast layer already announces
+      // failures + pauses via pushToast → announce, so this branch is the
+      // only place that needs an explicit success announce.
+      //
+      // Pre-slice to 2× the cap BEFORE the whitespace-collapse regex —
+      // a multi-KB reply would otherwise pay for a full-text regex scan
+      // we throw away on the next line. 280 chars leaves enough headroom
+      // for whitespace collapse to land at ≥140 visible chars.
+      const previewSrc =
+        finalText || get().messages.find((m) => m.id === assistantId)?.content || ''
+      const preview = previewSrc.slice(0, 280).replace(/\s+/g, ' ').trim().slice(0, 140)
+      useUiStore.getState().announce(preview ? `Reply ready. ${preview}` : 'Reply ready.')
+    }
+    if (!failure) {
       // Persist the updated transcript and quietly extract any new long-term
       // facts in the background — unless private mode is on, in which case
       // this conversation leaves no trace on disk or in long-term memory.
@@ -1319,7 +1491,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
           }))
         }
         scheduleHistorySave()
-        void extractFacts(get().messages)
+        // v2.0 polish — skip both passive extractors during conversation
+        // mode. Voice turns are inherently short + ephemeral; running an
+        // extra extractor LLM call per turn × 2 extractors burns tokens
+        // (30 turn convo = 60 extra calls) and biographical observations
+        // captured from quick voice exchanges tend to be noise anyway.
+        if (!conversationMode) {
+          void extractFacts(get().messages)
+          // v2.0 — passive biographical profile extractor. Independent of
+          // `extractFacts` (the manual "Remember this" pipeline); this one
+          // runs after every successful streaming reply when the master
+          // toggle is on. Both extractors share the concurrency lock at
+          // the IPC layer, so a slow provider can't pile up multiple
+          // in-flight calls.
+          void extractBiographical(get().messages)
+        }
       }
       if (finalText && activeSpeaker && activeSpeaker.requestId === requestId) {
         // Flush the trailing fragment — covers a final sentence that
@@ -1420,9 +1606,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({
       summary,
       threads: state.threads.map((t) =>
-        t.id === activeId
-          ? { ...t, summary, updatedAt: new Date().toISOString() }
-          : t
+        t.id === activeId ? { ...t, summary, updatedAt: new Date().toISOString() } : t
       )
     })
     // Schedule a debounced save so non-`send` callers (e.g. a future
@@ -1535,9 +1719,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // before the new agent loop starts adding to the thread.
     set((s) => ({
       messages: s.messages.map((m) =>
-        m.id === checkpoint.assistantMessageId
-          ? { ...m, streaming: false, error: false }
-          : m
+        m.id === checkpoint.assistantMessageId ? { ...m, streaming: false, error: false } : m
       )
     }))
     // Drop the old checkpoint row — the new send() below will INSERT
@@ -1615,16 +1797,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
       : undefined
     // If the active thread was the one deleted, hydrate the messages of
     // whichever thread the main process picked as the new active.
-    const nextMessages = wasActive && nextActive
-      ? await vs.history.getMessages(nextActive.id)
-      : null
+    const nextMessages =
+      wasActive && nextActive ? await vs.history.getMessages(nextActive.id) : null
     set({
       threads: result.summaries,
       activeThreadId: result.activeThreadId,
       ...(wasActive
         ? {
-            messages:
-              nextMessages && nextMessages.length > 0 ? nextMessages : [welcomeMessage()],
+            messages: nextMessages && nextMessages.length > 0 ? nextMessages : [welcomeMessage()],
             summary: nextActive?.summary ?? null,
             attachments: []
           }
@@ -1691,16 +1871,23 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // the user watches the code grow — Claude's "Artifacts" paradigm. The
     // detector is conservative: short snippets stay inline; only blocks
     // ≥200 chars OR ≥8 lines with a language tag elevate to the canvas.
-    if (!streamArtifactDismissed) {
+    //
+    // v2.0 round-5 perf — gate on backtick presence. detectArtifact does a
+    // full-buffer global regex scan; calling it per token was O(N²) over a
+    // long reply (every token re-scanned the entire accumulated string).
+    // 99% of tokens contain no backtick at all, so the gate skips the
+    // expensive regex pass for them. Once a fence is seen anywhere, we
+    // still re-scan on every chunk to keep the canvas in sync with the
+    // growing block (the size-grew guard below already debounces
+    // setState).
+    if (!streamArtifactDismissed && (chunk.delta.includes('`') || next.includes('```'))) {
       const candidate = detectArtifact(next)
       if (candidate) {
         const current = useUiStore.getState().canvasContent
         // Only refresh when the code has actually grown — avoids a setState
         // cascade on every delta when the block has paused mid-stream.
         if (!current || current.code.length < candidate.code.length) {
-          useUiStore
-            .getState()
-            .setCanvas({ code: candidate.code, language: candidate.language })
+          useUiStore.getState().setCanvas({ code: candidate.code, language: candidate.language })
         }
       }
     }

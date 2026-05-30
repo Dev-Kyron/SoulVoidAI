@@ -21,11 +21,7 @@ import { homedir, platform } from 'node:os'
 import { join } from 'node:path'
 import { log } from '../logger'
 import { wasLocalProviderDetected } from '../ai/detect'
-import {
-  ENV_KEY_PROVIDERS,
-  keyPreview,
-  parseMcpServersBlock
-} from './parse'
+import { ENV_KEY_PROVIDERS, keyPreview, parseMcpServersBlock } from './parse'
 import type {
   DetectedDesktopApp,
   DetectedEnvKey,
@@ -205,7 +201,11 @@ function detectLocalProviders(): DetectedLocalProvider[] {
   }
   // Best-effort log so the renderer / dev console shows what we found.
   if (out.length > 0) {
-    log('info', 'system', `Setup detect: local providers reachable — ${out.map((p) => p.providerId).join(', ')}`)
+    log(
+      'info',
+      'system',
+      `Setup detect: local providers reachable — ${out.map((p) => p.providerId).join(', ')}`
+    )
   }
   return out
 }
@@ -221,7 +221,10 @@ function detectLocalProviders(): DetectedLocalProvider[] {
  */
 export function runSetupDetection(): SetupReport {
   return {
-    claudeDesktop: safe('claude-desktop', detectClaudeDesktop, { installed: false, mcpServers: [] }),
+    claudeDesktop: safe('claude-desktop', detectClaudeDesktop, {
+      installed: false,
+      mcpServers: []
+    }),
     cursor: safe('cursor', detectCursor, { installed: false, mcpServers: [] }),
     chatgptDesktop: safe('chatgpt-desktop', detectChatGptDesktop, { installed: false }),
     envKeys: safe('env-keys', detectEnvKeys, []),

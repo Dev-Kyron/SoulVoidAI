@@ -40,13 +40,10 @@ export function ClickPreviewRoot(): JSX.Element {
   const token = params.get('token') ?? ''
   const description = params.get('description') ?? 'something on screen'
   const confidenceNum = Number(params.get('confidence') ?? '0.5')
-  const confidence = Number.isFinite(confidenceNum)
-    ? Math.max(0, Math.min(1, confidenceNum))
-    : 0.5
+  const confidence = Number.isFinite(confidenceNum) ? Math.max(0, Math.min(1, confidenceNum)) : 0.5
   const totalSecondsRaw = Number(params.get('seconds') ?? '3')
-  const totalSeconds = Number.isFinite(totalSecondsRaw) && totalSecondsRaw > 0
-    ? Math.min(10, totalSecondsRaw)
-    : 3
+  const totalSeconds =
+    Number.isFinite(totalSecondsRaw) && totalSecondsRaw > 0 ? Math.min(10, totalSecondsRaw) : 3
   const ringX = Number(params.get('ringX') ?? '150')
   const ringY = Number(params.get('ringY') ?? '50')
 
@@ -113,14 +110,13 @@ export function ClickPreviewRoot(): JSX.Element {
         cursor: 'default',
         position: 'relative',
         overflow: 'hidden',
-        fontFamily:
-          'system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif'
+        fontFamily: 'system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif'
       }}
     >
       {/* Target ring SVG. Positioned absolutely so its centre lands on
-        * (ringX, ringY) regardless of caption layout below. Two
-        * concentric rings + a countdown arc + centre dot give a clear
-        * "I am about to click HERE" signal at a glance. */}
+       * (ringX, ringY) regardless of caption layout below. Two
+       * concentric rings + a countdown arc + centre dot give a clear
+       * "I am about to click HERE" signal at a glance. */}
       <svg
         width={radius * 2 + 22}
         height={radius * 2 + 22}
@@ -167,8 +163,8 @@ export function ClickPreviewRoot(): JSX.Element {
           strokeOpacity={0.9}
         />
         {/* Countdown sweep arc — rotates the dashed stroke to indicate
-          * how much time is left. Starts at 12 o'clock (-90° rotation)
-          * and shrinks counter-clockwise as remaining time decreases. */}
+         * how much time is left. Starts at 12 o'clock (-90° rotation)
+         * and shrinks counter-clockwise as remaining time decreases. */}
         <circle
           cx={radius + 11}
           cy={radius + 11}
@@ -182,15 +178,10 @@ export function ClickPreviewRoot(): JSX.Element {
           transform={`rotate(-90 ${radius + 11} ${radius + 11})`}
         />
         {/* Centre dot — the actual click pixel. */}
-        <circle
-          cx={radius + 11}
-          cy={radius + 11}
-          r={3.5}
-          fill={ACCENT}
-        />
+        <circle cx={radius + 11} cy={radius + 11} r={3.5} fill={ACCENT} />
         {/* Crosshair ticks at 4 compass points — extra precision cue
-          * so the user can verify the centre dot lines up with what they
-          * expected to be clicked. */}
+         * so the user can verify the centre dot lines up with what they
+         * expected to be clicked. */}
         {[0, 1, 2, 3].map((i) => {
           const angle = (i * Math.PI) / 2
           const cx = radius + 11
@@ -291,8 +282,7 @@ export function ClickPreviewRoot(): JSX.Element {
               marginTop: 5,
               fontSize: 9,
               color: '#64748b',
-              fontFamily:
-                'ui-monospace, "SF Mono", Menlo, Consolas, monospace',
+              fontFamily: 'ui-monospace, "SF Mono", Menlo, Consolas, monospace',
               letterSpacing: '0.04em',
               textTransform: 'uppercase'
             }}
@@ -332,7 +322,7 @@ export function ClickPreviewRoot(): JSX.Element {
         </button>
       </div>
       {/* Local keyframe for the pulse dot — scoped to this window so it
-        * doesn't depend on the main app's CSS. */}
+       * doesn't depend on the main app's CSS. */}
       <style>{`
         @keyframes voidsoul-pulse {
           0%, 100% { opacity: 1; transform: scale(1); }

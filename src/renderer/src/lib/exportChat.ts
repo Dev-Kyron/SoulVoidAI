@@ -190,9 +190,7 @@ export function threadToOpml(thread: ExportableThread): string {
     const text = `${role}: ${firstLine}`
     const note = m.content || ''
     const createdAttr = m.createdAt ? ` created="${escapeXml(m.createdAt)}"` : ''
-    lines.push(
-      `    <outline text="${escapeXml(text)}"${createdAttr} _note="${escapeXml(note)}" />`
-    )
+    lines.push(`    <outline text="${escapeXml(text)}"${createdAttr} _note="${escapeXml(note)}" />`)
   }
   lines.push('  </body>', '</opml>', '')
   return lines.join('\n')

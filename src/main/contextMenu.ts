@@ -46,8 +46,7 @@ export function installContextMenu(win: BrowserWindow): void {
       menu.append(
         new MenuItem({
           label: `Add "${misspelledWord}" to dictionary`,
-          click: () =>
-            win.webContents.session.addWordToSpellCheckerDictionary(misspelledWord)
+          click: () => win.webContents.session.addWordToSpellCheckerDictionary(misspelledWord)
         })
       )
       menu.append(new MenuItem({ type: 'separator' }))
@@ -56,14 +55,10 @@ export function installContextMenu(win: BrowserWindow): void {
     // Standard edit operations. We use built-in roles so accelerators
     // + clipboard plumbing are handled by Electron, not us.
     if (editFlags.canUndo) {
-      menu.append(
-        new MenuItem({ label: 'Undo', accelerator: 'CmdOrCtrl+Z', role: 'undo' })
-      )
+      menu.append(new MenuItem({ label: 'Undo', accelerator: 'CmdOrCtrl+Z', role: 'undo' }))
     }
     if (editFlags.canRedo) {
-      menu.append(
-        new MenuItem({ label: 'Redo', accelerator: 'CmdOrCtrl+Shift+Z', role: 'redo' })
-      )
+      menu.append(new MenuItem({ label: 'Redo', accelerator: 'CmdOrCtrl+Shift+Z', role: 'redo' }))
     }
     if (editFlags.canUndo || editFlags.canRedo) {
       menu.append(new MenuItem({ type: 'separator' }))
@@ -75,14 +70,10 @@ export function installContextMenu(win: BrowserWindow): void {
     // Copy needs both the capability AND actual selected text — otherwise
     // copying "nothing" is just a visual no-op that wastes a menu slot.
     if (editFlags.canCopy && selectionText) {
-      menu.append(
-        new MenuItem({ label: 'Copy', accelerator: 'CmdOrCtrl+C', role: 'copy' })
-      )
+      menu.append(new MenuItem({ label: 'Copy', accelerator: 'CmdOrCtrl+C', role: 'copy' }))
     }
     if (editFlags.canPaste) {
-      menu.append(
-        new MenuItem({ label: 'Paste', accelerator: 'CmdOrCtrl+V', role: 'paste' })
-      )
+      menu.append(new MenuItem({ label: 'Paste', accelerator: 'CmdOrCtrl+V', role: 'paste' }))
     }
 
     // Link helpers. Appears when the right-click target is a hyperlink —

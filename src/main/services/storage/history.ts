@@ -11,11 +11,7 @@
 import { randomUUID } from 'node:crypto'
 import { db, ingestLegacyJson } from './db'
 import { getConfig } from './config'
-import {
-  indexMessages,
-  removeByThread,
-  clearEmbeddings
-} from '../embeddings'
+import { indexMessages, removeByThread, clearEmbeddings } from '../embeddings'
 import { log } from '../logger'
 import {
   WELCOME_MESSAGE_ID,
@@ -418,9 +414,9 @@ export function saveThread(
   summary?: HistorySummary | null
 ): ThreadSummary | null {
   ensureMigrated()
-  const existing = db()
-    .prepare(`SELECT * FROM threads WHERE id = ?`)
-    .get(threadId) as ThreadRow | undefined
+  const existing = db().prepare(`SELECT * FROM threads WHERE id = ?`).get(threadId) as
+    | ThreadRow
+    | undefined
   if (!existing) return null
 
   const trimmed = sanitiseMessages(messages)
@@ -470,8 +466,24 @@ export function saveThread(
   return summaryFor(threadId)
 }
 
-/** Adds a new empty thread and makes it active. */
-export function createThread(title?: string): ThreadSummary {
+/**
+ * Adds a new empty thread.
+ *
+ * Default behaviour (used by the chat sidebar's "+" button) flips the
+ * persisted active-thread pointer to the new id — that's the right call
+ * for an interactive create-and-jump-in workflow.
+ *
+ * Headless callers (v2.0 scheduled research bridge being the first) pass
+ * `setActive: false` so a background thread materialisation does NOT
+ * silently steal the user's in-flight conversation focus. The new thread
+ * shows up in the sidebar on next refresh; the user picks it up only when
+ * they explicitly click in.
+ *
+ * The MAX_THREADS trim also respects `setActive: false` and the current
+ * active thread — without this guard a background trim could evict the
+ * exact conversation the user is mid-typing in.
+ */
+export function createThread(title?: string, opts: { setActive?: boolean } = {}): ThreadSummary {
   ensureMigrated()
   const id = randomUUID()
   const now = new Date().toISOString()
@@ -484,18 +496,26 @@ export function createThread(title?: string): ThreadSummary {
     messages: [],
     summary: null
   })
-  setActiveThreadInternal(id)
+  const shouldSetActive = opts.setActive !== false
+  if (shouldSetActive) setActiveThreadInternal(id)
 
   // Trim to MAX_THREADS — drop the oldest (by updatedAt) unpinned threads.
-  const overflow = (
-    db().prepare(`SELECT COUNT(*) AS c FROM threads`).get() as { c: number }
-  ).c - MAX_THREADS
+  // The currently-active thread is excluded so a background createThread
+  // call (scheduler brief landing while the user has 100 threads open) can't
+  // evict the conversation they're actively reading; the just-created thread
+  // is also excluded so concurrent ticks racing the trim don't undo each
+  // other's work.
+  const overflow =
+    (db().prepare(`SELECT COUNT(*) AS c FROM threads`).get() as { c: number }).c - MAX_THREADS
   if (overflow > 0) {
+    const activeId = getActiveThreadInternal()
     const stale = db()
       .prepare(
-        `SELECT id FROM threads WHERE pinned = 0 ORDER BY updated_at ASC LIMIT ?`
+        `SELECT id FROM threads
+         WHERE pinned = 0 AND id != ? AND (? IS NULL OR id != ?)
+         ORDER BY updated_at ASC LIMIT ?`
       )
-      .all(overflow) as { id: string }[]
+      .all(id, activeId, activeId, overflow) as { id: string }[]
     for (const s of stale) deleteThread(s.id)
   }
   // A just-created thread always has a summary; the non-null assertion is
@@ -554,24 +574,17 @@ export function setThreadPinned(id: string, pinned: boolean): ThreadSummary | nu
 export function setThreadMode(id: string, mode: ModeId | null): ThreadSummary | null {
   ensureMigrated()
   const info = db()
-    .prepare(
-      `UPDATE threads SET pinned_mode = ?, updated_at = ? WHERE id = ?`
-    )
+    .prepare(`UPDATE threads SET pinned_mode = ?, updated_at = ? WHERE id = ?`)
     .run(mode, new Date().toISOString(), id)
   if (info.changes === 0) return null
   return summaryFor(id)
 }
 
 /** Sets (or clears, with `null`) a thread's pinned system prompt override. */
-export function setThreadSystemPrompt(
-  id: string,
-  prompt: string | null
-): ThreadSummary | null {
+export function setThreadSystemPrompt(id: string, prompt: string | null): ThreadSummary | null {
   ensureMigrated()
   const info = db()
-    .prepare(
-      `UPDATE threads SET pinned_system_prompt = ?, updated_at = ? WHERE id = ?`
-    )
+    .prepare(`UPDATE threads SET pinned_system_prompt = ?, updated_at = ? WHERE id = ?`)
     .run(prompt && prompt.trim() ? prompt : null, new Date().toISOString(), id)
   if (info.changes === 0) return null
   return summaryFor(id)

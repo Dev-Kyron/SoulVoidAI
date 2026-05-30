@@ -13,6 +13,7 @@ export type PermissionId =
   | 'inputAccess'
   | 'microphone'
   | 'screenCapture'
+  | 'homeAssistant'
 
 export type RiskLevel = 'low' | 'medium' | 'high'
 
@@ -70,6 +71,13 @@ export const PERMISSIONS: PermissionDef[] = [
     id: 'screenCapture',
     label: 'Screen Capture',
     description: 'Take screenshots and read on-screen text via OCR.',
+    risk: 'medium'
+  },
+  {
+    id: 'homeAssistant',
+    label: 'Home Assistant',
+    description:
+      'Read entity states and call services on your Home Assistant instance — lights, locks, thermostat, scenes, scripts and anything else HA exposes.',
     risk: 'medium'
   }
 ]

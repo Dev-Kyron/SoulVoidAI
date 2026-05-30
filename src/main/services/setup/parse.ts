@@ -78,9 +78,7 @@ export function parseMcpServersBlock(
     const entry = value as RawMcpServer
     if (!isString(entry.command) || !entry.command.trim()) continue
 
-    const args: string[] = Array.isArray(entry.args)
-      ? entry.args.filter(isString)
-      : []
+    const args: string[] = Array.isArray(entry.args) ? entry.args.filter(isString) : []
 
     // env block — keep only string→string pairs. Track which ones are
     // empty so the import UI can flag them as needing user input.

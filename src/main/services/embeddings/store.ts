@@ -78,7 +78,7 @@ interface Row {
 function rowToRecord(row: Row): EmbeddingRecord {
   return {
     messageId: row.id,
-    source: (row.source === 'file' ? 'file' : 'chat'),
+    source: row.source === 'file' ? 'file' : 'chat',
     threadId: row.thread_id,
     filePath: row.file_path,
     chunkIndex: row.chunk_index,
@@ -117,9 +117,7 @@ export function forEachEmbedding(visit: (record: EmbeddingRecord) => void): void
 
 export function hasEmbeddingFor(messageId: string): boolean {
   ensureMigrated()
-  const row = db()
-    .prepare(`SELECT 1 FROM embeddings WHERE id = ? LIMIT 1`)
-    .get(messageId)
+  const row = db().prepare(`SELECT 1 FROM embeddings WHERE id = ? LIMIT 1`).get(messageId)
   return Boolean(row)
 }
 
@@ -212,19 +210,28 @@ export function removeByFilePath(path: string): void {
   db().prepare(`DELETE FROM embeddings WHERE file_path = ?`).run(path)
 }
 
-export function removeByFolder(folder: string): void {
-  ensureMigrated()
-  // Two issues to dodge: LIKE wildcards in the user's path (`_` is common in
-  // Windows folder names, `%` is rare but legal), and `C:\proj` swallowing
-  // `C:\projects`. Escape SQL wildcards and append a path separator so the
-  // match is "folder + separator + anything", never "folder + sibling chars".
+/**
+ * Builds a SQL LIKE pattern that matches every path strictly INSIDE the
+ * supplied folder (folder + sep + anything). Two issues to dodge:
+ *   · LIKE wildcards in the user's path (`_` is common in Windows folder
+ *     names, `%` is rare but legal) — escape both, plus the escape char.
+ *   · `C:\proj` swallowing `C:\projects` — append the path separator so
+ *     the match is folder-as-prefix, never folder-as-substring.
+ * The returned tuple is `{pattern, escape}` — pair with `ESCAPE ?` in
+ * the SQL statement. Shared between removeByFolder + listFileSummaries.
+ */
+function folderLikePattern(folder: string): { pattern: string; escape: string } {
   const escaped = folder.replace(/[\\%_]/g, (m) => `\\${m}`)
   const sep = folder.includes('\\') ? '\\' : '/'
+  return { pattern: `${escaped}${sep}%`, escape: '\\' }
+}
+
+export function removeByFolder(folder: string): void {
+  ensureMigrated()
+  const { pattern } = folderLikePattern(folder)
   db()
-    .prepare(
-      `DELETE FROM embeddings WHERE source = 'file' AND file_path LIKE ? ESCAPE '\\'`
-    )
-    .run(`${escaped}${sep}%`)
+    .prepare(`DELETE FROM embeddings WHERE source = 'file' AND file_path LIKE ? ESCAPE '\\'`)
+    .run(pattern)
 }
 
 export function clearEmbeddings(): void {
@@ -241,15 +248,128 @@ export function clearEmbeddings(): void {
  */
 export function removeNonCurrentModel(currentModel: string): number {
   ensureMigrated()
-  const result = db()
-    .prepare(`DELETE FROM embeddings WHERE model != ?`)
-    .run(currentModel)
+  const result = db().prepare(`DELETE FROM embeddings WHERE model != ?`).run(currentModel)
   return Number(result.changes ?? 0)
 }
 
 export function countEmbeddings(): number {
   ensureMigrated()
   const row = db().prepare(`SELECT COUNT(*) AS c FROM embeddings`).get() as { c: number }
+  return row.c
+}
+
+/**
+ * v2.0 — Vector-store browser support. Lists the files that have any
+ * indexed chunks in the embeddings table, plus per-file aggregates
+ * (chunk count, earliest/latest timestamps). The browser uses this for
+ * the folder → files drill-down without materialising the full chunk
+ * preview text for thousands of rows up front.
+ *
+ * Optional `folderPrefix` narrows the result set to a single folder via
+ * a LIKE with the same wildcard-escape + path-sep guard `removeByFolder`
+ * uses, so `C:\proj` doesn't bleed into `C:\projects`.
+ */
+export function listFileSummaries(folderPrefix?: string): Array<{
+  filePath: string
+  chunkCount: number
+  earliestAt: string
+  latestAt: string
+  model: string
+}> {
+  ensureMigrated()
+  if (folderPrefix) {
+    const { pattern } = folderLikePattern(folderPrefix)
+    const rows = db()
+      .prepare(
+        `SELECT file_path AS filePath,
+                COUNT(*)  AS chunkCount,
+                MIN(created_at) AS earliestAt,
+                MAX(created_at) AS latestAt,
+                MAX(model) AS model
+         FROM embeddings
+         WHERE source = 'file' AND file_path LIKE ? ESCAPE '\\'
+         GROUP BY file_path
+         ORDER BY file_path ASC`
+      )
+      .all(pattern) as Array<{
+      filePath: string
+      chunkCount: number
+      earliestAt: string
+      latestAt: string
+      model: string
+    }>
+    return rows
+  }
+  return db()
+    .prepare(
+      `SELECT file_path AS filePath,
+              COUNT(*)  AS chunkCount,
+              MIN(created_at) AS earliestAt,
+              MAX(created_at) AS latestAt,
+              MAX(model) AS model
+       FROM embeddings
+       WHERE source = 'file' AND file_path IS NOT NULL
+       GROUP BY file_path
+       ORDER BY file_path ASC`
+    )
+    .all() as Array<{
+    filePath: string
+    chunkCount: number
+    earliestAt: string
+    latestAt: string
+    model: string
+  }>
+}
+
+/** Same as `EmbeddingRecord` minus the heavyweight `vector` array. The
+ *  vector-store browser only reads metadata + preview, so dragging the
+ *  Float32Array through SQLite/IPC for every visible chunk is a pure
+ *  waste (~768KB for a 500-chunk file at 384-dim, plus Buffer→array
+ *  decode on every row). */
+export type EmbeddingMeta = Omit<EmbeddingRecord, 'vector'>
+
+/**
+ * v2.0 — list every chunk for one file path, ordered by chunk_index. Used
+ * when the browser expands a file row. We deliberately omit the vector
+ * column from the SELECT (and from the return type) — pulling a 500-chunk
+ * file's ~768KB of float32 from disk + decoding into JS arrays only to
+ * drop them on the next line burns ~30-50ms per expand on a UE5-scale
+ * index. Cosine search reads from a different path that DOES pull the
+ * vector.
+ */
+export function listChunkMetaForFile(filePath: string): EmbeddingMeta[] {
+  ensureMigrated()
+  const rows = db()
+    .prepare(
+      `SELECT id, source, thread_id, file_path, chunk_index, role, preview, created_at, model
+       FROM embeddings
+       WHERE source = 'file' AND file_path = ?
+       ORDER BY chunk_index ASC`
+    )
+    .all(filePath) as Array<Omit<Row, 'vector'>>
+  return rows.map((row) => ({
+    messageId: row.id,
+    source: row.source === 'file' ? 'file' : 'chat',
+    threadId: row.thread_id,
+    filePath: row.file_path,
+    chunkIndex: row.chunk_index,
+    role: row.role as EmbeddingRecord['role'],
+    preview: row.preview,
+    createdAt: row.created_at,
+    model: row.model
+  }))
+}
+
+/**
+ * v2.0 — distinct embedding model count. Lets the browser flag a stale-
+ * model leftover ("you have 4k rows from text-embedding-ada-002 — clean
+ * up?") that would otherwise sit forever unreachable to cosine-search.
+ */
+export function distinctModelCount(): number {
+  ensureMigrated()
+  const row = db().prepare(`SELECT COUNT(DISTINCT model) AS c FROM embeddings`).get() as {
+    c: number
+  }
   return row.c
 }
 

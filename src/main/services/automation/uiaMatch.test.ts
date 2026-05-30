@@ -175,7 +175,10 @@ describe('matchUiaElement', () => {
       w: 36,
       h: 36
     })
-    const result = matchUiaElement([browserPane, sendButton], 'the Send button on Facebook Messenger')
+    const result = matchUiaElement(
+      [browserPane, sendButton],
+      'the Send button on Facebook Messenger'
+    )
     expect(result).not.toBeNull()
     expect(result?.element.name).toBe('Send')
     expect(result?.element.controlType).toBe('ControlType.Button')
@@ -222,7 +225,8 @@ describe('matchUiaElement', () => {
 
 describe('parseUiaJson', () => {
   it('parses a normal JSON array from PowerShell', () => {
-    const raw = '[{"name":"Send","automationId":"","controlType":"ControlType.Button","x":100,"y":200,"w":60,"h":30}]'
+    const raw =
+      '[{"name":"Send","automationId":"","controlType":"ControlType.Button","x":100,"y":200,"w":60,"h":30}]'
     expect(parseUiaJson(raw)).toEqual([
       {
         name: 'Send',
@@ -240,7 +244,8 @@ describe('parseUiaJson', () => {
     // PowerShell\'s ConvertTo-Json doesn\'t wrap a 1-item collection in []
     // by default. Without this tolerance the parser would silently
     // produce an empty array on single-result enumerations.
-    const raw = '{"name":"Send","automationId":"","controlType":"ControlType.Button","x":1,"y":2,"w":3,"h":4}'
+    const raw =
+      '{"name":"Send","automationId":"","controlType":"ControlType.Button","x":1,"y":2,"w":3,"h":4}'
     expect(parseUiaJson(raw)).toHaveLength(1)
   })
 

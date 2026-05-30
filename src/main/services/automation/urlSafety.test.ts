@@ -76,4 +76,42 @@ describe('checkUrlSafe — SSRF guard for agent-driven fetches', () => {
     expect(checkUrlSafe('not a url').ok).toBe(false)
     expect(checkUrlSafe('').ok).toBe(false)
   })
+
+  // v2.0 round-3 — non-dotted-quad IPv4 representations previously bypassed
+  // the regex-only guard. These tests lock in the new inet_aton-style
+  // decode + private-range check.
+  it('rejects decimal-encoded IPv4 loopback / private addresses', () => {
+    // 2130706433 = 0x7F000001 = 127.0.0.1
+    expect(checkUrlSafe('http://2130706433/').ok).toBe(false)
+    // 167772161 = 0x0A000001 = 10.0.0.1
+    expect(checkUrlSafe('http://167772161/').ok).toBe(false)
+    // 3232235521 = 0xC0A80001 = 192.168.0.1
+    expect(checkUrlSafe('http://3232235521/admin').ok).toBe(false)
+    // 2852039166 = 0xA9FEA9FE = 169.254.169.254 (AWS metadata)
+    expect(checkUrlSafe('http://2852039166/').ok).toBe(false)
+  })
+
+  it('rejects the bare-zero `http://0/` zero-page address', () => {
+    expect(checkUrlSafe('http://0/').ok).toBe(false)
+    expect(checkUrlSafe('http://0:8080/').ok).toBe(false)
+  })
+
+  it('rejects octal-encoded IPv4 loopback', () => {
+    // 0177.0.0.1 = 127.0.0.1 in octal
+    expect(checkUrlSafe('http://0177.0.0.1/').ok).toBe(false)
+  })
+
+  it('rejects hex-encoded IPv4 loopback', () => {
+    // 0x7f000001 = 127.0.0.1
+    expect(checkUrlSafe('http://0x7f000001/').ok).toBe(false)
+  })
+
+  it('rejects IPv4-mapped IPv6 loopback', () => {
+    expect(checkUrlSafe('http://[::ffff:127.0.0.1]/').ok).toBe(false)
+  })
+
+  it('still allows decimal-encoded PUBLIC IPv4', () => {
+    // 134744072 = 0x08080808 = 8.8.8.8 (Google DNS, public)
+    expect(checkUrlSafe('http://134744072/').ok).toBe(true)
+  })
 })

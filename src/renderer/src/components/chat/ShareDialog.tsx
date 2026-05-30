@@ -15,25 +15,11 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import {
-  Share2,
-  X,
-  Copy,
-  Save,
-  Github,
-  Globe,
-  Lock,
-  ExternalLink,
-  Check
-} from 'lucide-react'
+import { Share2, X, Copy, Save, Github, Globe, Lock, ExternalLink, Check } from 'lucide-react'
 import { useUiStore } from '../../store/useUiStore'
 import { vs } from '../../lib/bridge'
 import { copyToClipboard } from '../../lib/clipboard'
-import {
-  EXTENSION_FOR_FORMAT,
-  renderThread,
-  type ExportFormat
-} from '../../lib/exportChat'
+import { EXTENSION_FOR_FORMAT, renderThread, type ExportFormat } from '../../lib/exportChat'
 import { cn } from '../../lib/utils'
 import { useDialog } from '../../lib/useDialog'
 import type { ChatMessage } from '@shared/types'
@@ -74,15 +60,11 @@ export function ShareDialog({ thread, open, onClose }: ShareDialogProps): JSX.El
     }
   }, [open])
 
-  const formatLabel =
-    FORMAT_OPTIONS.find((opt) => opt.id === format)?.label ?? 'Markdown'
+  const formatLabel = FORMAT_OPTIONS.find((opt) => opt.id === format)?.label ?? 'Markdown'
   const extension = EXTENSION_FOR_FORMAT[format]
   // Re-render the content only when the thread or chosen format changes; the
   // four exporters are pure functions over `thread`.
-  const content = useMemo(
-    () => (thread ? renderThread(thread, format) : ''),
-    [thread, format]
-  )
+  const content = useMemo(() => (thread ? renderThread(thread, format) : ''), [thread, format])
   const title = thread?.title || 'Conversation'
   const empty = !thread || thread.messages.length === 0
 
@@ -116,10 +98,7 @@ export function ShareDialog({ thread, open, onClose }: ShareDialogProps): JSX.El
   const shareAsGist = async (): Promise<void> => {
     if (empty || busy) return
     if (!hasGithub) {
-      pushToast(
-        'info',
-        'Add a GitHub PAT in Settings → Integrations (with `gist` scope) first.'
-      )
+      pushToast('info', 'Add a GitHub PAT in Settings → Integrations (with `gist` scope) first.')
       return
     }
     setBusy('gist')
@@ -133,10 +112,7 @@ export function ShareDialog({ thread, open, onClose }: ShareDialogProps): JSX.El
     // Best-effort — toast still surfaces the URL even if the clipboard
     // write was rejected (very unlikely via the IPC path, but defensive).
     await copyToClipboard(result.url)
-    pushToast(
-      'success',
-      `${isPublic ? 'Public' : 'Secret'} gist created · URL on your clipboard.`
-    )
+    pushToast('success', `${isPublic ? 'Public' : 'Secret'} gist created · URL on your clipboard.`)
   }
 
   return (
@@ -211,8 +187,8 @@ export function ShareDialog({ thread, open, onClose }: ShareDialogProps): JSX.El
                       )}
                     </div>
                     <p className="mt-0.5 text-[10px] text-slate-500">
-                      Uploads the {formatLabel.toLowerCase()} to gist.github.com and returns
-                      a real URL you can paste anywhere.
+                      Uploads the {formatLabel.toLowerCase()} to gist.github.com and returns a real
+                      URL you can paste anywhere.
                     </p>
 
                     <div className="mt-2 flex gap-1.5">

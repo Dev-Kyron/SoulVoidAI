@@ -15,7 +15,13 @@
  * re-renders across every visible message bubble.
  */
 import { useEffect, useState } from 'react'
-import { getCurrentSpoken, subscribeCurrentSpoken } from '../lib/voice'
+import {
+  getCurrentSpoken,
+  getSpeakerState,
+  subscribeCurrentSpoken,
+  subscribeSpeakerState,
+  type SpeakerState
+} from '../lib/voice'
 
 export function useCurrentSpoken(): string | null {
   const [sentence, setSentence] = useState<string | null>(() => getCurrentSpoken())
@@ -24,19 +30,30 @@ export function useCurrentSpoken(): string | null {
 }
 
 /**
- * Like `useCurrentSpoken` but collapses the signal to a boolean. Because
- * setState bails out when the new value equals the old, this only triggers
- * a re-render on the speaking ↔ idle transition, not on every sentence
- * boundary. Cheap to call from many bubbles simultaneously.
+ * 3-state speaker signal: 'idle' | 'warming' | 'speaking'.
+ *
+ * `warming` covers the period between clicking Read Aloud and audio
+ * actually playing — Piper synthesis on a cold cache or a long input
+ * can take 1-3 seconds. Without this state the button stays in `idle`
+ * the whole time and the user thinks the click was ignored.
+ *
+ * Components that only care about play/stop can use `useIsSpeaking`
+ * (derived from this hook). Use this directly when you need to show
+ * a "preparing voice…" spinner.
+ */
+export function useSpeakerState(): SpeakerState {
+  const [state, setState] = useState<SpeakerState>(() => getSpeakerState())
+  useEffect(() => subscribeSpeakerState(setState), [])
+  return state
+}
+
+/**
+ * Like `useCurrentSpoken` but collapses the signal to a boolean — true
+ * only while audio is actively playing. Derived from `useSpeakerState`
+ * so there's one subscription path; React's setState equality short-
+ * circuits the warming↔idle transitions where the boolean doesn't
+ * change. Cheap to call from many bubbles simultaneously.
  */
 export function useIsSpeaking(): boolean {
-  const [speaking, setSpeaking] = useState<boolean>(() => getCurrentSpoken() !== null)
-  useEffect(
-    () =>
-      subscribeCurrentSpoken((value) => {
-        setSpeaking(value !== null)
-      }),
-    []
-  )
-  return speaking
+  return useSpeakerState() === 'speaking'
 }

@@ -145,11 +145,7 @@ function renderTxt(bundle: ThreadBundle): string {
  */
 function renderHtml(bundle: ThreadBundle): string {
   const escape = (s: string): string =>
-    s
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
+    s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 
   // Preserve newlines / indentation in the message body via <pre>-style
   // white-space rules; markdown is just shown as text — we don't want the
@@ -307,17 +303,12 @@ function renderXlsx(bundle: ThreadBundle): Buffer {
   const sheet = XLSX.utils.aoa_to_sheet(rows)
   // Sensible column widths so the user doesn't have to manually expand
   // every column on first open. Content gets the lion's share.
-  sheet['!cols'] = [
-    { wch: 22 },
-    { wch: 12 },
-    { wch: 22 },
-    { wch: 80 },
-    { wch: 10 }
-  ]
-  const sheetName = bundle.title
-    .replace(/[\\/?*[\]]/g, ' ')
-    .trim()
-    .slice(0, 31) || 'Conversation'
+  sheet['!cols'] = [{ wch: 22 }, { wch: 12 }, { wch: 22 }, { wch: 80 }, { wch: 10 }]
+  const sheetName =
+    bundle.title
+      .replace(/[\\/?*[\]]/g, ' ')
+      .trim()
+      .slice(0, 31) || 'Conversation'
 
   const wb = XLSX.utils.book_new()
   XLSX.utils.book_append_sheet(wb, sheet, sheetName)
@@ -360,7 +351,11 @@ export async function renderContent(
     const rows = parseTabularContent(content)
     const sheet = XLSX.utils.aoa_to_sheet(rows)
     sheet['!cols'] = inferColumnWidths(rows)
-    const sheetName = displayTitle.replace(/[\\/?*[\]]/g, ' ').trim().slice(0, 31) || 'Sheet1'
+    const sheetName =
+      displayTitle
+        .replace(/[\\/?*[\]]/g, ' ')
+        .trim()
+        .slice(0, 31) || 'Sheet1'
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, sheet, sheetName)
     return {
@@ -416,7 +411,7 @@ function inferColumnWidths(rows: string[][]): Array<{ wch: number }> {
   if (rows.length === 0) return []
   const cols = Math.max(...rows.map((r) => r.length))
   return Array.from({ length: cols }, (_, i) => {
-    const max = Math.max(...rows.map((r) => (r[i]?.length ?? 0)))
+    const max = Math.max(...rows.map((r) => r[i]?.length ?? 0))
     return { wch: Math.min(Math.max(max + 2, 10), 60) }
   })
 }

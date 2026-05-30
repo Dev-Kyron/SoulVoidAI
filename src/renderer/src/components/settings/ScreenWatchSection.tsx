@@ -72,9 +72,7 @@ export function ScreenWatchSectionBody(): JSX.Element | null {
 
   const handleEnable = async (next: boolean): Promise<void> => {
     if (next && !hasScreenCapture) {
-      const granted = await useUiStore
-        .getState()
-        .promptPermission('screenCapture', 'Screen watch')
+      const granted = await useUiStore.getState().promptPermission('screenCapture', 'Screen watch')
       if (!granted) {
         pushToast('info', 'Screen-capture permission is needed for screen watch.')
         return
@@ -102,10 +100,7 @@ export function ScreenWatchSectionBody(): JSX.Element | null {
           : `Soul stayed silent: ${s.lastReason ?? 'no useful observation'}`
       )
     } catch (err) {
-      pushToast(
-        'error',
-        err instanceof Error ? `Test failed: ${err.message}` : 'Test failed.'
-      )
+      pushToast('error', err instanceof Error ? `Test failed: ${err.message}` : 'Test failed.')
     } finally {
       setTesting(false)
     }
@@ -114,10 +109,10 @@ export function ScreenWatchSectionBody(): JSX.Element | null {
   return (
     <>
       <p className="mb-2 text-[10px] leading-relaxed text-slate-500">
-        Soul takes a low-resolution screenshot every few minutes and asks your
-        AI provider whether there's anything genuinely worth saying. She stays
-        silent most of the time — only speaks when she notices something
-        useful (stuck on a stack trace, blocked dialog, drifting attention).
+        Soul takes a low-resolution screenshot every few minutes and asks your AI provider whether
+        there's anything genuinely worth saying. She stays silent most of the time — only speaks
+        when she notices something useful (stuck on a stack trace, blocked dialog, drifting
+        attention).
       </p>
 
       {/* Privacy / cost banner — adapts to whether the active provider is
@@ -128,9 +123,9 @@ export function ScreenWatchSectionBody(): JSX.Element | null {
           <div>
             <p className="font-semibold">Cloud provider: {provider?.label ?? '—'}</p>
             <p className="mt-0.5 text-[10px] text-amber-300/80">
-              Every observation sends a screenshot to {provider?.label ?? 'your provider'}.
-              Costs tokens. Switch to Ollama / LM Studio with a vision model
-              (llava etc) for free + private operation.
+              Every observation sends a screenshot to {provider?.label ?? 'your provider'}. Costs
+              tokens. Switch to Ollama / LM Studio with a vision model (llava etc) for free +
+              private operation.
             </p>
           </div>
         </div>
@@ -138,9 +133,9 @@ export function ScreenWatchSectionBody(): JSX.Element | null {
         <div className="mb-2 flex items-start gap-2 rounded-lg border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-[11px] text-emerald-200">
           <ShieldCheck size={12} className="mt-0.5 shrink-0" />
           <p>
-            Local provider: <span className="font-semibold">{provider?.label}</span> —
-            screenshots stay on your machine. Make sure your model supports vision
-            (llava / bakllava / moondream).
+            Local provider: <span className="font-semibold">{provider?.label}</span> — screenshots
+            stay on your machine. Make sure your model supports vision (llava / bakllava /
+            moondream).
           </p>
         </div>
       )}
@@ -150,8 +145,7 @@ export function ScreenWatchSectionBody(): JSX.Element | null {
         <div className="mb-2 flex items-start gap-2 rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-[11px] text-slate-300">
           <Lock size={12} className="mt-0.5 shrink-0 text-slate-500" />
           <p>
-            Screen-capture permission isn't granted yet. Toggling Enabled below
-            will prompt for it.
+            Screen-capture permission isn't granted yet. Toggling Enabled below will prompt for it.
           </p>
         </div>
       )}
@@ -160,9 +154,7 @@ export function ScreenWatchSectionBody(): JSX.Element | null {
       <div className="mb-2 flex items-center justify-between rounded-lg border border-white/5 bg-black/20 px-2.5 py-2">
         <div>
           <p className="text-[11px] font-semibold text-slate-200">Enabled</p>
-          <p className="text-[10px] text-slate-500">
-            Off = no ticks fire. Ships off by default.
-          </p>
+          <p className="text-[10px] text-slate-500">Off = no ticks fire. Ships off by default.</p>
         </div>
         <Toggle checked={cfg.enabled} onChange={(v) => void handleEnable(v)} />
       </div>
@@ -210,9 +202,7 @@ export function ScreenWatchSectionBody(): JSX.Element | null {
       <div className="my-2 py-1">
         <div className="mb-1 flex items-center justify-between">
           <label className="text-[10px] text-slate-400">Daily call cap</label>
-          <span className="text-[10px] text-slate-500">
-            stops after {cfg.dailyCap} ticks/day
-          </span>
+          <span className="text-[10px] text-slate-500">stops after {cfg.dailyCap} ticks/day</span>
         </div>
         <input
           type="range"
@@ -252,9 +242,7 @@ export function ScreenWatchSectionBody(): JSX.Element | null {
             <p>
               Last observation:{' '}
               <span className="text-slate-200">
-                {status.lastObservationAt
-                  ? relativeTime(status.lastObservationAt)
-                  : 'never'}
+                {status.lastObservationAt ? relativeTime(status.lastObservationAt) : 'never'}
               </span>
             </p>
             {status.lastReason && (

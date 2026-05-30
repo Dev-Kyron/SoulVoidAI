@@ -75,9 +75,9 @@ function ensureMigrated(): void {
 
 export function getEntries(): UsageEntry[] {
   ensureMigrated()
-  const rows = db()
-    .prepare(`SELECT json FROM usage_entries ORDER BY ts ASC`)
-    .all() as { json: string }[]
+  const rows = db().prepare(`SELECT json FROM usage_entries ORDER BY ts ASC`).all() as {
+    json: string
+  }[]
   return rows.map((r) => JSON.parse(r.json) as UsageEntry)
 }
 
@@ -101,9 +101,11 @@ export function appendEntry(entry: UsageEntry): void {
       model: entry.model,
       json: JSON.stringify(entry)
     })
-    const count = (handle.prepare(`SELECT COUNT(*) AS c FROM usage_entries`).get() as {
-      c: number
-    }).c
+    const count = (
+      handle.prepare(`SELECT COUNT(*) AS c FROM usage_entries`).get() as {
+        c: number
+      }
+    ).c
     if (count > MAX_ENTRIES) trim.run({ overflow: count - MAX_ENTRIES })
   })
   tx()

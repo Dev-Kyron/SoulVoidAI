@@ -7,13 +7,7 @@
  */
 import { app, Menu, Tray, nativeImage, type MenuItemConstructorOptions } from 'electron'
 import { join } from 'node:path'
-import {
-  showWindow,
-  toggleWindow,
-  getWindow,
-  setAlwaysOnTop,
-  openSettingsWindow
-} from './window'
+import { showWindow, toggleWindow, getWindow, setAlwaysOnTop, openSettingsWindow } from './window'
 import { getConfig, getClientConfig, setAppearance, updateConfig } from './services/storage/config'
 import { getMemory } from './services/storage/memory'
 import { getRunningCheckpoints } from './services/storage/agent-checkpoints'
@@ -27,11 +21,14 @@ let tray: Tray | null = null
 let agentRuns: AgentCheckpoint[] = []
 let agentPollTimer: NodeJS.Timeout | null = null
 
-/** Tray-poll cadence. 4 seconds is fast enough that the user sees the
- *  step counter tick visibly while they're watching, slow enough that
- *  the SQLite SELECT + tray menu rebuild doesn't add measurable
- *  background CPU. */
-const AGENT_POLL_INTERVAL_MS = 4000
+/** Tray-poll cadence — active vs idle. v2.0 round-7 perf — adaptive: fast
+ *  4s when at least one agent run is currently `running` (so the user
+ *  sees the step counter tick), slow 30s when none are running (so a
+ *  user who never uses Agent mode doesn't pay 21,600 wasted DB reads
+ *  per day). The poll itself re-arms with the appropriate interval
+ *  after each tick based on the current run count. */
+const AGENT_POLL_ACTIVE_MS = 4000
+const AGENT_POLL_IDLE_MS = 30000
 
 /** Pushes the latest ClientConfig to every open renderer + refreshes the tray. */
 function emitConfigChange(): void {
@@ -200,10 +197,7 @@ function buildMenu(): Menu {
       // Disable the parent when there's nothing to pick — the user can still
       // see "Quick prompts (empty)" but the menu doesn't open into a near-
       // empty submenu that just says "no prompts yet".
-      label:
-        getMemory().customPrompts.length === 0
-          ? 'Quick prompts (none yet)'
-          : 'Quick prompts',
+      label: getMemory().customPrompts.length === 0 ? 'Quick prompts (none yet)' : 'Quick prompts',
       enabled: getMemory().customPrompts.length > 0,
       submenu: quickPromptsSubmenu()
     },
@@ -227,6 +221,59 @@ function buildMenu(): Menu {
         emitConfigChange()
       }
     },
+    // v2.0 round-9 — tray surface for the v2.0 "shut Soul up right now"
+    // controls. Before this, a user in a meeting whose wake word picked
+    // up "ok soul" or who was mid-typing when a proactive nudge fired
+    // had to open Settings → Voice → toggle — too slow. These four
+    // checkbox rows mirror the persistent config flags so the most
+    // common "silence the AI" actions are one right-click away.
+    { type: 'separator' },
+    {
+      label: 'Proactive voice',
+      type: 'checkbox',
+      checked: config.proactiveVoice.enabled,
+      click: (item) => {
+        updateConfig({
+          proactiveVoice: { ...config.proactiveVoice, enabled: item.checked }
+        })
+        emitConfigChange()
+      }
+    },
+    {
+      label: 'Wake word',
+      type: 'checkbox',
+      checked: config.voice.wakeWord.enabled,
+      click: (item) => {
+        updateConfig({
+          voice: {
+            ...config.voice,
+            wakeWord: { ...config.voice.wakeWord, enabled: item.checked }
+          }
+        })
+        emitConfigChange()
+      }
+    },
+    {
+      label: 'Screen awareness',
+      type: 'checkbox',
+      checked: config.appearance.screenAwareness,
+      click: (item) => {
+        setAppearance({ screenAwareness: item.checked })
+        emitConfigChange()
+      }
+    },
+    {
+      label: 'Screen-watch loop',
+      type: 'checkbox',
+      checked: config.screenWatch.enabled,
+      click: (item) => {
+        updateConfig({
+          screenWatch: { ...config.screenWatch, enabled: item.checked }
+        })
+        emitConfigChange()
+      }
+    },
+    { type: 'separator' },
     {
       label: 'Settings…',
       click: () => {
@@ -246,6 +293,15 @@ function buildMenu(): Menu {
 
 export function createTray(): Tray {
   const image = nativeImage.createFromPath(iconPath())
+  // v2.0 round-7 multi-platform — mark the icon as a template image on
+  // macOS so it inverts with light/dark menubar theme like every other
+  // native menubar icon. Without this the full-colour PNG sits as a
+  // colored orb regardless of theme — visually out of place on mac.
+  // No-op on Windows and Linux (the flag is ignored, and on Linux
+  // libappindicator handles theming natively).
+  if (process.platform === 'darwin' && !image.isEmpty()) {
+    image.setTemplateImage(true)
+  }
   tray = new Tray(image.isEmpty() ? nativeImage.createEmpty() : image)
   tray.setToolTip('VoidSoul AI Companion')
   tray.setContextMenu(buildMenu())
@@ -324,18 +380,42 @@ function pollAgentProgress(): void {
  * Starts the periodic poll. Idempotent — calling twice doesn't stack
  * timers. `.unref()` on the interval handle so a phantom running loop
  * doesn't block app quit if the cleanup path forgets to stop it.
+ *
+ * v2.0 round-7 perf — instead of `setInterval` at a fixed 4s, schedule
+ * each next tick at the cadence appropriate for the current state. Idle
+ * = 30s, active = 4s. The re-arm happens inside pollAgentProgress so
+ * the cadence flips immediately when a run starts or finishes.
  */
+function scheduleNextAgentPoll(): void {
+  const interval = agentRuns.length > 0 ? AGENT_POLL_ACTIVE_MS : AGENT_POLL_IDLE_MS
+  agentPollTimer = setTimeout(() => {
+    pollAgentProgress()
+    if (agentPollTimer) scheduleNextAgentPoll()
+  }, interval)
+  agentPollTimer.unref?.()
+}
+
 export function startAgentProgressPolling(): void {
   if (agentPollTimer) return
-  // Run once immediately so the first poll happens at boot, not 4s later.
+  // Run once immediately so the first poll happens at boot, not 30s later.
   pollAgentProgress()
-  agentPollTimer = setInterval(pollAgentProgress, AGENT_POLL_INTERVAL_MS)
-  agentPollTimer.unref?.()
+  scheduleNextAgentPoll()
 }
 
 export function stopAgentProgressPolling(): void {
   if (agentPollTimer) {
-    clearInterval(agentPollTimer)
+    clearTimeout(agentPollTimer)
     agentPollTimer = null
   }
+}
+
+/** v2.0 round-7 — explicit "an agent just started" hint so the tray
+ *  flips to fast cadence immediately instead of waiting up to 30s
+ *  for the next idle-poll to discover the new run. Called from the
+ *  `agent-checkpoint:create` IPC handler. */
+export function bumpAgentProgressPolling(): void {
+  if (!agentPollTimer) return
+  clearTimeout(agentPollTimer)
+  pollAgentProgress()
+  scheduleNextAgentPoll()
 }

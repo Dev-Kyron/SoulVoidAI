@@ -25,10 +25,7 @@ export function useGlobalSearchHotkey(target: 'main' | 'settings' = 'main'): voi
       const cmdOrCtrl = event.metaKey || event.ctrlKey
       if (!cmdOrCtrl || event.key.toLowerCase() !== 'f') return
       const t = event.target as HTMLElement | null
-      if (
-        t &&
-        (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)
-      ) {
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) {
         return
       }
       event.preventDefault()

@@ -65,10 +65,7 @@ export function ThreadOverridesDialog({
   const savePrompt = async (): Promise<void> => {
     const trimmed = draft.trim()
     await setThreadSystemPrompt(thread.id, trimmed || null)
-    pushToast(
-      'success',
-      trimmed ? 'Per-thread system prompt saved.' : 'Per-thread prompt cleared.'
-    )
+    pushToast('success', trimmed ? 'Per-thread system prompt saved.' : 'Per-thread prompt cleared.')
   }
 
   const resetPrompt = async (): Promise<void> => {
@@ -161,7 +158,7 @@ export function ThreadOverridesDialog({
                       if (!name || !name.trim()) return
                       const instructions =
                         window.prompt(
-                          'Project instructions (appended to every thread\'s system prompt). Leave blank to skip.'
+                          "Project instructions (appended to every thread's system prompt). Leave blank to skip."
                         ) ?? ''
                       const project = await createProject({
                         name: name.trim(),
@@ -183,7 +180,7 @@ export function ThreadOverridesDialog({
                       if (!project) return null
                       return project.instructions
                         ? `Shared instructions: ${project.instructions.slice(0, 140)}${project.instructions.length > 140 ? '…' : ''}`
-                        : 'No shared instructions — using this thread\'s baseline only.'
+                        : "No shared instructions — using this thread's baseline only."
                     })()}
                   </p>
                 )}
@@ -228,7 +225,10 @@ export function ThreadOverridesDialog({
                   })}
                 </div>
                 <p className="mt-1.5 text-[10px] leading-relaxed text-slate-500">
-                  Currently using: <span className="text-slate-300">{MODES.find((m) => m.id === effectiveMode)?.name ?? effectiveMode}</span>
+                  Currently using:{' '}
+                  <span className="text-slate-300">
+                    {MODES.find((m) => m.id === effectiveMode)?.name ?? effectiveMode}
+                  </span>
                   {pinnedMode === null && ' (global)'}
                 </p>
               </div>
@@ -262,8 +262,8 @@ export function ThreadOverridesDialog({
                   className="scrollbar-void w-full resize-none rounded-lg border border-white/10 bg-black/30 px-2.5 py-2 text-[11px] leading-relaxed text-slate-100 outline-none transition focus:border-[var(--accent-ring)] placeholder:text-slate-600"
                 />
                 <p className="mt-1 text-[10px] text-slate-500">
-                  Replaces the global baseline for this thread only. The mode prompt fragment
-                  still appends on top.
+                  Replaces the global baseline for this thread only. The mode prompt fragment still
+                  appends on top.
                 </p>
                 {promptDirty && (
                   <div className="mt-2 flex gap-2">

@@ -16,11 +16,7 @@ import { recordSentiment, getCurrentSentiment, recentSentiments } from './sentim
 import { getConfig } from '../storage/config'
 import { getMemory } from '../storage/memory'
 import { log } from '../logger'
-import type {
-  ChatTurn,
-  EmotionalContextSnapshot,
-  SessionSentiment
-} from '@shared/types'
+import type { ChatTurn, EmotionalContextSnapshot, SessionSentiment } from '@shared/types'
 
 /** Fire the classifier once every N user messages. 5 is the default
  *  — frequent enough to catch shifting moods, sparse enough that the
@@ -57,9 +53,7 @@ function shouldClassify(threadId: string): boolean {
  * callers should fire-and-forget so the chat stream isn't blocked on
  * a model round-trip.
  */
-export async function classifyAndPersist(
-  messages: ChatTurn[]
-): Promise<SessionSentiment | null> {
+export async function classifyAndPersist(messages: ChatTurn[]): Promise<SessionSentiment | null> {
   const config = getConfig()
   if (!config.memory.emotionalContext) return null
   if (config.chat.private) return null // Private mode: no classification
@@ -144,8 +138,7 @@ export function buildSentimentPromptBlock(): string {
     const intensity = ctx.current.intensity
     const summary = ctx.current.summary?.trim()
     lines.push(
-      `Current session: ${label} (intensity ${intensity}/5)` +
-        (summary ? `. ${summary}` : '.')
+      `Current session: ${label} (intensity ${intensity}/5)` + (summary ? `. ${summary}` : '.')
     )
   }
   if (ctx.lastWin) {

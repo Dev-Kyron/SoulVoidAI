@@ -68,7 +68,7 @@ describe.skipIf(!RUN)('embedding store', () => {
     expect(mod.hasEmbeddingFor('m2')).toBe(false)
   })
 
-  it('removeByThread deletes only that thread\'s records', async () => {
+  it("removeByThread deletes only that thread's records", async () => {
     const mod = await loadFresh()
     mod.addEmbeddings([
       { messageId: 'a', threadId: 't1', ...baseRecord },
@@ -226,7 +226,10 @@ describe.skipIf(!RUN)('embedding store', () => {
     const counts = mod.countBySource()
     expect(counts.chat).toBe(2)
     expect(counts.file).toBe(2)
-    const ids = mod.getEmbeddings().map((r) => r.messageId).sort()
+    const ids = mod
+      .getEmbeddings()
+      .map((r) => r.messageId)
+      .sort()
     expect(ids).toContain('C:/p/a.md#0')
     expect(ids).toContain('C:/p/b.md#0')
     expect(ids).toContain('c3')

@@ -35,6 +35,21 @@ export interface QuickStartProfile {
    *  "every entry that passes the eligibility filter" — used by the
    *  "Everything" profile so it stays in sync as the registry grows. */
   entryIds: readonly string[] | 'all-zero-config'
+  /**
+   * v2.0 — install mode.
+   *
+   *   'bulk' (default) — every entry is zero-config and we install them in
+   *     parallel via `vs.mcp.add`. The Quick Start dialog handles this end
+   *     to end without prompting.
+   *
+   *   'guided' — entries need API keys, OAuth, or system deps. The dialog
+   *     lists the recommended set + each entry's auth requirement and
+   *     hands off to the existing per-entry marketplace install flow so
+   *     the user can authorise each one. Used for the Productivity Pack
+   *     (Notion, Slack, Gmail, Calendar, Drive) where "one click" is
+   *     fundamentally not on the table.
+   */
+  mode?: 'bulk' | 'guided'
 }
 
 export const QUICK_START_PROFILES: readonly QuickStartProfile[] = [
@@ -69,6 +84,21 @@ export const QUICK_START_PROFILES: readonly QuickStartProfile[] = [
     description:
       'Install every curated server in the marketplace that needs no keys, no paths, and no system dependencies. Maximum tools, zero friction.',
     entryIds: 'all-zero-config'
+  },
+  {
+    // v2.0 — productivity pack. Notion + Slack + Gmail + Calendar + Drive
+    // all need auth (API tokens / OAuth credentials) so this is a guided
+    // profile rather than a bulk-install. The dialog points the user at
+    // the marketplace for per-entry setup; this profile exists primarily
+    // so a non-tech user has a single named target ("Productivity Pack")
+    // to recognise instead of hunting five separate entries.
+    id: 'productivity',
+    name: 'Productivity Pack',
+    tagline: 'Notion, Slack, Gmail, Calendar, Drive',
+    description:
+      'Connect VoidSoul to your work tools — Notion docs, Slack channels, Gmail, Google Calendar, Google Drive. Each needs a one-time auth step (a token or browser OAuth) — the Marketplace walks you through each one.',
+    entryIds: ['notion', 'slack', 'gmail', 'google-calendar', 'google-drive'],
+    mode: 'guided'
   }
 ]
 
@@ -87,18 +117,32 @@ export function filterZeroConfigEntries(entries: McpRegistryEntry[]): McpRegistr
 }
 
 /** Resolve a profile against the loaded marketplace entries. Missing IDs
- *  drop out; only entries currently in the filtered zero-config set come
- *  back. Use this BEFORE rendering the confirmation list so the count
- *  matches what will actually be installed. */
+ *  drop out.
+ *
+ *  Bulk profiles draw from the zero-config set only — anything that needs
+ *  a key, path, or system dep would silently fail at install time
+ *  otherwise. Guided profiles (v2.0+) draw from the full curated set so
+ *  credentialed entries like Notion / Gmail / Slack can be surfaced; the
+ *  dialog routes the user through the per-entry install flow rather than
+ *  bulk-installing them.
+ *
+ *  Use this BEFORE rendering the confirmation list so the count matches
+ *  what the user will see. */
 export function resolveProfileEntries(
   profile: QuickStartProfile,
   loaded: McpRegistryEntry[]
 ): McpRegistryEntry[] {
-  const zeroConfig = filterZeroConfigEntries(loaded)
-  if (profile.entryIds === 'all-zero-config') return zeroConfig
+  if (profile.entryIds === 'all-zero-config') return filterZeroConfigEntries(loaded)
+  // Guided profiles still constrain to curated (we're not handing the
+  // user a credentialed install for an unaudited PulseMCP/Smithery
+  // entry) but they DON'T require zero-config.
+  const candidatePool =
+    profile.mode === 'guided'
+      ? loaded.filter((e) => e.source === 'curated' && !e.discoveryOnly)
+      : filterZeroConfigEntries(loaded)
   // Preserve the profile's intended ordering when listing entries,
   // so "Essentials" reads memory→sequential not in registry order.
-  const byId = new Map(zeroConfig.map((e) => [e.id, e] as const))
+  const byId = new Map(candidatePool.map((e) => [e.id, e] as const))
   const ordered: McpRegistryEntry[] = []
   for (const id of profile.entryIds) {
     const entry = byId.get(id)

@@ -149,7 +149,11 @@ function VoiceBar(): JSX.Element | null {
       <button
         type="button"
         onClick={() => void toggle()}
-        title={voice.enabled ? 'Spoken replies on — click to mute' : 'Spoken replies off — click to enable'}
+        title={
+          voice.enabled
+            ? 'Spoken replies on — click to mute'
+            : 'Spoken replies off — click to enable'
+        }
         className={cn(
           'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border transition',
           voice.enabled
@@ -192,19 +196,21 @@ function VoiceBar(): JSX.Element | null {
  * breaks, no fenced code blocks, no list markers.
  */
 function flattenForPreview(text: string): string {
-  return text
-    // Strip v1.3.0+ voice markup BEFORE markdown — otherwise the
-    // `[*_#>~|`]` rule below eats the `<` from `<voice...>` and leaves
-    // a half-mangled tag in the rolling-line readback. The chat bubble
-    // uses stripVoiceTagsOnly elsewhere; the Nexus preview needs the
-    // same treatment.
-    .replace(/<\/?voice(?:\s[^>]*)?>/gi, '')
-    .replace(/```[\s\S]*?```/g, ' ')
-    .replace(/`([^`]+)`/g, '$1')
-    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
-    .replace(/[*_#>~|`]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
+  return (
+    text
+      // Strip v1.3.0+ voice markup BEFORE markdown — otherwise the
+      // `[*_#>~|`]` rule below eats the `<` from `<voice...>` and leaves
+      // a half-mangled tag in the rolling-line readback. The chat bubble
+      // uses stripVoiceTagsOnly elsewhere; the Nexus preview needs the
+      // same treatment.
+      .replace(/<\/?voice(?:\s[^>]*)?>/gi, '')
+      .replace(/```[\s\S]*?```/g, ' ')
+      .replace(/`([^`]+)`/g, '$1')
+      .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+      .replace(/[*_#>~|`]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+  )
 }
 
 /**
@@ -259,7 +265,7 @@ function NexusResponse(): JSX.Element | null {
   if (!assistant && !streamingContent) return null
 
   const toolCount = assistant?.toolCalls?.length ?? 0
-  const baseContent = streaming && streamingContent ? streamingContent : assistant?.content ?? ''
+  const baseContent = streaming && streamingContent ? streamingContent : (assistant?.content ?? '')
 
   // Priority: live spoken sentence > preview of the latest content > nothing.
   let line = ''
@@ -540,9 +546,7 @@ function AdvancedNexus(): JSX.Element | null {
 function AppTile({ action, custom }: { action: QuickAction; custom: boolean }): JSX.Element {
   const config = useConfigStore((s) => s.config)
   const Icon = resolveIcon(action.icon)
-  const granted = action.requires
-    ? (config?.permissions[action.requires]?.granted ?? false)
-    : true
+  const granted = action.requires ? (config?.permissions[action.requires]?.granted ?? false) : true
 
   return (
     <div className="group relative flex w-16 flex-col items-center gap-1.5">
@@ -598,11 +602,7 @@ function SimpleOrbButton({
   const streaming = useChatStore((s) => s.streaming)
   const recording = status === 'recording'
   const transcribing = status === 'transcribing'
-  const title = transcribing
-    ? 'Transcribing…'
-    : recording
-      ? 'Stop and transcribe'
-      : 'Tap to talk'
+  const title = transcribing ? 'Transcribing…' : recording ? 'Stop and transcribe' : 'Tap to talk'
   return (
     <button
       type="button"

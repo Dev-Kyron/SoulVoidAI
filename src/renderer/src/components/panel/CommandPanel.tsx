@@ -19,6 +19,7 @@ import {
   type LucideIcon
 } from 'lucide-react'
 import { Orb } from '../widget/Orb'
+import { ConversationOverlay } from '../widget/ConversationOverlay'
 import { useDndActive } from '../../lib/useDndActive'
 import { IconButton } from '../common/ui'
 import { NexusView } from './NexusView'
@@ -150,7 +151,9 @@ function TabBar(): JSX.Element {
             onClick={() => setTab(tab.id)}
             className={cn(
               'flex flex-1 items-center justify-center gap-1.5 rounded-lg py-1.5 text-[11px] font-medium transition',
-              active ? 'tab-active text-white' : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'
+              active
+                ? 'tab-active text-white'
+                : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'
             )}
           >
             <Icon size={13} />
@@ -238,6 +241,13 @@ export function CommandPanel(): JSX.Element {
       </div>
       <Overlays />
       <CommandPalette />
+      {/* v2.0 — Conversational voice mode overlay. Renders ABOVE every
+          tab content + the dialog cluster (z-50) so it covers the panel
+          while a session is active. Self-gates on `status !== 'idle'`
+          so the import is free when the user never enters conv mode. */}
+      <Suspense fallback={null}>
+        <ConversationOverlay />
+      </Suspense>
       {/* Dialogs render inside their own Suspense so a trigger doesn't block
           the rest of the panel from drawing while the chunk fetches. */}
       <Suspense fallback={null}>

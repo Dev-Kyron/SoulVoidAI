@@ -15,18 +15,30 @@
 import {
   addEmbeddings,
   clearEmbeddings,
+  countBySource,
   countEmbeddings,
+  distinctModelCount,
   hasEmbeddingFor,
+  listChunkMetaForFile,
+  listFileSummaries,
   removeByFilePath,
   removeByFolder,
   removeByIds,
   removeByThread,
   removeNonCurrentModel,
+  type EmbeddingMeta,
   type EmbeddingRecord
 } from './store'
 import { embedTexts, embeddingsAvailable, preferredModel } from './provider'
 import { cosineSearch } from '../rag-worker'
-import { WELCOME_MESSAGE_ID, type ChatThread } from '@shared/types'
+import {
+  WELCOME_MESSAGE_ID,
+  type ChatThread,
+  type VectorStoreChunkRow,
+  type VectorStoreFileSummary,
+  type VectorStoreQueryTrace,
+  type VectorStoreStats
+} from '@shared/types'
 
 const BATCH_SIZE = 50
 
@@ -75,9 +87,7 @@ interface ChatIndexInput {
 /** Embeds and stores any chat messages that aren't already in the index. */
 export async function indexMessages(messages: ChatIndexInput[]): Promise<number> {
   if (messages.length === 0) return 0
-  const fresh = messages.filter(
-    (m) => m.content.trim().length > 0 && !hasEmbeddingFor(m.id)
-  )
+  const fresh = messages.filter((m) => m.content.trim().length > 0 && !hasEmbeddingFor(m.id))
   if (fresh.length === 0) return 0
 
   let total = 0
@@ -207,9 +217,28 @@ export interface SearchOptions {
   source?: 'chat' | 'file'
 }
 
+/**
+ * Internal-only flag: skip the lastTrace capture inside searchSimilar.
+ * Used by the Vector-store browser's Explore tab so the panel's own
+ * probe queries don't clobber the chat layer's trace. Kept off the
+ * public SearchOptions surface so callers don't have a debug knob they
+ * shouldn't be touching.
+ */
+interface InternalSearchExtras {
+  skipTrace?: boolean
+}
+
 export async function searchSimilar(
   query: string,
   options: SearchOptions = {}
+): Promise<SearchHit[]> {
+  return searchSimilarInternal(query, options, {})
+}
+
+async function searchSimilarInternal(
+  query: string,
+  options: SearchOptions,
+  extras: InternalSearchExtras
 ): Promise<SearchHit[]> {
   const trimmed = query.trim()
   if (!trimmed) return []
@@ -228,7 +257,7 @@ export async function searchSimilar(
     excludeIds: options.excludeIds,
     source: options.source
   })
-  return hits.map((h) => ({
+  const mapped: SearchHit[] = hits.map((h) => ({
     messageId: h.messageId,
     source: h.source,
     threadId: h.threadId,
@@ -239,10 +268,143 @@ export async function searchSimilar(
     createdAt: h.createdAt,
     score: h.score
   }))
+  // v2.0 — capture the most-recent retrieval for the Vector-store browser's
+  // Query Trace tab. Store the raw hits and defer the chunk-row mapping
+  // until the panel actually asks for it — the mapping is wasted work on
+  // every chat retrieval otherwise (panel-open is the rare case).
+  if (!extras.skipTrace) {
+    lastTraceRaw = {
+      query: trimmed,
+      ranAt: new Date().toISOString(),
+      hits: mapped
+    }
+  }
+  return mapped
+}
+
+/* ---------------------- Vector-store browser surface ------------------- */
+
+/**
+ * v2.0 — single-slot memory of the most-recent retrieval, stored as RAW
+ * hits so the per-chunk `recordToChunkRow` mapping only runs when the
+ * panel actually opens. Keeps `searchSimilar` (which runs on every chat
+ * RAG-enabled turn) free of vestigial allocations. Reset when the user
+ * clears the index.
+ */
+interface RawTrace {
+  query: string
+  ranAt: string
+  hits: SearchHit[]
+}
+let lastTraceRaw: RawTrace | null = null
+
+/**
+ * Translate an EmbeddingMeta / EmbeddingRecord / SearchHit into the
+ * renderer-facing chunk row shape. All three carry the fields we need;
+ * the only divergence is `score` (SearchHit-only) and `model`
+ * (EmbeddingMeta + EmbeddingRecord), handled with safe defaults.
+ *
+ * Kept narrow on purpose — Float32Array vectors must never cross the
+ * IPC bridge (they don't structured-clone cleanly and would balloon the
+ * payload for no UI value). EmbeddingMeta is the same shape minus the
+ * vector, so accepting it directly avoids an unnecessary decode upstream.
+ */
+function recordToChunkRow(src: EmbeddingMeta | SearchHit): VectorStoreChunkRow {
+  return {
+    id: src.messageId,
+    source: (src.source ?? 'chat') as 'chat' | 'file',
+    filePath: src.filePath ?? null,
+    chunkIndex: src.chunkIndex ?? null,
+    threadId: src.threadId ?? null,
+    role: src.role,
+    preview: src.preview,
+    createdAt: src.createdAt,
+    // SearchHit doesn't carry `model` (cosine-search doesn't read it);
+    // empty string is fine because the panel only renders model when
+    // the row originates from listChunksForFile (which DOES include it).
+    model: 'model' in src ? src.model : '',
+    // EmbeddingRecord has no score; SearchHit always does.
+    score: 'score' in src ? src.score : undefined
+  }
+}
+
+/** Aggregate counts + active-model info for the dashboard chip. */
+export function vectorStoreStats(): VectorStoreStats {
+  const by = countBySource()
+  return {
+    totalChunks: by.chat + by.file,
+    chatChunks: by.chat,
+    fileChunks: by.file,
+    activeModel: embeddingsAvailable() ? preferredModel() : null,
+    modelCount: distinctModelCount()
+  }
+}
+
+/**
+ * List indexed files (optionally restricted to one folder prefix). Returns
+ * lightweight summaries — the browser fetches per-file chunk detail on
+ * expand.
+ */
+export function listVectorStoreFiles(folderPrefix?: string): VectorStoreFileSummary[] {
+  return listFileSummaries(folderPrefix)
+}
+
+/** Per-file chunk drill-down. */
+export function listVectorStoreChunks(filePath: string): VectorStoreChunkRow[] {
+  return listChunkMetaForFile(filePath).map((r) => recordToChunkRow(r))
+}
+
+/**
+ * The most-recent retrieval trace, or null if none has run yet. Lazily
+ * maps the raw hits to renderer-shape rows on read — most chat sessions
+ * never open the panel, so we avoid the per-turn allocation up-front.
+ */
+export function getQueryTrace(): VectorStoreQueryTrace | null {
+  if (!lastTraceRaw) return null
+  return {
+    query: lastTraceRaw.query,
+    ranAt: lastTraceRaw.ranAt,
+    hits: lastTraceRaw.hits.map((h) => recordToChunkRow(h))
+  }
+}
+
+/** Reset the trace — called by clearEmbeddings + on user request. */
+export function clearQueryTrace(): void {
+  lastTraceRaw = null
+}
+
+/**
+ * Run a query for the renderer's Query Explorer tab. Same retrieval path
+ * as the chat layer uses, but doesn't pollute the trace slot (this IS
+ * the trace already). The renderer renders the returned rows directly.
+ */
+export async function explainQuery(
+  query: string,
+  options: { limit?: number; source?: 'chat' | 'file' } = {}
+): Promise<VectorStoreChunkRow[]> {
+  const hits = await searchSimilarInternal(
+    query,
+    {
+      limit: options.limit ?? 10,
+      source: options.source
+    },
+    { skipTrace: true }
+  )
+  return hits.map((h) => recordToChunkRow(h))
+}
+
+/**
+ * Wraps the raw store-level clear so the in-memory trace slot is reset
+ * alongside the DB rows — otherwise a Cleared index would still surface
+ * the last query trace pointing at chunks that no longer exist.
+ */
+function clearEmbeddingsWithTrace(): void {
+  clearEmbeddings()
+  clearQueryTrace()
 }
 
 export {
-  clearEmbeddings,
+  clearEmbeddingsWithTrace as clearEmbeddings,
   preferredModel,
   removeByFilePath,
   removeByFolder,

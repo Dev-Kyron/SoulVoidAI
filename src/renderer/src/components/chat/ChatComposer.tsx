@@ -3,7 +3,7 @@
  * (image / file picker, screenshot capture, OCR screen-read) and a combined
  * send / stop button. Saved prompts can be pushed in from Settings → Memory.
  */
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import {
   ImagePlus,
   Camera,
@@ -16,10 +16,12 @@ import {
   Brain,
   ChevronDown,
   Eye,
-  Sparkles
+  Sparkles,
+  AudioLines
 } from 'lucide-react'
 import { useChatStore } from '../../store/useChatStore'
 import { useConfigStore } from '../../store/useConfigStore'
+import { useConversationStore } from '../../store/useConversationStore'
 import { useUiStore } from '../../store/useUiStore'
 import { useMemoryStore } from '../../store/useMemoryStore'
 import { extractFacts } from '../../lib/factExtractor'
@@ -43,6 +45,11 @@ import { useT } from '../../lib/i18n'
 function ModelPickerPill(): JSX.Element | null {
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
+  // v2.0 a11y — stable id pairing trigger ↔ listbox. The trigger's
+  // `aria-controls` and the popover's `id` must match for AT engines
+  // to follow the haspopup/expanded relationship into the listbox
+  // rather than treating it as a detached pop-up.
+  const listboxId = useId()
   const config = useConfigStore((s) => s.config)
   const provider = config?.providers.find((p) => p.id === config.activeProvider)
   // Subscribe to JUST this provider's model slice — using the whole `models`
@@ -73,10 +80,7 @@ function ModelPickerPill(): JSX.Element | null {
   // twice. Memoised so re-renders triggered by other store slices (or by
   // the popover toggling open) don't re-build the array.
   const merged = useMemo(
-    () =>
-      provider
-        ? Array.from(new Set([...(liveList ?? []), ...provider.defaultModels]))
-        : [],
+    () => (provider ? Array.from(new Set([...(liveList ?? []), ...provider.defaultModels])) : []),
     [liveList, provider]
   )
 
@@ -101,6 +105,14 @@ function ModelPickerPill(): JSX.Element | null {
         type="button"
         onClick={() => setOpen((v) => !v)}
         title={tooltip}
+        aria-label={
+          overridden
+            ? `Model: ${activeModel} (locked for this thread)`
+            : `Model: auto-routing, default ${activeModel}`
+        }
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-controls={listboxId}
         className={cn(
           'flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] transition',
           overridden
@@ -124,7 +136,15 @@ function ModelPickerPill(): JSX.Element | null {
         // `left-0` anchor would extend past the panel wall and get clipped
         // by the outer `overflow-hidden`. Width capped relative to the
         // viewport too, in case a future narrower panel surface mounts this.
-        <div className="absolute bottom-full right-0 z-30 mb-1 w-[240px] max-w-[calc(100vw-2rem)] rounded-lg border border-white/10 bg-[var(--surface-card-strong)] py-1 shadow-xl">
+        // role=listbox + aria-label completes the haspopup/expanded chain
+        // declared on the trigger pill — screen readers announce the
+        // popover as a model picker list, not a generic group.
+        <div
+          id={listboxId}
+          role="listbox"
+          aria-label="Pick a model for this thread"
+          className="absolute bottom-full right-0 z-30 mb-1 w-[240px] max-w-[calc(100vw-2rem)] rounded-lg border border-white/10 bg-[var(--surface-card-strong)] py-1 shadow-xl"
+        >
           <button
             type="button"
             onClick={() => {
@@ -132,12 +152,17 @@ function ModelPickerPill(): JSX.Element | null {
               setOpen(false)
             }}
             title="VoidSoul picks per prompt across every configured provider — vision tasks go to a vision model, agent runs to a fast tool-use model, etc."
+            role="option"
+            aria-selected={!overridden}
             className={cn(
               'flex w-full items-start gap-2 px-3 py-2 text-left text-[11px] transition hover:bg-white/5',
               !overridden ? 'text-[var(--accent)]' : 'text-slate-300'
             )}
           >
-            <Sparkles size={11} className={cn('mt-0.5 shrink-0', !overridden ? 'text-emerald-300' : 'text-slate-500')} />
+            <Sparkles
+              size={11}
+              className={cn('mt-0.5 shrink-0', !overridden ? 'text-emerald-300' : 'text-slate-500')}
+            />
             <span className="min-w-0 flex-1">
               <span className="block truncate font-semibold">Auto-route</span>
               <span className="block truncate text-[9px] text-slate-500">
@@ -158,6 +183,8 @@ function ModelPickerPill(): JSX.Element | null {
                     setModelOverride(id)
                     setOpen(false)
                   }}
+                  role="option"
+                  aria-selected={selected}
                   className={cn(
                     'flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left text-[11px] transition hover:bg-white/5',
                     selected ? 'text-[var(--accent)]' : 'text-slate-300'
@@ -278,9 +305,7 @@ export function ChatComposer(): JSX.Element {
       pushToast('info', CHAT_STRINGS.rememberedDisabledByPrivate)
       return
     }
-    const messages = useChatStore
-      .getState()
-      .messages.filter((m) => m.id !== WELCOME_MESSAGE_ID)
+    const messages = useChatStore.getState().messages.filter((m) => m.id !== WELCOME_MESSAGE_ID)
     if (messages.length === 0) {
       pushToast('info', 'Have a conversation first — nothing to remember yet.')
       return
@@ -347,6 +372,7 @@ export function ChatComposer(): JSX.Element {
               <button
                 type="button"
                 onClick={() => removeAttachment(attachment.id)}
+                aria-label={`Remove attachment ${attachment.name}`}
                 className="rounded p-0.5 text-slate-400 hover:bg-white/10 hover:text-white"
               >
                 <X size={11} />
@@ -378,6 +404,7 @@ export function ChatComposer(): JSX.Element {
             onClick={() => void runAction({ type: 'read-screen', params: {} }, 'Read screen text')}
           />
           <MicButton className="h-8 w-8" />
+          <ConversationButton />
           <ToolButton
             icon={<Brain size={16} className={remembering ? 'animate-pulse' : undefined} />}
             title={t('composer.remember')}
@@ -385,11 +412,7 @@ export function ChatComposer(): JSX.Element {
             disabled={remembering}
             active={remembering}
           />
-          <ToolButton
-            icon={<Trash2 size={15} />}
-            title={t('composer.clear')}
-            onClick={clear}
-          />
+          <ToolButton icon={<Trash2 size={15} />} title={t('composer.clear')} onClick={clear} />
         </div>
 
         <textarea
@@ -397,6 +420,11 @@ export function ChatComposer(): JSX.Element {
           value={text}
           rows={1}
           placeholder={t('composer.placeholder')}
+          // v2.0 a11y — `placeholder` is NOT an accessible name (it
+          // disappears as soon as the user types); the aria-label gives
+          // screen readers a stable handle. Mirrors the visible UI
+          // language so sighted + SR users see the same affordance.
+          aria-label={t('composer.placeholder')}
           onChange={(e) => {
             setText(e.target.value)
             resize()
@@ -421,6 +449,7 @@ export function ChatComposer(): JSX.Element {
           onClick={() => (streaming ? stop() : submit())}
           disabled={!canSend}
           title={streaming ? t('composer.stop') : t('composer.send')}
+          aria-label={streaming ? t('composer.stop') : t('composer.send')}
           className={cn(
             'flex h-9 w-9 shrink-0 items-center justify-center rounded-xl transition',
             'disabled:cursor-not-allowed disabled:opacity-40',
@@ -433,5 +462,38 @@ export function ChatComposer(): JSX.Element {
         </button>
       </div>
     </div>
+  )
+}
+
+/**
+ * v2.0 — Launches conversation mode (full-duplex hands-free voice).
+ * Distinct from MicButton: that's a single-shot push-to-transcribe;
+ * this one opens a continuous, interruptible session that auto-loops
+ * between user turns and assistant replies until the user exits.
+ *
+ * Pulled into its own component so the Zustand subscription is local —
+ * the broader ChatComposer doesn't need to re-render every time the
+ * conversation state ticks over.
+ */
+function ConversationButton(): JSX.Element {
+  const status = useConversationStore((s) => s.status)
+  const toggle = useConversationStore((s) => s.toggle)
+  const active = status !== 'idle'
+  return (
+    <button
+      type="button"
+      onClick={() => void toggle()}
+      title={active ? 'Exit conversation mode' : 'Start conversation mode (Ctrl/Cmd+Shift+V)'}
+      aria-label={active ? 'Exit conversation mode' : 'Start conversation mode'}
+      aria-pressed={active}
+      className={cn(
+        'flex h-8 w-8 items-center justify-center rounded-lg transition',
+        active
+          ? 'bg-[var(--accent)] text-white shadow-[0_0_12px_var(--accent-glow)]'
+          : 'text-slate-400 hover:bg-white/10 hover:text-white'
+      )}
+    >
+      <AudioLines size={16} className={active ? 'animate-pulse' : undefined} />
+    </button>
   )
 }

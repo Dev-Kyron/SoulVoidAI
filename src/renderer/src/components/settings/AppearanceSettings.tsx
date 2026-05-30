@@ -116,6 +116,18 @@ export function AppearanceSettings(): JSX.Element | null {
           <option value="ja" className="bg-void-700">
             日本語
           </option>
+          <option value="zh" className="bg-void-700">
+            中文
+          </option>
+          <option value="ko" className="bg-void-700">
+            한국어
+          </option>
+          <option value="fr" className="bg-void-700">
+            Français
+          </option>
+          <option value="pt" className="bg-void-700">
+            Português
+          </option>
         </select>
       </Row>
 
@@ -178,24 +190,50 @@ export function AppearanceSettings(): JSX.Element | null {
               pushToast('info', 'Grant the Screen Capture permission first.')
               return
             }
-            void setAppearance({ screenAwareness: value })
+            // v2.0 — turning OFF coarse awareness also disables the
+            // semantic variant (it has nothing to react to without
+            // the window-change events). Persist both so the toggle
+            // state matches main's view.
+            void setAppearance(
+              value
+                ? { screenAwareness: true }
+                : { screenAwareness: false, semanticScreenAwareness: false }
+            )
+          }}
+        />
+      </Row>
+      <Row
+        label="Semantic awareness"
+        hint="Local OCR on window change — gives the AI a text excerpt of what's on screen"
+      >
+        <Toggle
+          checked={appearance.semanticScreenAwareness ?? false}
+          onChange={(value) => {
+            if (value && !appearance.screenAwareness) {
+              pushToast(
+                'info',
+                'Turn on Screen awareness first — semantic awareness rides on top of it.'
+              )
+              return
+            }
+            if (value && !config.permissions.screenCapture.granted) {
+              pushToast('info', 'Grant the Screen Capture permission first.')
+              return
+            }
+            void setAppearance({ semanticScreenAwareness: value })
           }}
         />
       </Row>
 
       <div className="mt-2 border-t border-white/5 pt-2">
-        <p className="mb-1 text-[10px] uppercase tracking-wide text-slate-500">
-          Quiet mode (DND)
-        </p>
+        <p className="mb-1 text-[10px] uppercase tracking-wide text-slate-500">Quiet mode (DND)</p>
         <Row
           label="Do not disturb"
           hint="Orb dims, voice replies suppressed, summon-hotkey still works"
         >
           <Toggle
             checked={appearance.dnd.enabled}
-            onChange={(value) =>
-              void setAppearance({ dnd: { ...appearance.dnd, enabled: value } })
-            }
+            onChange={(value) => void setAppearance({ dnd: { ...appearance.dnd, enabled: value } })}
           />
         </Row>
         <QuietHoursRow appearance={appearance} setAppearance={setAppearance} />
@@ -222,13 +260,11 @@ function QuietHoursRow({
 }): JSX.Element {
   const start = useDraftField<string>({
     source: appearance.dnd.quietStart ?? '',
-    commit: (value) =>
-      setAppearance({ dnd: { ...appearance.dnd, quietStart: value || null } })
+    commit: (value) => setAppearance({ dnd: { ...appearance.dnd, quietStart: value || null } })
   })
   const end = useDraftField<string>({
     source: appearance.dnd.quietEnd ?? '',
-    commit: (value) =>
-      setAppearance({ dnd: { ...appearance.dnd, quietEnd: value || null } })
+    commit: (value) => setAppearance({ dnd: { ...appearance.dnd, quietEnd: value || null } })
   })
   return (
     <Row
@@ -255,4 +291,3 @@ function QuietHoursRow({
     </Row>
   )
 }
-

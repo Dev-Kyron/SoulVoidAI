@@ -59,9 +59,9 @@ export function AgentReadinessNotice(): JSX.Element | null {
               Agent mode is off — the AI can&apos;t use any of this
             </p>
             <p className="mt-0.5 text-[10px] leading-snug text-amber-200/80">
-              Permissions, MCP servers, and plugins shown below are only available to
-              the AI when Agent mode is on. Without it, the model answers as a plain
-              chat — no tool calls, no actions on your computer.
+              Permissions, MCP servers, and plugins shown below are only available to the AI when
+              Agent mode is on. Without it, the model answers as a plain chat — no tool calls, no
+              actions on your computer.
             </p>
           </div>
           <button
@@ -78,13 +78,12 @@ export function AgentReadinessNotice(): JSX.Element | null {
           <AlertTriangle size={14} className="mt-0.5 shrink-0 text-rose-300" />
           <div className="min-w-0 flex-1">
             <p className="text-[11px] font-semibold text-rose-100">
-              <span className="font-mono">{activeModel}</span> doesn&apos;t support tool
-              calling
+              <span className="font-mono">{activeModel}</span> doesn&apos;t support tool calling
             </p>
             <p className="mt-0.5 text-[10px] leading-snug text-rose-200/80">
               Even with Agent mode on, this model can&apos;t invoke tools. Switch to a
-              function-calling-capable model in Settings → Providers (Claude 3+, GPT-4o
-              / GPT-4-turbo, Gemini 1.5+, or a recent Llama 3 / Qwen 2.5+ locally).
+              function-calling-capable model in Settings → Providers (Claude 3+, GPT-4o /
+              GPT-4-turbo, Gemini 1.5+, or a recent Llama 3 / Qwen 2.5+ locally).
             </p>
           </div>
         </div>

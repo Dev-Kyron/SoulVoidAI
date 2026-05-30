@@ -11,7 +11,8 @@ describe('parseLocateResponse', () => {
   const H = 900
 
   it('parses a clean JSON locate result', () => {
-    const raw = '{"found": true, "x": 800, "y": 450, "confidence": 0.92, "label": "Send button", "reason": ""}'
+    const raw =
+      '{"found": true, "x": 800, "y": 450, "confidence": 0.92, "label": "Send button", "reason": ""}'
     const result = parseLocateResponse(raw, W, H)
     expect(result.ok).toBe(true)
     if (result.ok) {
@@ -23,7 +24,8 @@ describe('parseLocateResponse', () => {
   })
 
   it('returns a typed failure when the model says found=false', () => {
-    const raw = '{"found": false, "x": 0, "y": 0, "confidence": 0, "label": "", "reason": "no compose window visible"}'
+    const raw =
+      '{"found": false, "x": 0, "y": 0, "confidence": 0, "label": "", "reason": "no compose window visible"}'
     const result = parseLocateResponse(raw, W, H)
     expect(result.ok).toBe(false)
     if (!result.ok) {
@@ -34,7 +36,8 @@ describe('parseLocateResponse', () => {
   it('strips Gemini-style markdown fences before parsing', () => {
     // Gemini wraps JSON in ```json…``` even when the system prompt says not
     // to. Same defensive strip the screen-watch parser uses.
-    const raw = '```json\n{"found": true, "x": 100, "y": 200, "confidence": 0.5, "label": "icon", "reason": ""}\n```'
+    const raw =
+      '```json\n{"found": true, "x": 100, "y": 200, "confidence": 0.5, "label": "icon", "reason": ""}\n```'
     const result = parseLocateResponse(raw, W, H)
     expect(result.ok).toBe(true)
   })
@@ -43,7 +46,8 @@ describe('parseLocateResponse', () => {
     // Hallucinated coords past the screenshot can\'t drive the mouse off
     // the display — clamp into bounds rather than reject so the user
     // still has a preview to cancel.
-    const raw = '{"found": true, "x": 99999, "y": -50, "confidence": 0.4, "label": "x", "reason": ""}'
+    const raw =
+      '{"found": true, "x": 99999, "y": -50, "confidence": 0.4, "label": "x", "reason": ""}'
     const result = parseLocateResponse(raw, W, H)
     expect(result.ok).toBe(true)
     if (result.ok) {
@@ -65,7 +69,8 @@ describe('parseLocateResponse', () => {
     // A model that returned strings or null for x/y is broken — failing
     // closed here is safer than coercing to NaN→0 and clicking at the
     // top-left corner of the user\'s screen.
-    const raw = '{"found": true, "x": "hello", "y": null, "confidence": 0.5, "label": "x", "reason": ""}'
+    const raw =
+      '{"found": true, "x": "hello", "y": null, "confidence": 0.5, "label": "x", "reason": ""}'
     const result = parseLocateResponse(raw, W, H)
     expect(result.ok).toBe(false)
   })

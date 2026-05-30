@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>VoidSoul · Options</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      }
+      body {
+        margin: 0 auto;
+        padding: 32px;
+        max-width: 640px;
+        background: #0c0e1f;
+        color: #e6e8f5;
+        font-size: 14px;
+        line-height: 1.5;
+      }
+      h1 {
+        color: #c4b5fd;
+        font-size: 22px;
+        margin: 0 0 8px;
+      }
+      h2 {
+        font-size: 14px;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: #94a3b8;
+        margin: 28px 0 10px;
+      }
+      .card {
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 10px;
+        padding: 16px;
+      }
+      kbd {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 12px;
+        padding: 1px 6px;
+        border-radius: 4px;
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+      }
+      code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 12px;
+        background: rgba(255, 255, 255, 0.06);
+        padding: 1px 5px;
+        border-radius: 3px;
+      }
+      a {
+        color: #c4b5fd;
+      }
+      ol {
+        padding-left: 22px;
+      }
+      ol li {
+        margin-bottom: 6px;
+      }
+      .tag {
+        display: inline-block;
+        font-size: 10px;
+        padding: 2px 6px;
+        border-radius: 999px;
+        background: rgba(124, 58, 237, 0.14);
+        color: #c4b5fd;
+        margin-left: 8px;
+        vertical-align: middle;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>VoidSoul Browser Extension</h1>
+    <p>
+      Local-only bridge. Every request goes through the desktop app on this
+      machine. Nothing crosses the network unless the underlying provider you
+      picked in the desktop app does that itself.
+    </p>
+
+    <h2>One-time setup</h2>
+    <div class="card">
+      <ol>
+        <li>Open the VoidSoul desktop app.</li>
+        <li>
+          Go to <strong>Settings → Tools → Browser Extension</strong> and flip
+          <em>Enable bridge</em> on.
+        </li>
+        <li>
+          Copy your extension id from <code>chrome://extensions</code> (developer
+          mode on) and paste it into the Settings panel's "Install" prompt.
+        </li>
+        <li>Restart your browser. Done.</li>
+      </ol>
+      <p>
+        The Settings panel's <em>Copy install command</em> button writes the
+        right shell command for your OS — Mac/Linux register a JSON manifest,
+        Windows also writes a registry key under
+        <code>HKCU\Software\Google\Chrome\NativeMessagingHosts</code>.
+      </p>
+    </div>
+
+    <h2>Daily use</h2>
+    <div class="card">
+      <p>
+        Hotkey: <kbd id="hotkey">Alt+Shift+J</kbd>. Highlight some text first,
+        hit the hotkey, the overlay opens with that selection as context. Type
+        a question, press Enter, watch the reply stream in. <kbd>Esc</kbd>
+        closes the overlay.
+      </p>
+      <p>
+        You can also right-click any selection and pick <em>Ask VoidSoul about
+        &ldquo;&hellip;&rdquo;</em> — same surface, same context.
+      </p>
+    </div>
+
+    <h2>Privacy</h2>
+    <div class="card">
+      <p>
+        The extension talks to the desktop app through Chrome's
+        <code>nativeMessaging</code> API over a local
+        <code>stdio</code> pipe — no network sockets, no <code>fetch</code>,
+        no remote server. The host manifest only allows
+        <code>chrome-extension://&lt;your-id&gt;/</code> as a sender, so
+        other extensions can't piggyback on the bridge.
+      </p>
+      <p>
+        The desktop app's local IPC socket sits at a per-OS path
+        (<code>~/Library/Application Support/VoidSoul AI Companion/voidsoul-extension.sock</code>
+        on macOS, an equivalent Windows named pipe), with file permissions
+        scoped to your user account.
+      </p>
+    </div>
+
+    <script>
+      if (navigator.platform.includes('Mac')) {
+        document.getElementById('hotkey').textContent = '⌥⇧J'
+      }
+    </script>
+  </body>
+</html>

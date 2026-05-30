@@ -94,9 +94,9 @@ export function SmokeTestPanel(): JSX.Element {
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0 flex-1 text-[11px] leading-snug text-slate-400">
             Click <span className="font-semibold text-slate-200">Run smoke test</span> and the app
-            will read, list, write, run a shell command, and inspect any MCP filesystem servers — the
-            same operations the AI would attempt. Each row reports pass, fail (with the underlying
-            error), or skipped (when the matching permission is off).
+            will read, list, write, run a shell command, and inspect any MCP filesystem servers —
+            the same operations the AI would attempt. Each row reports pass, fail (with the
+            underlying error), or skipped (when the matching permission is off).
           </div>
           <button
             type="button"
@@ -104,7 +104,9 @@ export function SmokeTestPanel(): JSX.Element {
             disabled={running}
             className={cn(
               'no-drag inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-[11px] font-medium text-slate-100 transition',
-              running ? 'cursor-wait opacity-60' : 'hover:border-[var(--accent-ring)] hover:bg-white/10'
+              running
+                ? 'cursor-wait opacity-60'
+                : 'hover:border-[var(--accent-ring)] hover:bg-white/10'
             )}
           >
             {running ? (
@@ -135,7 +137,12 @@ export function SmokeTestPanel(): JSX.Element {
               </span>
               {ranAt && (
                 <span className="ml-auto">
-                  Last run: {ranAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                  Last run:{' '}
+                  {ranAt.toLocaleTimeString([], {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit'
+                  })}
                 </span>
               )}
             </div>
@@ -155,7 +162,12 @@ export function SmokeTestPanel(): JSX.Element {
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
                         <p className="text-[12px] font-medium text-white">{check.label}</p>
-                        <span className={cn('text-[10px] font-semibold uppercase tracking-wider', style.text)}>
+                        <span
+                          className={cn(
+                            'text-[10px] font-semibold uppercase tracking-wider',
+                            style.text
+                          )}
+                        >
                           {style.label}
                         </span>
                       </div>

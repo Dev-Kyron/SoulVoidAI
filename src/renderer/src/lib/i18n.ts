@@ -9,9 +9,10 @@
  *    when the locale flips is cheap.
  *
  * Strings live in a flat namespaced map per language (`en`, `es`, `de`,
- * `ja`). `t(key, params?)` returns the active-locale string, falling back
- * to English when a key is missing in the active locale. Simple `{name}`
- * substitution is supported for dynamic values.
+ * `ja`, `zh`, `ko`, `fr`, `pt`). `t(key, params?)` returns the
+ * active-locale string, falling back to English when a key is missing
+ * in the active locale. Simple `{name}` substitution is supported for
+ * dynamic values.
  *
  * The active locale is read from `appearance.locale` in the config store
  * (set in AppearanceSettings). `'system'` resolves via `navigator.language`.
@@ -24,21 +25,42 @@ import en from '../locales/en'
 import es from '../locales/es'
 import de from '../locales/de'
 import ja from '../locales/ja'
+import zh from '../locales/zh'
+import ko from '../locales/ko'
+import fr from '../locales/fr'
+import pt from '../locales/pt'
 
 type Catalog = Record<string, string>
 
-const CATALOGS: Record<Exclude<LocaleCode, 'system'>, Catalog> = { en, es, de, ja }
+const CATALOGS: Record<Exclude<LocaleCode, 'system'>, Catalog> = {
+  en,
+  es,
+  de,
+  ja,
+  zh,
+  ko,
+  fr,
+  pt
+}
 
 /**
- * Maps the OS / browser `navigator.language` (e.g. `"es-ES"`, `"en-US"`)
- * down to one of our supported short codes. Unknown locales fall back to
- * English so we never render a raw key.
+ * The set of supported short codes, derived from CATALOGS so adding a new
+ * locale file + import is the only edit needed — `resolveLocale` and the
+ * type system both stay in sync automatically.
+ */
+const SUPPORTED_LOCALES = Object.keys(CATALOGS) as Array<Exclude<LocaleCode, 'system'>>
+
+/**
+ * Maps the OS / browser `navigator.language` (e.g. `"es-ES"`, `"en-US"`,
+ * `"zh-CN"`) down to one of our supported short codes. Unknown locales
+ * fall back to English so we never render a raw key.
  */
 function resolveLocale(locale: LocaleCode): Exclude<LocaleCode, 'system'> {
   if (locale !== 'system') return locale
   const sys = (navigator.language || 'en').slice(0, 2).toLowerCase()
-  if (sys === 'es' || sys === 'de' || sys === 'ja') return sys
-  return 'en'
+  return (SUPPORTED_LOCALES as string[]).includes(sys)
+    ? (sys as Exclude<LocaleCode, 'system'>)
+    : 'en'
 }
 
 let activeLocale: Exclude<LocaleCode, 'system'> = 'en'
@@ -66,9 +88,11 @@ const unsubscribeConfig = useConfigStore.subscribe((state, prev) => {
 // pile up across edits. Guarded so production builds (no `import.meta.hot`)
 // stay clean of the dev-only call. Cast inline so we don't have to drag
 // `vite/client` types into the renderer's tsconfig.
-const hot = (import.meta as ImportMeta & {
-  hot?: { dispose: (cb: () => void) => void }
-}).hot
+const hot = (
+  import.meta as ImportMeta & {
+    hot?: { dispose: (cb: () => void) => void }
+  }
+).hot
 if (hot) {
   hot.dispose(() => {
     unsubscribeConfig()
@@ -110,7 +134,7 @@ export function useT(): (key: string, params?: Record<string, string | number>) 
   return t
 }
 
-/** The resolved short locale code (`'en' | 'es' | 'de' | 'ja'`). */
+/** The resolved short locale code (`'en' | 'es' | 'de' | 'ja' | 'zh' | 'ko' | 'fr' | 'pt'`). */
 export function currentLocale(): Exclude<LocaleCode, 'system'> {
   return activeLocale
 }

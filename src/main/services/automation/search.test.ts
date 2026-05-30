@@ -23,8 +23,9 @@ describe('runWebSearch', () => {
   beforeEach(() => {
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () =>
-        new Response(DDG_FIXTURE, { status: 200, headers: { 'Content-Type': 'text/html' } })
+      vi.fn(
+        async () =>
+          new Response(DDG_FIXTURE, { status: 200, headers: { 'Content-Type': 'text/html' } })
       )
     )
   })
@@ -72,14 +73,15 @@ describe('runWebSearch', () => {
   it('uses Tavily when a key is supplied and it succeeds', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () =>
-        new Response(
-          JSON.stringify({
-            answer: 'The quick answer.',
-            results: [{ title: 'T', url: 'https://t.example', content: 'snippet' }]
-          }),
-          { status: 200, headers: { 'Content-Type': 'application/json' } }
-        )
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              answer: 'The quick answer.',
+              results: [{ title: 'T', url: 'https://t.example', content: 'snippet' }]
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } }
+          )
       )
     )
     const out = await runWebSearch('q', 5, 'fake-key')

@@ -136,7 +136,9 @@ describe.skipIf(!RUN)('history migrator', () => {
     const mod = await loadFresh()
     const a = mod.createThread('a')
     const b = mod.createThread('b')
-    mod.saveThread(a.id, [{ id: 'm1', role: 'user', content: 'x', createdAt: '2026-01-01T00:00:00.000Z' }])
+    mod.saveThread(a.id, [
+      { id: 'm1', role: 'user', content: 'x', createdAt: '2026-01-01T00:00:00.000Z' }
+    ])
     const after = mod.deleteThread(a.id)
     expect(after.summaries.some((t) => t.id === a.id)).toBe(false)
     expect(after.summaries.some((t) => t.id === b.id)).toBe(true)

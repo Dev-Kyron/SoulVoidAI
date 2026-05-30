@@ -34,9 +34,7 @@ describe('estimateTokens', () => {
         id: 'm',
         ...baseMsg,
         content: 'hello world', // 11 chars
-        attachments: [
-          { id: 'a', kind: 'text', name: 'notes.txt', text: 'b'.repeat(339) }
-        ]
+        attachments: [{ id: 'a', kind: 'text', name: 'notes.txt', text: 'b'.repeat(339) }]
       }
     ])
     // 11 + 339 = 350 chars → 100 tokens.
@@ -61,9 +59,7 @@ describe('estimateTurnTokens', () => {
       {
         role: 'assistant',
         content: '',
-        toolCalls: [
-          { id: 't1', name: 'web_fetch', args: { url: 'a'.repeat(100) } }
-        ]
+        toolCalls: [{ id: 't1', name: 'web_fetch', args: { url: 'a'.repeat(100) } }]
       },
       {
         role: 'tool',

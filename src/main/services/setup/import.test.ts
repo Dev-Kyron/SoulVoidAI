@@ -45,11 +45,7 @@ vi.mock('./detect', () => ({
 import { addServer, listServers } from '../mcp/manager'
 import { setApiKey } from '../storage/keys'
 import { runSetupDetection } from './detect'
-import {
-  importClaudeDesktopServers,
-  importCursorServers,
-  importEnvKey
-} from './import'
+import { importClaudeDesktopServers, importCursorServers, importEnvKey } from './import'
 import type { SetupReport } from '@shared/types'
 
 const addServerMock = vi.mocked(addServer)
@@ -178,8 +174,22 @@ describe('importClaudeDesktopServers', () => {
           installed: true,
           path: '/fake',
           mcpServers: [
-            { name: 'a', command: 'echo', args: [], env: {}, source: 'claude-desktop', missingEnv: [] },
-            { name: 'b', command: 'echo', args: [], env: {}, source: 'claude-desktop', missingEnv: [] }
+            {
+              name: 'a',
+              command: 'echo',
+              args: [],
+              env: {},
+              source: 'claude-desktop',
+              missingEnv: []
+            },
+            {
+              name: 'b',
+              command: 'echo',
+              args: [],
+              env: {},
+              source: 'claude-desktop',
+              missingEnv: []
+            }
           ]
         }
       })
@@ -201,7 +211,14 @@ describe('importClaudeDesktopServers', () => {
           installed: true,
           path: '/fake',
           mcpServers: [
-            { name: 'twice', command: 'echo', args: [], env: {}, source: 'claude-desktop', missingEnv: [] }
+            {
+              name: 'twice',
+              command: 'echo',
+              args: [],
+              env: {},
+              source: 'claude-desktop',
+              missingEnv: []
+            }
           ]
         }
       })
@@ -223,23 +240,35 @@ describe('importCursorServers', () => {
           installed: true,
           path: '/c',
           mcpServers: [
-            { name: 'fs', command: 'claude-cmd', args: [], env: {}, source: 'claude-desktop', missingEnv: [] }
+            {
+              name: 'fs',
+              command: 'claude-cmd',
+              args: [],
+              env: {},
+              source: 'claude-desktop',
+              missingEnv: []
+            }
           ]
         },
         cursor: {
           installed: true,
           path: '/cur',
           mcpServers: [
-            { name: 'fs', command: 'cursor-cmd', args: [], env: {}, source: 'cursor', missingEnv: [] }
+            {
+              name: 'fs',
+              command: 'cursor-cmd',
+              args: [],
+              env: {},
+              source: 'cursor',
+              missingEnv: []
+            }
           ]
         }
       })
     )
     const result = await importCursorServers(['fs'])
     expect(result.imported).toBe(1)
-    expect(addServerMock).toHaveBeenCalledWith(
-      expect.objectContaining({ command: 'cursor-cmd' })
-    )
+    expect(addServerMock).toHaveBeenCalledWith(expect.objectContaining({ command: 'cursor-cmd' }))
   })
 })
 
@@ -254,7 +283,7 @@ describe('importEnvKey', () => {
   })
 
   it('walks aliases — GOOGLE_API_KEY then GEMINI_API_KEY for gemini', () => {
-    vi.stubEnv('GOOGLE_API_KEY', '')          // empty — skip
+    vi.stubEnv('GOOGLE_API_KEY', '') // empty — skip
     vi.stubEnv('GEMINI_API_KEY', 'AIza-real') // populated — use this one
     const result = importEnvKey('gemini')
     expect(result.success).toBe(true)

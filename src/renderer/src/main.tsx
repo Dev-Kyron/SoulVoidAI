@@ -21,13 +21,7 @@ const params = new URLSearchParams(window.location.search)
 const view = params.get('view')
 
 const Root =
-  view === 'settings' ? (
-    <SettingsRoot />
-  ) : view === 'click-preview' ? (
-    <ClickPreviewRoot />
-  ) : (
-    <App />
-  )
+  view === 'settings' ? <SettingsRoot /> : view === 'click-preview' ? <ClickPreviewRoot /> : <App />
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>{Root}</React.StrictMode>

@@ -340,11 +340,7 @@ export function SpiritAvatar({
   const width = Math.round(size * 0.78)
 
   return (
-    <div
-      className="relative"
-      style={{ width, height: size, opacity: dnd ? 0.55 : 1 }}
-      aria-hidden
-    >
+    <div className="relative" style={{ width, height: size, opacity: dnd ? 0.55 : 1 }} aria-hidden>
       {/* Soft accent halo behind the figure — sits behind the dots and
        *  brightens with state. The ellipse is biased toward the head so
        *  the glow feels like aura rather than a flat backdrop. */}
@@ -419,9 +415,7 @@ export function SpiritAvatar({
                 style={
                   eyeAlive
                     ? {
-                        animation: `spirit-eye-pulse ${
-                          speaking ? 0.9 : 2.4
-                        }s ease-in-out infinite`
+                        animation: `spirit-eye-pulse ${speaking ? 0.9 : 2.4}s ease-in-out infinite`
                       }
                     : undefined
                 }

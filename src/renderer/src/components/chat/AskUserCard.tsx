@@ -233,9 +233,7 @@ function DecisionCard({ payload }: { payload: AskUserPayload }): JSX.Element {
                   <span
                     className={cn(
                       'mt-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border transition',
-                      isSelected
-                        ? 'border-[var(--accent)] bg-[var(--accent)]'
-                        : 'border-white/30'
+                      isSelected ? 'border-[var(--accent)] bg-[var(--accent)]' : 'border-white/30'
                     )}
                   >
                     {isSelected && <Check size={9} className="text-white" />}
@@ -357,9 +355,7 @@ function DecisionCard({ payload }: { payload: AskUserPayload }): JSX.Element {
         </div>
       )}
 
-      {submitted && (
-        <p className="mt-2 text-[10px] italic text-slate-500">Answer sent.</p>
-      )}
+      {submitted && <p className="mt-2 text-[10px] italic text-slate-500">Answer sent.</p>}
     </div>
   )
 }

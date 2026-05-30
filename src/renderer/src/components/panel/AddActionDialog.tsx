@@ -11,11 +11,12 @@ import { useDialog } from '../../lib/useDialog'
 import { cn } from '../../lib/utils'
 import type { CustomActionKind } from '@shared/types'
 
-const KINDS: Array<{ id: CustomActionKind; label: string; icon: typeof Box; placeholder: string }> = [
-  { id: 'app', label: 'App', icon: Box, placeholder: 'App name or path' },
-  { id: 'url', label: 'Website', icon: Globe, placeholder: 'https://…' },
-  { id: 'folder', label: 'Folder', icon: Folder, placeholder: 'Folder path or ~downloads' }
-]
+const KINDS: Array<{ id: CustomActionKind; label: string; icon: typeof Box; placeholder: string }> =
+  [
+    { id: 'app', label: 'App', icon: Box, placeholder: 'App name or path' },
+    { id: 'url', label: 'Website', icon: Globe, placeholder: 'https://…' },
+    { id: 'folder', label: 'Folder', icon: Folder, placeholder: 'Folder path or ~downloads' }
+  ]
 
 const FIELD =
   'w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-[12px] text-slate-100 outline-none transition focus:border-[var(--accent-ring)] placeholder:text-slate-600'

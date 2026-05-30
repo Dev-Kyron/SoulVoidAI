@@ -1,0 +1,11 @@
+{
+  "id": "example-discord-send",
+  "label": "Discord — Send message button",
+  "prompt": "Send button in Discord compose box",
+  "category": "labeled-native",
+  "inWindow": "Discord",
+  "referenceScreenshotPath": null,
+  "groundTruth": null,
+  "notes": "PLACEHOLDER. Open Discord, focus a channel where you can compose, ensure the compose box has at least one character, then capture this benchmark via Settings → Experimental → Click Benchmark → Capture. UIA should match this 100%; vision should also land cleanly. Useful baseline for 'easy native button' case.",
+  "capturedAt": null
+}

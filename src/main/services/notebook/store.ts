@@ -76,7 +76,8 @@ export function createNotebook(title?: string): Notebook {
     {
       id: randomUUID(),
       kind: 'markdown',
-      input: '## New notebook\n\nWrite, run, chain cells. Reference earlier outputs with `{{cell-1}}`.',
+      input:
+        '## New notebook\n\nWrite, run, chain cells. Reference earlier outputs with `{{cell-1}}`.',
       output: '',
       status: 'idle'
     }

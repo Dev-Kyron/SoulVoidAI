@@ -153,9 +153,7 @@ export interface ClassifyOptions {
  * or (c) the request was aborted. All three are non-fatal — the caller
  * simply doesn't write a new row this round.
  */
-export async function classifySentiment(
-  opts: ClassifyOptions
-): Promise<ClassifierResult | null> {
+export async function classifySentiment(opts: ClassifyOptions): Promise<ClassifierResult | null> {
   const picked = pickSentimentProvider()
   if (!picked) {
     log('info', 'system', '[sentiment] no usable provider — skipping classification')
@@ -166,12 +164,10 @@ export async function classifySentiment(
   // Trim messages to the last 12 turns and cap individual lengths so the
   // classifier prompt stays small. Sentiment doesn't need full context;
   // the gist is enough.
-  const window = opts.messages
-    .slice(-12)
-    .map((m) => ({
-      role: m.role,
-      content: (m.content ?? '').slice(0, 600)
-    })) as ChatTurn[]
+  const window = opts.messages.slice(-12).map((m) => ({
+    role: m.role,
+    content: (m.content ?? '').slice(0, 600)
+  })) as ChatTurn[]
 
   const signal = opts.signal ?? new AbortController().signal
   try {

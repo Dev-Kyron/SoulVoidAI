@@ -48,7 +48,12 @@ const MODE_ICONS: Record<ModeId, LucideIcon> = {
 
 const STYLE_OPTIONS: Array<{ id: NexusStyle; name: string; desc: string; icon: LucideIcon }> = [
   { id: 'simple', name: 'Simple', desc: 'A clean, phone-style app launcher.', icon: LayoutGrid },
-  { id: 'advanced', name: 'Advanced', desc: 'The full radial HUD with live telemetry.', icon: Radar }
+  {
+    id: 'advanced',
+    name: 'Advanced',
+    desc: 'The full radial HUD with live telemetry.',
+    icon: Radar
+  }
 ]
 
 /** localStorage key for the in-progress "try these" checklist state. */
@@ -145,8 +150,8 @@ function SetupScreen(): JSX.Element {
 function TryThesePanel({ onDone }: { onDone: () => void }): JSX.Element {
   // Subscribe to the bits of state each task watches. Cheap selectors —
   // each is a single value-equality check.
-  const messageCount = useChatStore((s) =>
-    s.messages.filter((m) => m.role === 'user' && m.id !== WELCOME_MESSAGE_ID).length
+  const messageCount = useChatStore(
+    (s) => s.messages.filter((m) => m.role === 'user' && m.id !== WELCOME_MESSAGE_ID).length
   )
   const globalSearchOpen = useUiStore((s) => s.globalSearchOpen)
   const voiceStatus = useVoiceInputStore((s) => s.status)
@@ -180,9 +185,7 @@ function TryThesePanel({ onDone }: { onDone: () => void }): JSX.Element {
         action: {
           label: 'Focus composer',
           run: () => {
-            const el = document.querySelector<HTMLTextAreaElement>(
-              'textarea[placeholder]'
-            )
+            const el = document.querySelector<HTMLTextAreaElement>('textarea[placeholder]')
             el?.focus()
           }
         }
@@ -275,9 +278,7 @@ function TryThesePanel({ onDone }: { onDone: () => void }): JSX.Element {
               key={task.id}
               className={cn(
                 'flex items-start gap-3 rounded-xl border p-2.5 transition',
-                done
-                  ? 'border-emerald-400/30 bg-emerald-500/5'
-                  : 'border-white/10 hover:bg-white/5'
+                done ? 'border-emerald-400/30 bg-emerald-500/5' : 'border-white/10 hover:bg-white/5'
               )}
             >
               <span

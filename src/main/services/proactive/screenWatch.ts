@@ -30,7 +30,7 @@ import { getConfig } from '../storage/config'
 import { isQuietNow } from '@shared/types'
 import { log } from '../logger'
 import { invokeCompletion } from '../ai'
-import { speakProactiveAdHoc } from './watchTasks'
+import { getIdleMinutes, speakProactiveAdHoc } from './watchTasks'
 import type { ChatTurn, ScreenWatchConfig, ScreenWatchStatus } from '@shared/types'
 import type { ToneTag } from '@shared/voiceMarkers'
 
@@ -201,8 +201,7 @@ function parseDecision(text: string): Decision {
   try {
     const json = JSON.parse(cleaned) as Record<string, unknown>
     const speak = json.speak === true
-    const content =
-      typeof json.content === 'string' ? json.content.trim().slice(0, 300) : ''
+    const content = typeof json.content === 'string' ? json.content.trim().slice(0, 300) : ''
     const toneRaw = typeof json.tone === 'string' ? json.tone.toLowerCase() : 'warm'
     const validTones: ToneTag[] = [
       'casual',
@@ -271,6 +270,24 @@ async function tick(): Promise<void> {
   resetDailyCounterIfNeeded()
   if (dailyCalls >= watch.dailyCap) {
     lastReason = `daily cap reached (${watch.dailyCap} calls)`
+    return
+  }
+
+  // v2.0 round-7 perf — Gate 7: AFK guard. If the user hasn't interacted
+  // with VoidSoul in the last 15 minutes they're almost certainly away
+  // from the keyboard; firing the vision provider (real money — cloud
+  // API call per tick) at an unchanging screen burns budget the user
+  // never sees. The `tooSimilar` check downstream would discard the
+  // result anyway. This pairs with the daily cap as a SECOND-class
+  // cost guard: cap = "you've spent enough today", AFK = "you're not
+  // even watching right now".
+  //
+  // Threshold of 15min mirrors the idle-duration watch's default
+  // "long idle" sense — chosen high enough that a quick coffee break
+  // doesn't pause the loop the user actually wants running.
+  const AFK_THRESHOLD_MIN = 15
+  if (getIdleMinutes() >= AFK_THRESHOLD_MIN) {
+    lastReason = `user appears AFK (${getIdleMinutes()}min idle)`
     return
   }
 
@@ -377,4 +394,3 @@ async function tick(): Promise<void> {
     lastReason = 'gated-broadcast suppressed (DND/mute/master?)'
   }
 }
-

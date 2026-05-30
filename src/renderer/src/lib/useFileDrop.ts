@@ -19,11 +19,48 @@ import { vs } from './bridge'
 
 /** Same extension table the file-picker uses — kept narrow to avoid surprises. */
 const TEXT_EXTENSIONS = new Set([
-  '.txt', '.md', '.markdown', '.json', '.yaml', '.yml', '.toml', '.csv', '.log', '.xml',
-  '.html', '.css', '.scss', '.js', '.jsx', '.ts', '.tsx', '.py', '.rb', '.go', '.rs',
-  '.java', '.c', '.h', '.cpp', '.hpp', '.cs', '.swift', '.kt', '.kts', '.sh', '.bash',
-  '.zsh', '.ps1', '.bat', '.sql', '.graphql', '.proto', '.dockerfile', '.env.example',
-  '.gitignore', '.editorconfig'
+  '.txt',
+  '.md',
+  '.markdown',
+  '.json',
+  '.yaml',
+  '.yml',
+  '.toml',
+  '.csv',
+  '.log',
+  '.xml',
+  '.html',
+  '.css',
+  '.scss',
+  '.js',
+  '.jsx',
+  '.ts',
+  '.tsx',
+  '.py',
+  '.rb',
+  '.go',
+  '.rs',
+  '.java',
+  '.c',
+  '.h',
+  '.cpp',
+  '.hpp',
+  '.cs',
+  '.swift',
+  '.kt',
+  '.kts',
+  '.sh',
+  '.bash',
+  '.zsh',
+  '.ps1',
+  '.bat',
+  '.sql',
+  '.graphql',
+  '.proto',
+  '.dockerfile',
+  '.env.example',
+  '.gitignore',
+  '.editorconfig'
 ])
 
 /** Hard cap on a single dropped text file — same as the IPC pick path. */
@@ -68,17 +105,20 @@ export function useFileDrop(): FileDropHandlers {
   const addPdf = useChatStore((s) => s.addPdfAttachment)
   const pushToast = useUiStore((s) => s.pushToast)
 
-  const onDragOver = useCallback((event: DragEvent): void => {
-    // Only react when actual files are being dragged — skip page-internal
-    // drags (text selection drag, motion-component reorders, etc.).
-    const hasFiles =
-      event.dataTransfer?.types?.includes('Files') ||
-      Array.from(event.dataTransfer?.items ?? []).some((i) => i.kind === 'file')
-    if (!hasFiles) return
-    event.preventDefault()
-    event.dataTransfer.dropEffect = 'copy'
-    if (!isDragging) setDragging(true)
-  }, [isDragging])
+  const onDragOver = useCallback(
+    (event: DragEvent): void => {
+      // Only react when actual files are being dragged — skip page-internal
+      // drags (text selection drag, motion-component reorders, etc.).
+      const hasFiles =
+        event.dataTransfer?.types?.includes('Files') ||
+        Array.from(event.dataTransfer?.items ?? []).some((i) => i.kind === 'file')
+      if (!hasFiles) return
+      event.preventDefault()
+      event.dataTransfer.dropEffect = 'copy'
+      if (!isDragging) setDragging(true)
+    },
+    [isDragging]
+  )
 
   const onDragLeave = useCallback((event: DragEvent): void => {
     // Only clear when the drag actually exits the drop zone (the related

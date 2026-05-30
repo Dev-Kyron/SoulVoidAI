@@ -1,0 +1,19 @@
+/*
+ * Fallback overlay stylesheet — Shadow DOM inlines its own copy in content.js
+ * so styles still land on pages with restrictive CSP. This file is referenced
+ * from manifest.json's content_scripts.css solely as a defence-in-depth
+ * fallback: if a page strips our shadow root (extremely rare), the overlay
+ * still picks up these rules from the page's regular cascade.
+ *
+ * Keep this file thin — the canonical styles live inside content.js's
+ * OVERLAY_CSS constant. If you change something there, mirror it here.
+ */
+#voidsoul-overlay-host {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 2147483647;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}

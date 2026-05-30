@@ -58,9 +58,9 @@ describe.skipIf(!RUN)('db()', () => {
     expect(names).toContain('usage_entries')
     expect(names).toContain('usage_budget')
 
-    const version = handle
-      .prepare(`SELECT value FROM meta WHERE key = 'schema_version'`)
-      .get() as { value: string }
+    const version = handle.prepare(`SELECT value FROM meta WHERE key = 'schema_version'`).get() as {
+      value: string
+    }
     expect(Number(version.value)).toBeGreaterThanOrEqual(1)
     mod.closeDb()
   })

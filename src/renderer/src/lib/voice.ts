@@ -63,10 +63,16 @@ import {
 let currentSpoken: string | null = null
 const currentSpokenListeners = new Set<(s: string | null) => void>()
 
-function setCurrentSpoken(value: string | null): void {
+function setCurrentSpoken(value: string | null, opts?: { silent?: boolean }): void {
   if (value === currentSpoken) return
   currentSpoken = value
   currentSpokenListeners.forEach((listener) => listener(value))
+  // `silent` lets a caller batch a counter change + currentSpoken change
+  // into one speaker-state notify — e.g. the warming → speaking transition
+  // in playNext, where decPendingSpeech() and setCurrentSpoken() would
+  // otherwise fire notify twice in the same microtask (and re-render
+  // every visible SpeakerButton twice).
+  if (!opts?.silent) notifySpeakerState()
 }
 
 export function subscribeCurrentSpoken(callback: (sentence: string | null) => void): () => void {
@@ -76,6 +82,66 @@ export function subscribeCurrentSpoken(callback: (sentence: string | null) => vo
 
 export function getCurrentSpoken(): string | null {
   return currentSpoken
+}
+
+/* ----------------------- speaker state machine ------------------------ *
+ *
+ * Three-state view of "is the voice subsystem doing anything?" used by the
+ * per-bubble Read Aloud button so a long Piper synth doesn't leave the user
+ * staring at a dead button. Piper's first-sentence synth can take 1-3s on
+ * a cold cache or for long inputs — without a `warming` state the button
+ * stayed in `idle` until audio actually played, which read as "broken".
+ *
+ *   idle     — nothing happening
+ *   warming  — synth in flight OR decoded audio queued but not yet playing
+ *   speaking — currentSpoken !== null (audio actively playing)
+ *
+ * The counter is bumped in `queueOne` BEFORE the async synth and
+ * decremented exactly once per item: in `playNext` just before
+ * `setCurrentSpoken` (transition to speaking) OR in `queueOne`'s finally
+ * when the work bypassed the audio queue (synth error / zero bytes /
+ * superseded by stopSpeaking via the generation check).
+ * --------------------------------------------------------------------- */
+
+export type SpeakerState = 'idle' | 'warming' | 'speaking'
+
+let pendingSpeechCount = 0
+const speakerStateListeners = new Set<(state: SpeakerState) => void>()
+
+function notifySpeakerState(): void {
+  const state = getSpeakerState()
+  speakerStateListeners.forEach((listener) => listener(state))
+}
+
+function setPendingSpeech(value: number, opts?: { silent?: boolean }): void {
+  const next = Math.max(0, value)
+  if (next === pendingSpeechCount) return
+  pendingSpeechCount = next
+  if (!opts?.silent) notifySpeakerState()
+}
+
+function bumpPendingSpeech(): void {
+  setPendingSpeech(pendingSpeechCount + 1)
+}
+
+/** `silent` skips the speaker-state broadcast — used by playNext at the
+ *  warming→speaking hand-off so the paired setCurrentSpoken() fires the
+ *  single combined notify for both state changes. */
+function decPendingSpeech(opts?: { silent?: boolean }): void {
+  setPendingSpeech(pendingSpeechCount - 1, opts)
+}
+
+export function getSpeakerState(): SpeakerState {
+  if (currentSpoken !== null) return 'speaking'
+  if (pendingSpeechCount > 0) return 'warming'
+  return 'idle'
+}
+
+export function subscribeSpeakerState(callback: (state: SpeakerState) => void): () => void {
+  speakerStateListeners.add(callback)
+  return () => {
+    speakerStateListeners.delete(callback)
+  }
 }
 
 /* ----------------------- text → speech-friendly ----------------------- */
@@ -251,6 +317,9 @@ class AudioQueue {
       )
       console.warn('[voice] decodeAudioData failed', err)
       // Skip to the next chunk so the queue doesn't lock up.
+      // This item never reached the hand-off in the success path, so
+      // decrement here to keep the speaker counter balanced.
+      decPendingSpeech()
       this.current = null
       this.currentGain = null
       void this.playNext()
@@ -285,6 +354,13 @@ class AudioQueue {
 
     this.current = source
     this.currentGain = gain
+    // Hand-off point: decrement the pending counter BEFORE flipping
+    // currentSpoken so the speaker state goes 'warming' → 'speaking'
+    // in a single tick instead of briefly visiting 'idle'. Both writes
+    // produce the SAME derived state (currentSpoken !== null), so we
+    // silence the decrement's notify and let setCurrentSpoken's notify
+    // be the single fan-out to subscribers.
+    decPendingSpeech({ silent: true })
     setCurrentSpoken(item.display)
 
     // ---- diagnostic: currentTime + onended watchdog ----
@@ -355,6 +431,10 @@ class AudioQueue {
       this.current = null
       this.currentGain = null
     }
+    // Drop pending items + balance the pendingSpeech counter for each one
+    // that was waiting in line — their hand-off in playNext will never
+    // fire, so we settle the books here.
+    for (let i = 0; i < this.pending.length; i++) decPendingSpeech()
     this.pending = []
     setCurrentSpoken(null)
   }
@@ -451,33 +531,62 @@ function queueOne(
   tone?: ToneTag
 ): void {
   const myGen = synthGeneration
+  // Bump immediately (not inside the .then) so the Read Aloud button
+  // flips to its "warming" state on the same tick as the click — the
+  // synthChain may sit behind a previous segment for hundreds of ms
+  // before our .then even fires, and the user needs feedback NOW.
+  bumpPendingSpeech()
   synthChain = synthChain.then(async () => {
     // Bail if stopSpeaking() bumped the generation while we were waiting
     // in line — without this guard, late-arriving synth bytes would
     // queue audio after the user explicitly stopped.
-    if (myGen !== synthGeneration) return
+    if (myGen !== synthGeneration) {
+      decPendingSpeech()
+      return
+    }
+    let handedToQueue = false
     try {
       console.info(
         `[voice] synth start (${persona}${tone ? `/${tone}` : ''}, ${text.length} chars)`
       )
-      const bytes = await vs.voice.synthesise({ persona, text, rate, tone })
+      const result = await vs.voice.synthesise({ persona, text, rate, tone })
       if (myGen !== synthGeneration) {
         console.info('[voice] synth result dropped — superseded by stop')
         return
       }
+      if (!result.ok) {
+        // v2.0 polish — main now returns a structured error instead of
+        // throwing, so we log a warn (not error) and bail. The "No voice
+        // installed for the <persona> persona" branch is the common case
+        // on fresh installs that haven't run `npm run piper` yet; no
+        // need to spam the log store with errors for that.
+        void vs.logs.write('warn', 'system', `[voice] synth skipped: ${result.error}`)
+        return
+      }
+      const bytes = result.bytes
       if (bytes.length === 0) {
-        void vs.logs.write('warn', 'system', '[voice] synth returned 0 bytes — piper produced no audio')
+        void vs.logs.write(
+          'warn',
+          'system',
+          '[voice] synth returned 0 bytes — piper produced no audio'
+        )
         return
       }
       console.info(`[voice] synth ok — ${bytes.length} bytes, enqueuing audio`)
       // Pass raw bytes directly — AudioQueue uses Web Audio API's
       // decodeAudioData, which wants an ArrayBuffer it can own. We
-      // skip the Blob/URL hop entirely.
+      // skip the Blob/URL hop entirely. The pendingSpeech decrement
+      // moves to playNext (handedToQueue=true skips the finally's
+      // decrement) so the speaker stays in 'warming' until audio
+      // ACTUALLY plays, not just until synth completes.
       audioQueue.enqueue({ bytes, display: displayText, volume })
+      handedToQueue = true
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       void vs.logs.write('error', 'system', `[voice] synth failed: ${msg}`)
       console.warn('[voice] piper synthesis failed', err)
+    } finally {
+      if (!handedToQueue) decPendingSpeech()
     }
   })
 }
@@ -598,20 +707,38 @@ export class StreamingSpeaker {
   private readonly rate: number
   private readonly volume: number
   private readonly fallbackOnNoTags: boolean
+  private readonly speakAll: boolean
+  /**
+   * Buffer of un-spoken text accumulated in speakAll mode between
+   * sentence flushes. Tagged-mode uses the extractor for segmenting;
+   * speakAll cuts on sentence boundaries here instead so the model's
+   * `<voice>` markup is ignored. Strips voice tags from the output so
+   * they don't leak into Piper as literal characters.
+   */
+  private speakAllBuffer = ''
 
   /**
    * @param voice  active voice config — persona / rate / volume
-   * @param opts   `fallbackOnNoTags` (default true) controls whether
-   *               flush() should emit a soft "speak the first paragraph"
-   *               fallback if the model never wrapped any segment in
-   *               <voice> tags. Set false for fully-agentic replies
-   *               where pure silence on untagged output is correct.
+   * @param opts.fallbackOnNoTags  default true. Controls whether flush()
+   *               emits a soft "speak the first paragraph" fallback if
+   *               the model never wrapped any segment in <voice> tags.
+   *               Set false for fully-agentic replies where pure silence
+   *               on untagged output is correct. Ignored when speakAll
+   *               is true (speakAll always speaks everything).
+   * @param opts.speakAll  v2.0 — conversation-mode flag. When true,
+   *               every sentence of the reply is spoken regardless of
+   *               <voice> markup. The model can't know in conv mode
+   *               that the user is listening to the whole reply (no
+   *               text surface to read), so silence on untagged text
+   *               would feel broken. Cuts on sentence boundaries to
+   *               keep Piper's per-segment cold-start cost low.
    */
-  constructor(voice: VoiceConfig, opts: { fallbackOnNoTags?: boolean } = {}) {
+  constructor(voice: VoiceConfig, opts: { fallbackOnNoTags?: boolean; speakAll?: boolean } = {}) {
     this.persona = voice.persona
     this.rate = voice.rate
     this.volume = voice.volume
     this.fallbackOnNoTags = opts.fallbackOnNoTags ?? true
+    this.speakAll = opts.speakAll ?? false
   }
 
   /** Called per streaming delta with the accumulated text so far. */
@@ -619,6 +746,10 @@ export class StreamingSpeaker {
     if (fullText.length <= this.lastFeedLength) return
     const delta = fullText.slice(this.lastFeedLength)
     this.lastFeedLength = fullText.length
+    if (this.speakAll) {
+      this.feedSpeakAll(delta)
+      return
+    }
     const segments = this.extractor.feed(delta)
     for (const segment of segments) {
       this.enqueue(segment)
@@ -627,11 +758,20 @@ export class StreamingSpeaker {
 
   /**
    * Called when the stream ends. Catches any trailing content, then
-   * applies the no-tags fallback if appropriate.
+   * applies the no-tags fallback (tagged mode) or drains the sentence
+   * buffer (speakAll mode).
    */
   flush(finalText: string): void {
     if (finalText.length > this.lastFeedLength) {
       this.feed(finalText)
+    }
+    if (this.speakAll) {
+      const tail = this.speakAllBuffer.trim()
+      this.speakAllBuffer = ''
+      if (tail) {
+        enqueueSpeak(tail, this.persona, this.rate, this.volume, 'casual')
+      }
+      return
     }
     const tail = this.extractor.flush({ fallbackOnNoTags: this.fallbackOnNoTags })
     for (const segment of tail) {
@@ -642,4 +782,99 @@ export class StreamingSpeaker {
   private enqueue(segment: VoiceSegment): void {
     enqueueSpeak(segment.text, this.persona, this.rate, this.volume, segment.tone)
   }
+
+  /**
+   * speakAll feeder: drop voice tags + ship complete sentences as they
+   * arrive. We buffer until a sentence-ending punctuation lands so Piper
+   * gets natural prosody (sentence-by-sentence is the sweet spot
+   * between latency and intonation). Anything left over flushes at
+   * stream end.
+   *
+   * v2.0 polish — abbreviation + minimum-length guard. The naive
+   * `[.!?…]+\s+` cut fires on "Dr. Strange", "Mr. Smith", "e.g.",
+   * "i.e.", "U.S. economy", etc., which produces robotic prosody
+   * because Piper hits a cold synth on the two-letter fragment. Two
+   * defences in concert:
+   *   1. A min-segment-length floor (`SENTENCE_MIN_CHARS = 12`) — a
+   *      legitimate sentence is always longer than the abbreviation
+   *      cases above, and Piper's per-synth cold-start cost isn't
+   *      amortised on anything shorter anyway.
+   *   2. An abbreviation tail check — if the chars immediately
+   *      before the candidate cut match a known abbreviation, skip
+   *      this match and keep buffering until the NEXT punctuation.
+   */
+  private feedSpeakAll(delta: string): void {
+    const cleaned = stripVoiceTagsOnly(delta)
+    this.speakAllBuffer += cleaned
+    const sentenceEnd = /([.!?…]+["')\]]?\s+)/g
+    let lastCut = 0
+    let match: RegExpExecArray | null
+    while ((match = sentenceEnd.exec(this.speakAllBuffer)) !== null) {
+      const endIdx = match.index + match[0].length
+      const candidate = this.speakAllBuffer.slice(lastCut, endIdx).trim()
+      // Skip too-short candidates (almost always an abbreviation) AND
+      // explicit common-abbreviation tails. Both checks together cover
+      // "Dr.", "Mr.", "Mrs.", "Ms.", "St.", "vs.", "e.g.", "i.e.",
+      // "U.S.", "Ph.D." and the long tail of titles + initials.
+      if (candidate.length < SENTENCE_MIN_CHARS || endsWithAbbreviation(candidate)) {
+        continue
+      }
+      enqueueSpeak(candidate, this.persona, this.rate, this.volume, 'casual')
+      lastCut = endIdx
+    }
+    if (lastCut > 0) {
+      this.speakAllBuffer = this.speakAllBuffer.slice(lastCut)
+    }
+  }
+}
+
+/** Minimum segment length before we'll treat a sentence-ending mark as
+ *  a real cut. Below this we keep buffering — protects abbreviations,
+ *  initials, and stray punctuation from triggering a cold Piper synth
+ *  on a fragment. */
+const SENTENCE_MIN_CHARS = 12
+
+/**
+ * Common-abbreviation tail check — returns true when the candidate's
+ * trailing token looks like a known abbreviation rather than a
+ * sentence-ending word. Case-insensitive; the regex matches the last
+ * word (sans trailing whitespace/quotes) against a short curated list
+ * plus a generic "all-caps with dots" pattern (catches U.S., U.K.,
+ * a.k.a., etc.).
+ */
+const ABBREVIATIONS = new Set([
+  'dr.',
+  'mr.',
+  'mrs.',
+  'ms.',
+  'st.',
+  'sr.',
+  'jr.',
+  'vs.',
+  'etc.',
+  'i.e.',
+  'e.g.',
+  'no.',
+  'fig.',
+  'mt.',
+  'ave.',
+  'ft.',
+  'inc.',
+  'ltd.',
+  'co.',
+  'cf.',
+  'al.'
+])
+
+function endsWithAbbreviation(text: string): boolean {
+  // Grab the last whitespace-delimited token, strip surrounding quotes /
+  // brackets so the lookup doesn't miss '"e.g."' or '(i.e.)'.
+  const trimmed = text.replace(/[")\]]+$/, '')
+  const lastSpace = trimmed.lastIndexOf(' ')
+  const token = (lastSpace === -1 ? trimmed : trimmed.slice(lastSpace + 1)).toLowerCase()
+  if (ABBREVIATIONS.has(token)) return true
+  // Generic single-letter or two-letter all-caps initials with dots —
+  // catches "U.S.", "U.K.", "J.R.R.", "Ph.D." style tokens that
+  // the curated list would never enumerate exhaustively.
+  return /^(?:[A-Za-z]\.){2,}$/.test(token.replace(/[")\]]+$/, ''))
 }

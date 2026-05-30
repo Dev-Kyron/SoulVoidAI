@@ -68,13 +68,7 @@ function ServerRow({ server }: { server: McpServerStatus }): JSX.Element {
   const hasDuplicates = server.duplicateTools && server.duplicateTools.length > 0
 
   if (editing) {
-    return (
-      <ServerForm
-        mode="edit"
-        serverId={server.id}
-        onDone={() => setEditing(false)}
-      />
-    )
+    return <ServerForm mode="edit" serverId={server.id} onDone={() => setEditing(false)} />
   }
 
   if (confirmingDelete) {
@@ -92,9 +86,7 @@ function ServerRow({ server }: { server: McpServerStatus }): JSX.Element {
             type="button"
             onClick={() => {
               setConfirmingDelete(false)
-              void remove(server.id).then(() =>
-                pushToast('success', `Removed "${server.name}".`)
-              )
+              void remove(server.id).then(() => pushToast('success', `Removed "${server.name}".`))
             }}
             className="rounded px-1.5 py-0.5 text-[10px] font-semibold text-rose-400 transition hover:bg-rose-500/20"
           >
@@ -173,18 +165,20 @@ function ServerRow({ server }: { server: McpServerStatus }): JSX.Element {
       </div>
 
       {/* v1.11.0 — duplicate-tool warning. When this server's tools
-        * collide with another connected MCP server (or a built-in
-        * tool name), surface an amber strip naming the duplicates so
-        * the user knows the agent's pick between them is ambiguous.
-        * Fix is to rename one of the servers OR disable one. */}
+       * collide with another connected MCP server (or a built-in
+       * tool name), surface an amber strip naming the duplicates so
+       * the user knows the agent's pick between them is ambiguous.
+       * Fix is to rename one of the servers OR disable one. */}
       {hasDuplicates && (
         <div className="mt-1.5 flex items-start gap-1.5 rounded border border-amber-400/30 bg-amber-500/10 px-2 py-1 text-[10px] text-amber-200">
           <AlertCircle size={11} className="mt-0.5 shrink-0" />
           <span className="break-words">
-            <span className="font-semibold">Duplicate tool name{server.duplicateTools.length === 1 ? '' : 's'}:</span>{' '}
-            <span className="font-mono">{server.duplicateTools.join(', ')}</span>{' '}
-            — also exposed by another source. Rename this server or disable the
-            duplicate to make the agent's routing unambiguous.
+            <span className="font-semibold">
+              Duplicate tool name{server.duplicateTools.length === 1 ? '' : 's'}:
+            </span>{' '}
+            <span className="font-mono">{server.duplicateTools.join(', ')}</span> — also exposed by
+            another source. Rename this server or disable the duplicate to make the agent's routing
+            unambiguous.
           </span>
         </div>
       )}
@@ -269,11 +263,7 @@ function ServerForm({
       setCommand(cfg.command)
       // Args: keep whitespace-friendly. Quote any arg containing spaces
       // so the round-trip through parseArgs preserves it.
-      setArgsRaw(
-        cfg.args
-          .map((a) => (/\s/.test(a) ? `"${a}"` : a))
-          .join(' ')
-      )
+      setArgsRaw(cfg.args.map((a) => (/\s/.test(a) ? `"${a}"` : a)).join(' '))
       setEnvRaw(
         Object.entries(cfg.env)
           .map(([k, v]) => `${k}=${v}`)
@@ -351,9 +341,7 @@ function ServerForm({
 
   return (
     <div className="space-y-1.5 rounded-lg border border-white/10 bg-black/20 p-2.5">
-      {prefilling && (
-        <p className="text-[10px] italic text-slate-500">Loading current config…</p>
-      )}
+      {prefilling && <p className="text-[10px] italic text-slate-500">Loading current config…</p>}
       <input
         value={name}
         onChange={(e) => setName(e.target.value)}
@@ -369,13 +357,15 @@ function ServerForm({
       <input
         value={argsRaw}
         onChange={(e) => setArgsRaw(e.target.value)}
-        placeholder='Args (e.g. -y @modelcontextprotocol/server-filesystem /path)'
+        placeholder="Args (e.g. -y @modelcontextprotocol/server-filesystem /path)"
         className={FIELD}
       />
       <textarea
         value={envRaw}
         onChange={(e) => setEnvRaw(e.target.value)}
-        placeholder={'Env (optional, one KEY=value per line)\nDISCORD_BOT_TOKEN=...\nDISCORD_GUILD_ID=...'}
+        placeholder={
+          'Env (optional, one KEY=value per line)\nDISCORD_BOT_TOKEN=...\nDISCORD_GUILD_ID=...'
+        }
         rows={3}
         className={`${FIELD} resize-y font-mono`}
       />
@@ -455,8 +445,9 @@ export function McpSettings(): JSX.Element {
   // we open the marketplace AND ask it to auto-launch Quick Start once
   // entries are loaded. One state for both flows keeps the dialog mount
   // count to one.
-  const [marketplaceInitialView, setMarketplaceInitialView] =
-    useState<'quickStart' | undefined>(undefined)
+  const [marketplaceInitialView, setMarketplaceInitialView] = useState<'quickStart' | undefined>(
+    undefined
+  )
 
   const refreshReport = (): void => {
     void vs.setup.detect().then(setReport)
@@ -467,10 +458,7 @@ export function McpSettings(): JSX.Element {
     refreshReport()
   }, [load])
 
-  const totalTools = servers.reduce(
-    (sum, s) => sum + (s.connected ? s.tools.length : 0),
-    0
-  )
+  const totalTools = servers.reduce((sum, s) => sum + (s.connected ? s.tools.length : 0), 0)
 
   // Pass installed names into the dialog so it can mark already-imported
   // entries as non-checkable. We memo on a STRING KEY derived from the
@@ -493,16 +481,16 @@ export function McpSettings(): JSX.Element {
       hint="Model Context Protocol servers — pluggable tool sources. Add a command (e.g. an npx-based server) and its tools become callable by the agent alongside the built-in ones. Stdio transport for now."
     >
       {/* v1.12.6 — agent-readiness banner. Renders only when Agent mode is
-        * off OR the active model can't call tools, so a healthy setup sees
-        * nothing here. Surfaces the "you configured all this but it won't
-        * run without flipping one switch" UX gap. */}
+       * off OR the active model can't call tools, so a healthy setup sees
+       * nothing here. Surfaces the "you configured all this but it won't
+       * run without flipping one switch" UX gap. */}
       <AgentReadinessNotice />
       <div className="mb-2 flex items-center justify-between text-[10px]">
         <div className="flex items-center gap-1.5 text-slate-400">
           <Plug size={11} className="text-[var(--accent)]" />
           <span>
-            {servers.filter((s) => s.connected).length}/{servers.length} connected ·{' '}
-            {totalTools} tool{totalTools === 1 ? '' : 's'}
+            {servers.filter((s) => s.connected).length}/{servers.length} connected · {totalTools}{' '}
+            tool{totalTools === 1 ? '' : 's'}
           </span>
         </div>
       </div>
@@ -525,10 +513,10 @@ export function McpSettings(): JSX.Element {
         {servers.length === 0 ? (
           <>
             {/* v1.12.0 — Quick Start CTA for first-time users. Opens the
-              * marketplace AND auto-launches Quick Start once entries are
-              * loaded, so a brand-new install can land 5 working tools in
-              * one click instead of staring at an empty list wondering
-              * which of the 100+ marketplace entries to pick. */}
+             * marketplace AND auto-launches Quick Start once entries are
+             * loaded, so a brand-new install can land 5 working tools in
+             * one click instead of staring at an empty list wondering
+             * which of the 100+ marketplace entries to pick. */}
             <button
               type="button"
               onClick={() => {
@@ -543,9 +531,9 @@ export function McpSettings(): JSX.Element {
                   Quick Start — bulk-install your first tools
                 </p>
                 <p className="mt-0.5 text-[10px] leading-snug text-slate-300">
-                  Pick a workflow (Essentials, Developer, Researcher, Everything) and
-                  install several MCP servers in one click. No API keys or paths
-                  required — just zero-config tools the AI can use right away.
+                  Pick a workflow (Essentials, Developer, Researcher, Everything) and install
+                  several MCP servers in one click. No API keys or paths required — just zero-config
+                  tools the AI can use right away.
                 </p>
               </div>
               <span className="self-center rounded-md bg-white/10 px-2 py-1 text-[10px] font-semibold text-white transition group-hover:bg-white/20">

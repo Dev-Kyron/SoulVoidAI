@@ -114,7 +114,7 @@ export const TOOL_SPECS: ToolSpec[] = [
         path: {
           type: 'string',
           description:
-            'Absolute file path. Parent directory must exist; the file is created if it doesn\'t.'
+            "Absolute file path. Parent directory must exist; the file is created if it doesn't."
         },
         content: { type: 'string', description: 'Full text content to write (replaces the file).' }
       },
@@ -128,7 +128,9 @@ export const TOOL_SPECS: ToolSpec[] = [
       'Sort the loose files in a folder into typed sub-folders (Images, Videos, Documents, …). Reversible.',
     parameters: {
       type: 'object',
-      properties: { dir: { type: 'string', description: 'Folder path or token, e.g. ~downloads.' } },
+      properties: {
+        dir: { type: 'string', description: 'Folder path or token, e.g. ~downloads.' }
+      },
       required: ['dir']
     }
   },
@@ -162,7 +164,7 @@ export const TOOL_SPECS: ToolSpec[] = [
     name: 'see_screen',
     actionType: 'screenshot',
     description:
-      'Capture the screen as an image and look at it. Use this ONLY when you need to DESCRIBE on-screen content back to the user — explain what they\'re looking at, summarise a chart, read an error dialog, comment on a UI layout. Do NOT use this as a step before clicking — `click_on_screen` already screenshots internally and is dramatically more reliable than asking you to compute coordinates yourself. The image is attached to your next reasoning step.',
+      "Capture the screen as an image and look at it. Use this ONLY when you need to DESCRIBE on-screen content back to the user — explain what they're looking at, summarise a chart, read an error dialog, comment on a UI layout. Do NOT use this as a step before clicking — `click_on_screen` already screenshots internally and is dramatically more reliable than asking you to compute coordinates yourself. The image is attached to your next reasoning step.",
     parameters: { type: 'object', properties: {}, required: [] }
   },
   {
@@ -205,7 +207,7 @@ export const TOOL_SPECS: ToolSpec[] = [
       '  · "Post this tweet" → click_on_screen({ what: "the Post button", in_window: "Twitter" })\n' +
       '  · "Submit the form" → click_on_screen({ what: "the Submit button", in_window: "Chrome" })\n' +
       '  · "Close this dialog" → click_on_screen({ what: "the X button to close the current dialog" })\n\n' +
-      'Mechanics: tries Windows accessibility tree first (exact for native apps), falls back to vision on a screenshot. User sees a 3-second cancellable cyan-ring preview before the click fires — wrong locates fail safe (Esc to cancel). Don\'t call see_screen first; this tool screenshots internally. Don\'t pre-narrate; just call the tool.',
+      "Mechanics: tries Windows accessibility tree first (exact for native apps), falls back to vision on a screenshot. User sees a 3-second cancellable cyan-ring preview before the click fires — wrong locates fail safe (Esc to cancel). Don't call see_screen first; this tool screenshots internally. Don't pre-narrate; just call the tool.",
     parameters: {
       type: 'object',
       properties: {
@@ -236,7 +238,10 @@ export const TOOL_SPECS: ToolSpec[] = [
       type: 'object',
       properties: {
         query: { type: 'string', description: 'What to search for.' },
-        max_results: { type: 'number', description: 'Number of results to return (1-10, default 5).' }
+        max_results: {
+          type: 'number',
+          description: 'Number of results to return (1-10, default 5).'
+        }
       },
       required: ['query']
     }
@@ -255,6 +260,28 @@ export const TOOL_SPECS: ToolSpec[] = [
     }
   },
   {
+    name: 'deep_research',
+    actionType: 'deep-research',
+    description:
+      'Multi-step research on a topic: plans 2-5 sub-queries, runs web searches, fetches top sources, and synthesises a markdown answer with [^N] footnote citations + a numbered Sources list. Use for ANY question that genuinely needs multiple sources (current events, surveys, comparisons, "what do experts say about X"). Prefer over a single `web_search` + `web_fetch` pair when the topic isn\'t answerable from one page. The whole pipeline is one tool call — you don\'t need to chain search + fetch yourself.',
+    parameters: {
+      type: 'object',
+      properties: {
+        topic: {
+          type: 'string',
+          description:
+            'The research question, in natural language. The more specific, the better the planner can break it down.'
+        },
+        depth: {
+          type: 'string',
+          description:
+            '"quick" (2 queries × 1 source, ~20-40s), "standard" (3×2, ~40-80s, DEFAULT), or "deep" (5×2, ~60-120s). Match to the user\'s patience and topic complexity.'
+        }
+      },
+      required: ['topic']
+    }
+  },
+  {
     name: 'generate_image',
     actionType: 'generate-image',
     description:
@@ -270,21 +297,93 @@ export const TOOL_SPECS: ToolSpec[] = [
         },
         size: {
           type: 'string',
-          description: '"1024x1024" (default, square), "1792x1024" (wide), or "1024x1792" (tall). Stability + Gemini map this to closest aspect ratio.'
+          description:
+            '"1024x1024" (default, square), "1792x1024" (wide), or "1024x1792" (tall). Stability + Gemini map this to closest aspect ratio.'
         }
       },
       required: ['prompt']
     }
   },
   {
-    name: 'run_python',
-    actionType: 'run-python',
+    name: 'edit_image_inpaint',
+    actionType: 'edit-image-inpaint',
     description:
-      'Execute Python in an isolated temporary directory using the system interpreter. Captures stdout + stderr. Use for data crunching, quick math, generating files, anything Code-Interpreter-shaped. The temp dir is wiped after the run. Timeout 30s default, 2min max.',
+      'Replace a masked region of an existing image with content described by a prompt. Use when the user wants to "remove this person", "swap the sky for a sunset", "put a hat on him", etc. Requires a Stability AI key (Settings → Integrations). Pass `image_path` to an existing PNG/JPG and either `mask_path` (white = replace, black = keep) OR `mask_prompt` (a short description of WHAT to mask, e.g. "the dog" — server-side auto-mask). Saves the result and returns the new path + data URL.',
     parameters: {
       type: 'object',
       properties: {
-        code: { type: 'string', description: 'Python source to execute.' },
+        image_path: {
+          type: 'string',
+          description: 'Absolute path to the source image (PNG or JPG).'
+        },
+        prompt: {
+          type: 'string',
+          description: 'What to put in place of the masked region.'
+        },
+        mask_path: {
+          type: 'string',
+          description:
+            'Optional: absolute path to a mask PNG (white pixels = replace, black = keep). If omitted, `mask_prompt` is required.'
+        },
+        mask_prompt: {
+          type: 'string',
+          description:
+            'Optional: short text describing WHAT to mask out (e.g. "the cat", "the background sky"). Stability auto-segments. Either this OR `mask_path` is required.'
+        }
+      },
+      required: ['image_path', 'prompt']
+    }
+  },
+  {
+    name: 'edit_image_upscale',
+    actionType: 'edit-image-upscale',
+    description:
+      'Upscale an image 2-4x while preserving detail. Use when the user has a low-res photo and asks for "make this bigger", "upscale", "enhance", "4K version". Non-creative — does not invent new content, just adds resolution. Requires a Stability AI key. Pass `image_path` to an existing PNG/JPG. Returns the upscaled file path + data URL.',
+    parameters: {
+      type: 'object',
+      properties: {
+        image_path: {
+          type: 'string',
+          description: 'Absolute path to the source image (PNG or JPG, max 1 megapixel input).'
+        },
+        prompt: {
+          type: 'string',
+          description:
+            'Optional short text describing the image — Stability uses it as a denoising hint. Leave blank if unsure; the upscaler still works.'
+        }
+      },
+      required: ['image_path']
+    }
+  },
+  {
+    name: 'edit_image_remove_background',
+    actionType: 'edit-image-bg-remove',
+    description:
+      'Remove the background from an image, returning a transparent-background PNG of just the foreground subject. Use when the user asks to "cut out", "remove background", "make transparent", "isolate the product / person / object". Requires a Stability AI key. Pass `image_path` to an existing PNG/JPG. Returns the transparent-background PNG path + data URL.',
+    parameters: {
+      type: 'object',
+      properties: {
+        image_path: {
+          type: 'string',
+          description: 'Absolute path to the source image (PNG or JPG).'
+        }
+      },
+      required: ['image_path']
+    }
+  },
+  {
+    name: 'run_python',
+    actionType: 'run-python',
+    description:
+      'Execute Python in a per-thread persistent sandbox using the system interpreter. State PERSISTS across calls within the same thread: variables, imports, helper functions, and files in the workspace dir all carry over from one run to the next — same as Jupyter / Code Interpreter. The CWD is a per-thread workspace folder, so files you write (`open("out.csv", "w")`) stay there for follow-up calls and the user can find them later. Use for data crunching, multi-step analysis, file generation, anything where you want to build on a previous result. Each call captures stdout + stderr. Timeout 30s default, 2min max. In Private mode the sandbox falls back to ephemeral (no on-disk workspace).',
+    parameters: {
+      type: 'object',
+      properties: {
+        code: {
+          type: 'string',
+          description:
+            'Python source to execute. References previously-defined names / files in this thread freely.'
+        },
         timeout_ms: { type: 'number', description: 'Override the 30s default (max 120000).' }
       },
       required: ['code']
@@ -320,6 +419,70 @@ export const TOOL_SPECS: ToolSpec[] = [
         }
       },
       required: ['content', 'format', 'filename']
+    }
+  },
+  /* ------------- v2.0 Home Assistant integration ------------- */
+  {
+    name: 'ha_list_entities',
+    actionType: 'ha-list-entities',
+    description:
+      'List Home Assistant entities the user has set up. Use this BEFORE calling ha_call_service so you know the exact entity_id (HA service calls fail silently if the id is misspelt). Optionally filter by domain — common ones: "light", "switch", "lock", "climate", "cover" (blinds/garage), "scene", "script", "media_player", "sensor", "binary_sensor", "fan", "vacuum". No domain = every entity. Returns id + friendly_name + current state.',
+    parameters: {
+      type: 'object',
+      properties: {
+        domain: {
+          type: 'string',
+          description:
+            'Optional domain prefix — e.g. "light", "lock", "climate". Leave empty to list everything.'
+        }
+      },
+      required: []
+    }
+  },
+  {
+    name: 'ha_get_state',
+    actionType: 'ha-get-state',
+    description:
+      'Read the current state and attributes of one Home Assistant entity. Use AFTER ha_list_entities pins down the entity_id, when you need the live value (e.g. "is the front door locked", "what temperature is the thermostat reading"). Returns state + attributes (brightness, temperature, etc).',
+    parameters: {
+      type: 'object',
+      properties: {
+        entity_id: {
+          type: 'string',
+          description: 'Full entity id like "light.kitchen" or "lock.front_door".'
+        }
+      },
+      required: ['entity_id']
+    }
+  },
+  {
+    name: 'ha_call_service',
+    actionType: 'ha-call-service',
+    description:
+      'Call a Home Assistant service — the universal write operation. Covers turn_on/off, lock/unlock, set_temperature, set_hvac_mode, open/close cover, activate scene, run script, anything HA exposes.\n\nCommon recipes:\n- Lights: { domain: "light", service: "turn_on", entity_id: "light.kitchen", data: { brightness_pct: 60 } }\n- Locks: { domain: "lock", service: "unlock", entity_id: "lock.front_door" }\n- Thermostat: { domain: "climate", service: "set_temperature", entity_id: "climate.living_room", data: { temperature: 21 } }\n- Thermostat mode: { domain: "climate", service: "set_hvac_mode", entity_id: "climate.living_room", data: { hvac_mode: "heat" } }\n- Scene: { domain: "scene", service: "turn_on", entity_id: "scene.evening" }\n- Script: { domain: "script", service: "turn_on", entity_id: "script.morning_routine" }\n- Cover: { domain: "cover", service: "open_cover", entity_id: "cover.garage_door" }\n\nReturns the array of entities HA reports as changed so you can confirm the action took effect.',
+    parameters: {
+      type: 'object',
+      properties: {
+        domain: {
+          type: 'string',
+          description: 'Service domain — "light", "lock", "climate", "scene", "script", etc.'
+        },
+        service: {
+          type: 'string',
+          description:
+            'Service name within the domain — "turn_on", "turn_off", "toggle", "lock", "unlock", "set_temperature", "set_hvac_mode", "open_cover", "close_cover", "activate", etc.'
+        },
+        entity_id: {
+          type: 'string',
+          description: 'Target entity_id. Optional — omit only for services that act globally.'
+        },
+        data: {
+          type: 'object',
+          description:
+            'Optional extra parameters: { brightness_pct: 60 } for light.turn_on, { temperature: 21 } for climate.set_temperature, { hvac_mode: "heat" } for climate.set_hvac_mode, etc.'
+        }
+      },
+      required: ['domain', 'service']
     }
   }
 ]

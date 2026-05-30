@@ -117,8 +117,8 @@ export function About(): JSX.Element {
 
         <div className="border-t border-white/5 px-3 py-2.5 text-[10px] leading-relaxed text-slate-500">
           Local-first. API keys are encrypted with your OS keychain and never leave this machine.
-          Chat history, embeddings, and indexed files live in the data folder above — back it up
-          if you care about it.
+          Chat history, embeddings, and indexed files live in the data folder above — back it up if
+          you care about it.
         </div>
       </div>
     </CollapsibleSection>
@@ -219,7 +219,11 @@ function UpdaterRow(): JSX.Element {
 function describeStatus(
   status: UpdaterStatus,
   onRestart: () => void
-): { label: string; tone: 'ok' | 'info' | 'warn'; action: { label: string; onClick: () => void } | null } {
+): {
+  label: string
+  tone: 'ok' | 'info' | 'warn'
+  action: { label: string; onClick: () => void } | null
+} {
   switch (status.kind) {
     case 'idle':
       return { label: 'Checking for updates…', tone: 'info', action: null }

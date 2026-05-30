@@ -160,7 +160,12 @@ export function LogsView(): JSX.Element {
         </div>
         <div className="flex flex-wrap items-center gap-1">
           {CATEGORY_OPTIONS.map((c) => (
-            <FilterChip key={c} label={c} active={categories.has(c)} onClick={() => toggleCategory(c)} />
+            <FilterChip
+              key={c}
+              label={c}
+              active={categories.has(c)}
+              onClick={() => toggleCategory(c)}
+            />
           ))}
         </div>
       </div>

@@ -22,6 +22,7 @@ import type {
   IndexedFileSummary,
   IndexedFolder,
   McpServerInput,
+  BrowserExtensionStatus,
   McpServerStatus,
   MessageSearchHit,
   Notebook,
@@ -30,6 +31,10 @@ import type {
   ScanProgress,
   ScanResult,
   ScheduledTask,
+  ClickBenchBenchmark,
+  HomeAssistantEntitySummary,
+  HomeAssistantStatus,
+  SyncStatus,
   ThreadSummary,
   ProviderPerformance,
   UsageBudget,
@@ -45,7 +50,9 @@ import type {
   MemoryState,
   CustomActionKind,
   ModeId,
-  OcrResult,
+  // v2.0 round-5 cleanup — OcrResult / ScreenshotResult / SessionSentiment
+  // imports dropped along with the dead `screen.*` namespace and
+  // `memory.recentSentiments` bridge method that referenced them.
   McpInstallValues,
   McpMarketplaceInstallResult,
   McpRegistryEntry,
@@ -55,7 +62,7 @@ import type {
   ProviderId,
   QuickAction,
   RecentProject,
-  ScreenshotResult,
+  ScreenSnapshot,
   SetupEnvKeyImportResult,
   SetupImportResult,
   SetupReport,
@@ -67,7 +74,6 @@ import type {
   ProactiveVoiceConfig,
   ScreenWatchConfig,
   ScreenWatchStatus,
-  SessionSentiment,
   WatchSpec,
   WatchTask,
   SystemStats,
@@ -75,6 +81,15 @@ import type {
   VoiceSetupStatus,
   UpdaterStatus,
   UserFact,
+  BiographicalCategory,
+  BiographicalEntry,
+  PersonaBundle,
+  PersonaTemplate,
+  PythonKernelStatus,
+  VectorStoreChunkRow,
+  VectorStoreFileSummary,
+  VectorStoreQueryTrace,
+  VectorStoreStats,
   VoiceConfig
 } from './types'
 
@@ -114,6 +129,10 @@ export interface VoidSoulBridge {
      *  to the active provider verbatim; when on, the router may route
      *  to a different provider/model per task. */
     setAutoRoute(enabled: boolean): Promise<ClientConfig>
+    /** v2.0 — master kill-switch for plugin JS hook execution. Off by
+     *  default; install dialog warns about JS hooks even when this is
+     *  off so the user has visibility into what plugins declare. */
+    setPluginHooks(enabled: boolean): Promise<ClientConfig>
     /** v1.4.0 — patch any subset of the MemoryConfig (emotionalContext
      *  toggle, sentimentModel pin, etc). Merges with existing values. */
     setMemory(patch: Partial<MemoryConfig>): Promise<ClientConfig>
@@ -158,11 +177,9 @@ export interface VoidSoulBridge {
     undo(undoId: string): Promise<{ ok: boolean; message: string }>
     list(): Promise<ActionDescriptor[]>
   }
-  screen: {
-    capture(): Promise<ScreenshotResult>
-    ocr(source: string): Promise<OcrResult>
-    activeWindow(): Promise<ActiveWindowInfo>
-  }
+  // v2.0 round-5 cleanup — `screen` namespace removed. Nobody ever called
+  // `vs.screen.*`; semantic awareness runs entirely main-side and pushes
+  // its results via `events.onActiveWindow` / `events.onScreenSnapshot`.
   memory: {
     get(): Promise<MemoryState>
     rememberProject(path: string): Promise<RecentProject[]>
@@ -180,20 +197,35 @@ export interface VoidSoulBridge {
     removeFact(id: string): Promise<UserFact[]>
     clearFacts(): Promise<UserFact[]>
     /**
+     * v2.0 — passive biographical profile.
+     *   bioMerge: extractor write path — submit a batch of categorized
+     *     observations from the renderer's post-stream extractor. Main
+     *     applies confidence + observation merge semantics; renderer
+     *     never owns those (they're a storage concern).
+     *   bioRemove: per-entry delete (Settings UI).
+     *   bioClear: bulk-clear (Settings "Forget profile" button).
+     */
+    bioMerge(
+      updates: { category: BiographicalCategory; text: string }[]
+    ): Promise<BiographicalEntry[]>
+    bioRemove(id: string): Promise<BiographicalEntry[]>
+    bioClear(): Promise<BiographicalEntry[]>
+    /**
      * v1.4.0 emotional-context hooks.
      *
      * onUserMessage: fire-and-forget after a user message lands; the
      * scheduler counts exchanges and classifies in the background.
      * emotionalContext: snapshot for Settings panel + system prompt.
      * sentimentPromptBlock: pre-rendered block the renderer injects.
-     * recentSentiments: history for the Settings rollup view.
      * forgetRecentSentiment: privacy escape hatch — drops the last N
      * days of classifier output (default 7).
+     *
+     * v2.0 round-5 cleanup — `recentSentiments` removed (read main-side
+     * by the prompt composer; no renderer consumer ever existed).
      */
     onUserMessage(threadId: string, recentMessages: ChatTurn[]): Promise<{ ok: boolean }>
     emotionalContext(): Promise<EmotionalContextSnapshot>
     sentimentPromptBlock(): Promise<string>
-    recentSentiments(limit?: number): Promise<SessionSentiment[]>
     forgetRecentSentiment(days?: number): Promise<{ deleted: number }>
   }
   /** v1.5.0 proactive watch tasks — Soul can initiate without being asked.
@@ -268,24 +300,23 @@ export interface VoidSoulBridge {
     flushAllAck(token: string): Promise<void>
     createThread(title?: string): Promise<ThreadSummary>
     renameThread(id: string, title: string): Promise<ThreadSummary | null>
-    deleteThread(
-      id: string
-    ): Promise<{ summaries: ThreadSummary[]; activeThreadId: string | null }>
+    deleteThread(id: string): Promise<{ summaries: ThreadSummary[]; activeThreadId: string | null }>
     setActiveThread(id: string): Promise<void>
     setPinned(id: string, pinned: boolean): Promise<ThreadSummary | null>
     /** Pin a mode override on this thread; pass null to fall back to global. */
     setThreadMode(id: string, mode: ModeId | null): Promise<ThreadSummary | null>
     /** Pin a system-prompt override on this thread; pass null to fall back to global. */
-    setThreadSystemPrompt(
-      id: string,
-      prompt: string | null
-    ): Promise<ThreadSummary | null>
+    setThreadSystemPrompt(id: string, prompt: string | null): Promise<ThreadSummary | null>
     clearThread(id: string): Promise<ThreadSummary | null>
     clearAll(): Promise<{ summaries: ThreadSummary[]; activeThreadId: string | null }>
   }
   projects: {
     list(): Promise<Project[]>
-    create(input: { name: string; description?: string | null; instructions?: string | null }): Promise<Project>
+    create(input: {
+      name: string
+      description?: string | null
+      instructions?: string | null
+    }): Promise<Project>
     update(
       id: string,
       patch: { name?: string; description?: string | null; instructions?: string | null }
@@ -403,7 +434,206 @@ export interface VoidSoulBridge {
     removeFolder(folder: string): Promise<IndexedFolder[]>
     rescan(folder: string): Promise<{ ok: boolean }>
     rescanAll(): Promise<{ ok: boolean }>
-    scanStatus(): Promise<ScanProgress | null>
+    // v2.0 round-5 cleanup — `scanStatus` removed; renderer subscribes
+    // to push-based `files-rag:progress` events instead of polling.
+    /**
+     * v2.0 — request that an in-flight scan pause after the current file.
+     * Partial progress stays on disk; a subsequent `rescan` resumes via
+     * the stat-skip fast path. No-op when nothing is running.
+     */
+    stopScan(folder: string): Promise<{ ok: boolean }>
+  }
+  /**
+   * v2.0 — persistent per-thread Python kernels (Jupyter-style). The
+   * `run_python` agent tool routes through this pool automatically when
+   * a threadId is in scope; variables / imports / generated files
+   * survive across turns within the same thread. This namespace is the
+   * Settings panel surface — execution itself flows via automation.
+   */
+  pythonSandbox: {
+    list(): Promise<PythonKernelStatus[]>
+    /** Kill the kernel but keep the workspace dir — clears variables. */
+    restart(threadId: string): Promise<{ ok: boolean }>
+    /** Kill the kernel AND delete the workspace dir. */
+    dispose(threadId: string): Promise<{ ok: boolean }>
+  }
+  /**
+   * v2.0 — persona templates. Saveable, sharable bundles of {system
+   * prompt + recommended model + sample prompts} the user can apply
+   * to a thread. Built-in MODES stay as the substrate; these are
+   * presets the user collects and trades. Returns the post-mutation
+   * ClientConfig so the renderer doesn't need a re-fetch round-trip.
+   */
+  personas: {
+    upsert(persona: PersonaTemplate): Promise<ClientConfig>
+    remove(id: string): Promise<ClientConfig>
+    /** Native save dialog; writes the bundle as .voidsoul-persona.json. */
+    exportToFile(
+      bundle: PersonaBundle,
+      defaultFilename: string
+    ): Promise<{ ok: true; path: string } | { ok: false }>
+    /** Native open dialog; returns the parsed+validated bundle. */
+    importFromFile(): Promise<
+      | { ok: true; bundle: PersonaBundle; sourcePath: string }
+      | { ok: false; reason: 'cancelled' | 'invalid'; message?: string }
+    >
+  }
+  /**
+   * v2.0 — Vector-store browser: inspect the embeddings index from the UI.
+   * Folder → file → chunk drill-down + "what was retrieved for the last
+   * chat query" trace + an explorer that runs ad-hoc queries with scores
+   * + per-chunk exclude (used to prune noisy chunks from retrieval).
+   */
+  /**
+   * v2.0 — browser-extension bridge (local-only via Chrome native messaging).
+   * `status` is read by the Settings panel + by an event subscription so
+   * the listening/connected-clients chip stays live without polling.
+   * `setEnabled` flips the master switch AND starts/stops the local IPC
+   * server in one round-trip.
+   */
+  browserExtension: {
+    status(): Promise<BrowserExtensionStatus>
+    setEnabled(enabled: boolean): Promise<BrowserExtensionStatus>
+  }
+  /**
+   * v2.0 — click_on_screen measurement harness. Settings → Advanced →
+   * Experimental hosts a Click Benchmark dialog that the dev (and
+   * curious users) opens to measure how often each strategy actually
+   * lands the click. Phase 1 of the Tier-S click_on_screen plan; lays
+   * the foundation for the provider-aware router, Set-of-Marks
+   * fallback, and hover-to-teach work that follows.
+   */
+  clickBench: {
+    list(): Promise<{
+      benchmarks: Array<{
+        id: string
+        label: string
+        category: string
+        hasGroundTruth: boolean
+        inWindow: string | null
+        capturedAt: string | null
+      }>
+      strategies: Array<{ id: string; label: string }>
+    }>
+    run(opts: {
+      strategyIds?: string[]
+      benchmarkIds?: string[]
+      openReportWhenDone?: boolean
+    }): Promise<{
+      htmlPath: string
+      csvPath: string
+      summary: Array<{
+        strategyId: string
+        total: number
+        hits: number
+        hitsBbox: number
+        hitsRadius: number
+        misses: number
+        noPrediction: number
+        avgPixelError: number | null
+        avgMs: number
+      }>
+      totalCells: number
+    }>
+    abort(): Promise<void>
+    saveBenchmark(benchmark: ClickBenchBenchmark): Promise<string>
+    captureScreenshot(): Promise<{
+      dataUrl: string
+      width: number
+      height: number
+      displayWidth: number
+      displayHeight: number
+      /** v2.0 polish — count of connected displays. >1 means the user
+       *  may be capturing from the wrong monitor; the dialog warns. */
+      displayCount: number
+    }>
+  }
+  /**
+   * v2.0 Phase 4 — hover-to-teach. User teaches Soul a click once
+   * (point cursor at the target, press F8), then future identical
+   * descriptions short-circuit to a direct UIA click in the
+   * production pipeline (visualClick.ts step 0.3) with ZERO model
+   * calls. List/remove for the Settings UI; start/cancel capture
+   * for the recording flow; save persists a captured element.
+   */
+  taughtClicks: {
+    list(): Promise<
+      Array<{
+        id: string
+        description: string
+        rawDescription: string
+        name: string
+        automationId: string
+        controlType: string
+        inWindow: string | null
+        capturedAt: string
+        hitCount: number
+        lastUsedAt: string | null
+      }>
+    >
+    remove(id: string): Promise<void>
+    save(input: {
+      rawDescription: string
+      name: string
+      automationId: string
+      controlType: string
+      inWindow: string | null
+    }): Promise<{
+      id: string
+      description: string
+      rawDescription: string
+      name: string
+      automationId: string
+      controlType: string
+      inWindow: string | null
+      capturedAt: string
+      hitCount: number
+      lastUsedAt: string | null
+    }>
+    /** Arm the capture hotkey. Returns `ok: false` when another app
+     *  owns the hotkey (the renderer surfaces a copy explaining the
+     *  collision). `hotkey` is the accelerator string ('F8') for UI. */
+    startCapture(): Promise<{ ok: boolean; hotkey: string; senderId: number }>
+    cancelCapture(): Promise<{ ok: boolean }>
+  }
+  /**
+   * v2.0 — Home Assistant native integration. The setup wizard and the
+   * Settings panel both consume `status` (cached, fast) and `refresh`
+   * (live probe). `test` validates a URL + token pair WITHOUT persisting
+   * — used by the wizard's "Test connection" button so the user can fix
+   * typos before committing. `configure` persists URL + token + flips
+   * `enabled` on; `disable` keeps the credentials but stops the tool
+   * surface; `clear` wipes everything.
+   */
+  homeAssistant: {
+    status(): Promise<HomeAssistantStatus>
+    refresh(): Promise<HomeAssistantStatus>
+    test(opts: { url: string; token: string }): Promise<
+      | {
+          ok: true
+          url: string
+          instanceName: string | null
+          version: string | null
+          entityCount: number
+          sample: HomeAssistantEntitySummary[]
+        }
+      | { ok: false; error: string }
+    >
+    configure(opts: { url: string; token: string; enabled: boolean }): Promise<HomeAssistantStatus>
+    disable(): Promise<HomeAssistantStatus>
+    clear(): Promise<HomeAssistantStatus>
+  }
+  vectorStore: {
+    stats(): Promise<VectorStoreStats>
+    listFiles(folderPrefix?: string): Promise<VectorStoreFileSummary[]>
+    listChunks(filePath: string): Promise<VectorStoreChunkRow[]>
+    queryTrace(): Promise<VectorStoreQueryTrace | null>
+    clearTrace(): Promise<void>
+    explain(
+      query: string,
+      options?: { limit?: number; source?: 'chat' | 'file' }
+    ): Promise<VectorStoreChunkRow[]>
+    exclude(ids: string[]): Promise<{ removed: number }>
   }
   plugins: {
     list(): Promise<PluginInfo[]>
@@ -433,6 +663,10 @@ export interface VoidSoulBridge {
       prompt: string
       scheduleKind: 'daily' | 'interval' | 'once'
       scheduleValue: string
+      /** v2.0 — `'research'` routes the task through the deep-research
+       *  pipeline and drops the brief into a new chat thread instead of
+       *  emitting a one-shot completion. Defaults to `'prompt'`. */
+      mode?: 'prompt' | 'research'
     }): Promise<ScheduledTask>
     remove(id: string): Promise<void>
     setEnabled(id: string, enabled: boolean): Promise<ScheduledTask | null>
@@ -460,6 +694,42 @@ export interface VoidSoulBridge {
     clearFolder(): Promise<ClientConfig>
     push(): Promise<SyncResult>
     pull(): Promise<SyncResult>
+    /* ------------ v2.0 E2E continuous engine ------------- */
+    /** v2.0 polish — non-persisting folder picker for the pair wizard.
+     *  Returns the picked path or null on cancel. Does NOT write to
+     *  config.syncFolder (the legacy bundle field) so an aborted setup
+     *  leaves no trace. */
+    pickVaultFolder(): Promise<string | null>
+    /** Read the live engine status (paired flag, devices, last push/pull,
+     *  current state). Used by the Settings panel to paint the sync ribbon
+     *  without subscribing to events. */
+    status(): Promise<SyncStatus>
+    /** Create a brand-new sync vault in the user's chosen folder. Returns
+     *  the freshly-generated 24-word recovery phrase so the Settings UI
+     *  can display it once for backup. The phrase is also stored in the
+     *  local keychain — the user doesn't need to type it on this device
+     *  again. */
+    setupNew(opts: { folder: string; deviceName: string }): Promise<{
+      mnemonic: string
+      vaultId: string
+    }>
+    /** Join an EXISTING vault. The user has typed the recovery phrase
+     *  another device generated + picked the same shared folder. */
+    join(opts: { folder: string; mnemonic: string; deviceName: string }): Promise<{
+      vaultId: string
+    }>
+    /** Unpair this device. Stops the loop, removes the local mnemonic
+     *  from the keychain, de-registers from the vault's device list.
+     *  Local data is untouched; other devices on the vault keep working. */
+    unpair(): Promise<void>
+    /** One-shot run: pull + push right now. Useful for the "Sync now"
+     *  button when the user wants to see their changes propagated before
+     *  the next 60s tick. */
+    syncNow(): Promise<void>
+    /** Returns the active recovery phrase from the local keychain so the
+     *  Settings panel can offer "show / back up my phrase". Returns null
+     *  if not paired. */
+    getMnemonic(): Promise<string | null>
   }
   /** Per-thread document export — distinct from the whole-app `sync` bundle.
    *  Renderer picks a thread + format; main process renders + shows save
@@ -474,7 +744,8 @@ export interface VoidSoulBridge {
     setExpanded(expanded: boolean): Promise<boolean>
     moveBy(dx: number, dy: number): Promise<void>
     hide(): Promise<void>
-    setAlwaysOnTop(value: boolean): Promise<void>
+    // v2.0 round-5 cleanup — `setAlwaysOnTop` removed; tray.ts calls the
+    // main-side helper directly.
     /** Opens (or focuses) the dedicated Settings window. */
     openSettings(): Promise<void>
     /** Closes the Settings window if it's open. */
@@ -497,9 +768,8 @@ export interface VoidSoulBridge {
     quitAndInstall(): Promise<void>
   }
   wakeWord: {
-    /** Returns the absolute path to the folder users drop .ppn files in. */
-    keywordDir(): Promise<string>
-    /** Opens that folder in the OS file explorer. */
+    // v2.0 round-5 cleanup — `keywordDir` removed (zero callers).
+    /** Opens the wake-words folder in the OS file explorer. */
     openFolder(): Promise<string>
     /** Base64-encoded .ppn bytes for the persona, or null if absent. */
     keywordBytes(persona: 'void' | 'soul'): Promise<string | null>
@@ -560,10 +830,7 @@ export interface VoidSoulBridge {
      * Returns `{ ok: false, error }` on missing prompts or addServer
      * failure, `{ ok: true, status }` on success or already-installed.
      */
-    install(
-      entry: McpRegistryEntry,
-      values: McpInstallValues
-    ): Promise<McpMarketplaceInstallResult>
+    install(entry: McpRegistryEntry, values: McpInstallValues): Promise<McpMarketplaceInstallResult>
   }
   voice: {
     /** Snapshot of binary availability + installed Void/Soul voices. */
@@ -583,7 +850,7 @@ export interface VoidSoulBridge {
       text: string
       rate?: number
       tone?: import('./voiceMarkers').ToneTag
-    }): Promise<Uint8Array>
+    }): Promise<{ ok: true; bytes: Uint8Array } | { ok: false; error: string }>
     /** Opens the per-user voices folder in the OS file explorer. */
     openFolder(): Promise<string>
     /**
@@ -599,6 +866,18 @@ export interface VoidSoulBridge {
     onLog(cb: (entry: LogEntry) => void): Unsubscribe
     onLogCleared(cb: () => void): Unsubscribe
     onActiveWindow(cb: (info: ActiveWindowInfo) => void): Unsubscribe
+    /**
+     * v2.0 — semantic screen-awareness snapshot. Fires after a
+     * debounced screenshot + OCR run when the user has both
+     * `screenAwareness` and `semanticScreenAwareness` enabled. The
+     * payload carries the active window + an OCR text excerpt the
+     * chat surface injects into the system prompt.
+     *
+     * A null payload fires when the user toggles semantic awareness
+     * OFF — the renderer should clear its cached snapshot so a stale
+     * OCR excerpt can't leak into subsequent chat sends.
+     */
+    onScreenSnapshot(cb: (info: ScreenSnapshot | null) => void): Unsubscribe
     /** Fired when the global summon hotkey is pressed. */
     onSummon(cb: (intent: 'expand' | 'toggle') => void): Unsubscribe
     /** Fired when the Settings window asks the main window to open the
@@ -613,9 +892,7 @@ export interface VoidSoulBridge {
       cb: (info: { level: 75 | 90 | 100; total: number; budget: number }) => void
     ): Unsubscribe
     /** Fired when a `listModels` call discovers model ids never seen before. */
-    onNewModels(
-      cb: (info: { provider: ProviderId; models: string[] }) => void
-    ): Unsubscribe
+    onNewModels(cb: (info: { provider: ProviderId; models: string[] }) => void): Unsubscribe
     /** Fired when an in-flight completion hit a retryable error on the
      *  selected provider and the dispatcher silently swapped to another
      *  configured one. UI surfaces this as a transient toast so the user
@@ -681,8 +958,23 @@ export interface VoidSoulBridge {
         output: string
         /** True iff the scheduler suppressed its OS notification due to DND. */
         suppressed?: boolean
+        /** Present when a research-mode task succeeded — the threadId of
+         *  the newly-materialised chat thread carrying the synthesised
+         *  brief. Renderer uses this to reload the sidebar so the brief
+         *  shows up immediately + show a clickable "View brief" toast. */
+        threadId?: string
       }) => void
     ): Unsubscribe
+    /** Fired when the user clicks an OS notification for a finished
+     *  research task. Renderer activates the thread + expands the panel
+     *  + jumps to the chat tab. Separate channel from `task-ran` so
+     *  user-initiated deep-links don't race with the auto-fire toast. */
+    onSchedulerOpenBrief(cb: (info: { threadId: string; taskName: string }) => void): Unsubscribe
+    /** v2.0 — E2E sync engine status broadcast. Fires on every state
+     *  transition (idle ⇄ syncing ⇄ error) AND after every push/pull
+     *  that wrote at least one chunk. Settings panel subscribes to keep
+     *  its ribbon live without polling. */
+    onSyncStatus(cb: (status: SyncStatus) => void): Unsubscribe
     /**
      * Main signals "we're about to quit — flush any debounced state to disk
      * NOW". Renderer calls `history.flushAllAck(token)` when done so main
@@ -710,5 +1002,61 @@ export interface VoidSoulBridge {
     onVisualClickFailure(
       cb: (info: { description: string; reason: string; progress?: boolean }) => void
     ): Unsubscribe
+    /**
+     * v2.0 Phase 2 — click-bench runner progress. Fires once per cell
+     * (benchmark × strategy) as the runner advances. The Settings
+     * dialog uses it to paint a live "cell N of M" ribbon while a run
+     * is in flight — without it the dialog showed a generic spinner
+     * for the full duration regardless of progress.
+     */
+    onClickBenchProgress(
+      cb: (info: {
+        benchmarkIndex: number
+        benchmarkTotal: number
+        strategyIndex: number
+        strategyTotal: number
+        benchmarkLabel: string
+        strategyLabel: string
+      }) => void
+    ): Unsubscribe
+    /**
+     * v2.0 Phase 4 — hover-to-teach capture events. Fires once after
+     * `taughtClicks.startCapture()` is armed: either `captured` with
+     * the UIA element under the cursor at hotkey-press time, or
+     * `cancelled` when the user dismissed the capture from Settings.
+     */
+    onTaughtClicksEvent(
+      cb: (
+        info:
+          | {
+              kind: 'captured'
+              element: {
+                name: string
+                automationId: string
+                controlType: string
+                x: number
+                y: number
+                w: number
+                h: number
+              } | null
+              cursorX: number
+              cursorY: number
+            }
+          | { kind: 'cancelled' }
+      ) => void
+    ): Unsubscribe
+    /**
+     * v2.0 — browser-extension bridge status pushes. Fires whenever the
+     * local IPC server starts/stops or a native-host client connects /
+     * disconnects, so the Settings panel's chip stays live without
+     * polling.
+     */
+    onExtensionStatus(cb: (status: BrowserExtensionStatus) => void): Unsubscribe
+    /**
+     * v2.0 — Conversation-mode toggle. Fires when the user hits the
+     * global hotkey (Ctrl/Cmd+Shift+V) so the renderer can start /
+     * stop the voice loop from anywhere.
+     */
+    onConversationToggle(cb: () => void): Unsubscribe
   }
 }

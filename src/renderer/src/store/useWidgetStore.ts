@@ -126,10 +126,7 @@ export const useWidgetStore = create<WidgetStore>((set, get) => ({
     }
     // Keep last 8 — slightly more than v1.7.1's 5 because silence beats
     // + errors push useful entries off the list faster.
-    const next = [{ at: Date.now(), text: trimmed, matched, error }, ...get().wakeHeard].slice(
-      0,
-      8
-    )
+    const next = [{ at: Date.now(), text: trimmed, matched, error }, ...get().wakeHeard].slice(0, 8)
     set({ wakeHeard: next })
   },
 

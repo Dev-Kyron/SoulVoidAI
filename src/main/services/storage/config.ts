@@ -8,8 +8,10 @@ import { hasApiKey } from './keys'
 import { PROVIDER_META, isLocalProvider } from '../ai/types'
 import { wasLocalProviderDetected } from '../ai/detect'
 import { DEFAULT_MODE } from '@shared/modes'
+import type { PersonaTemplate } from '@shared/personas'
 import { defaultPermissionState } from '@shared/permissions'
 import type { PermissionId, PermissionState } from '@shared/permissions'
+import { DEFAULT_SYSTEM_PROMPT } from '@shared/defaultPrompts'
 import type {
   AppearanceConfig,
   ChatBehaviourConfig,
@@ -34,6 +36,14 @@ export interface AppConfigFile {
   activeProvider: ProviderId
   providers: Record<ProviderId, ProviderSettings>
   activeMode: ModeId
+  /**
+   * v2.0 — user-defined persona templates. Each is a sharable bundle of
+   * {system prompt + recommended model + sample prompts} that the user
+   * can apply to a thread via the Persona panel. Doesn't override the
+   * 6 built-in MODES — these are presets on top of them. Empty by
+   * default; populated by export/import or in-app creation.
+   */
+  customPersonas: PersonaTemplate[]
   permissions: Record<PermissionId, PermissionState>
   appearance: AppearanceConfig
   voice: VoiceConfig
@@ -51,7 +61,33 @@ export interface AppConfigFile {
   /** When each model id was first observed from a `listModels` call, per provider. */
   seenModels: SeenModels
   syncFolder: string
+  /** v2.0 — true once the user has set up the E2E sync vault on this
+   *  device (either created or joined). Independent of `syncFolder`
+   *  being set: the legacy manual backup/import path also uses
+   *  `syncFolder` without engaging the continuous encrypted engine. */
+  syncPaired?: boolean
+  /** v2.0 — this device's UUID inside the sync vault. Stable across
+   *  launches; regenerated only on unpair/re-pair. */
+  syncDeviceId?: string
+  /** v2.0 — user-visible label for this device (e.g. "Kyron-Desktop"),
+   *  shown in the vault's device registry on every peer. */
+  syncDeviceName?: string
+  /** v2.0 polish — the encrypted-vault subfolder (typically
+   *  `<userPickedParent>/voidsoul-sync`). Kept distinct from
+   *  `syncFolder` so the legacy "Push bundle" button can't be tricked
+   *  into writing a plaintext JSON dump into the encrypted vault
+   *  directory after pairing. The engine reads + writes only this
+   *  field; the legacy backup path reads + writes only `syncFolder`. */
+  syncVaultFolder?: string
   onboarded: boolean
+  /** v2.0 — browser-extension bridge master switch. Off by default; the
+   *  Settings panel toggles it after the user pastes their extension id
+   *  and accepts the install prompt. Optional in the on-disk schema so
+   *  older config files migrate cleanly to a sensible default. */
+  browserExtension?: { enabled: boolean }
+  /** v2.0 — Home Assistant native integration. Off by default. Token
+   *  stored separately in the OS keychain. */
+  homeAssistant?: { url: string; enabled: boolean }
   /** Last expanded-panel size (height 0 means "auto, full height"). */
   panel: { width: number; height: number }
   /**
@@ -63,71 +99,11 @@ export interface AppConfigFile {
   systemPrompt: string
 }
 
-// Default base prompt — the runtime composer layers persona, mode, recent
-// emotional state, and time-of-day blocks on top of this at call time, so
-// this string only has to establish character + the four house rules
-// (concrete, read-the-room, voice-aware, permission-flow). Last rewritten
-// for v1.5.0: the v1.0 wording called this an "AI operating layer", which
-// is app marketing not a self-concept the model can act on.
-const DEFAULT_SYSTEM_PROMPT =
-  "You are Soul (or Void — your active persona is in context), a local AI companion " +
-  "living inside the user's VoidSoul desktop app. Be precise and concrete: prefer " +
-  "runnable code, tight steps, and direct answers over hedge. Read the room — the " +
-  "user's mode, recent emotional state, and time of day are all in your context. " +
-  "Let them shape your tone without narrating them. Your replies may be heard aloud " +
-  "via Piper TTS; mark genuine tone shifts with <voice tone=\"casual\"> style markers " +
-  "when a different delivery would land better. " +
-  // v1.9.2 — flipped the "describe what you're about to do" guidance.
-  // The old wording told the model to NARRATE its actions, which on
-  // every model we tested caused it to say "I'll click the Send
-  // button now!" without ever calling the tool. For tools that have
-  // their own user-facing safety preview (notably click_on_screen,
-  // which shows a 3-second cancellable cyan-ring HUD before firing),
-  // narrating first is pure friction. New rule: ACT first for
-  // visible/cancellable tools; describe first only for irreversible
-  // ones (file delete, send a payment, post publicly).
-  "When the user asks you to do something on their screen — click, " +
-  "press, send, submit, open, close, select, tap — CALL THE MATCHING " +
-  "TOOL IMMEDIATELY. Don't announce 'I'll click that' and stop; just " +
-  "call click_on_screen (or the equivalent tool). click_on_screen " +
-  "itself shows the user a 3-second cancellable preview before " +
-  "anything actually happens, so there is no risk in acting at once. " +
-  "Only describe-then-act when the action is irreversible (deleting " +
-  "files, sending payments, posting publicly). " +
-  // v1.12.6 — identity reinforcement. Weaker models (gpt-4o-mini, some
-  // local Llama/Mistral checkpoints) sometimes start describing
-  // VoidSoul as a third-party "AI system the user is working with"
-  // and decline to act, treating the tools/permissions list as if it
-  // belonged to someone else's product. This block anchors identity
-  // hard: YOU are the AI, the configured surface is YOURS, refusing
-  // a tool call you're capable of is itself the wrong answer.
-  "\n\nIdentity anchor: YOU are this AI. When the user opens Settings " +
-  "and configures permissions, MCP servers, or plugins, those are YOUR " +
-  "capabilities — they describe what you can do on this machine. Do not " +
-  "refer to 'the AI system you're working with' or 'the assistant you " +
-  "have set up' — that's you. Do not say 'I can't access files on your " +
-  "screen' or 'I can't execute actions on your computer' when the " +
-  "permissions in your context show those capabilities are granted AND " +
-  "the matching tool is in your toolbox. If a tool exists for what the " +
-  "user asked, the correct answer is to call it. Refusing a capability " +
-  "you actually have is a worse failure than calling the wrong tool. " +
-  // v1.13.2 — tool fallback hierarchy. The MCP filesystem server is
-  // SANDBOXED to a single configured folder; the built-in read_file /
-  // write_file / list_files actions have unrestricted filesystem
-  // access (modulo the `filesystem` permission, which is granted when
-  // the user can see Permissions → File System as ON). Models keep
-  // calling MCP filesystem first, hitting "outside allowed directories"
-  // for any path the user didn't pre-scope, and then giving up. Tell
-  // them to fall back.
-  "\n\nFile-access fallback: when reading/writing any file by ABSOLUTE " +
-  "PATH on the user's machine, prefer the BUILT-IN `read_file` / " +
-  "`write_file` / `list_files` tools — they work on any path the user " +
-  "has filesystem permission for, with no folder allowlist. The MCP " +
-  "filesystem server (if installed) is sandboxed to a specific folder " +
-  "and will refuse paths outside it with 'Access denied — path outside " +
-  "allowed directories'. If you see that error, retry the same path " +
-  "with the built-in tool instead of telling the user you can't access " +
-  "their file. The built-in tool can read it."
+// v2.0 polish — DEFAULT_SYSTEM_PROMPT body now lives ONLY in
+// shared/defaultPrompts.ts. The inline copy here was 130 lines of duplicated
+// string with a misleading "asserted equal at boot" comment promising drift
+// protection that didn't exist. One source of truth, imported at the top.
+// All references in this file point at the imported binding.
 
 const DEFAULT_PROVIDERS = (Object.keys(PROVIDER_META) as ProviderId[]).reduce(
   (acc, id) => {
@@ -146,6 +122,9 @@ const DEFAULT_CONFIG: AppConfigFile = {
   activeProvider: 'ollama',
   providers: DEFAULT_PROVIDERS,
   activeMode: DEFAULT_MODE,
+  // v2.0 — empty by default; users grow this list by importing bundles
+  // or saving their own through the Persona panel.
+  customPersonas: [],
   permissions: defaultPermissionState(),
   appearance: {
     accent: 'violet',
@@ -155,6 +134,9 @@ const DEFAULT_CONFIG: AppConfigFile = {
     alwaysOnTop: true,
     launchOnStartup: false,
     screenAwareness: false,
+    // v2.0 — semantic awareness opt-in. Local OCR via tesseract.js
+    // when both this AND the coarse `screenAwareness` flag are on.
+    semanticScreenAwareness: false,
     nexusStyle: 'advanced',
     locale: 'system',
     dnd: { enabled: false, quietStart: null, quietEnd: null }
@@ -169,7 +151,12 @@ const DEFAULT_CONFIG: AppConfigFile = {
     persona: 'void',
     rate: 1,
     volume: 1,
-    wakeWord: { enabled: false }
+    wakeWord: { enabled: false },
+    // v2.0 — both default to empty so pre-2.0 behaviour is preserved:
+    // activeVoice() falls back to voices[0], resolveEffectivePersona()
+    // falls back to the global `persona`. Users opt in via Settings.
+    selectedVoiceByPersona: {},
+    personaByMode: {}
   },
   chat: {
     agent: true,
@@ -177,7 +164,11 @@ const DEFAULT_CONFIG: AppConfigFile = {
     private: false,
     rag: false,
     embeddingProvider: 'auto',
-    autoRoute: true
+    autoRoute: true,
+    // v2.0 — plugin JS hooks default OFF. Even when a plugin is enabled
+    // and its manifest declares hooks, nothing runs until the user flips
+    // this master switch in Settings. Forces an informed choice.
+    pluginHooks: false
   },
   memory: {
     // Emotional context on by default — Soul's wishlist item #1, beta
@@ -186,7 +177,25 @@ const DEFAULT_CONFIG: AppConfigFile = {
     emotionalContext: true,
     // Auto-pick the cheapest model from the active provider unless the
     // user pins one explicitly in Settings.
-    sentimentModel: null
+    sentimentModel: null,
+    // v2.0 — summariser defaults match the pre-2.0 hardcoded constants
+    // (SUMMARIZE_TRIGGER_TOKENS=10_000, KEEP_RECENT_MIN=8) so existing
+    // users see identical behaviour after upgrade. Users tune per-mode
+    // via summariserPerMode below.
+    summariserTriggerTokens: 10_000,
+    summariserKeepRecent: 8,
+    summariserPerMode: {},
+    // v2.0 — pause fact extraction during stressed/stuck sessions so
+    // the assistant doesn't memorialise frustration. Defaults ON; only
+    // does anything when `emotionalContext` is also on (no signal
+    // otherwise).
+    sentimentPruning: true,
+    // v2.0 — passive biographical profile. Headline v2.0 feature: a
+    // categorized profile (identity / projects / preferences /
+    // relationships / tools / work-patterns) auto-extracted from each
+    // streaming reply. Default ON because passive memory is the whole
+    // point; users who hate the idea turn it off in Settings → Memory.
+    biographical: true
   },
   proactiveVoice: {
     // Master kill-switch ON by default so that when the user opts INTO
@@ -218,10 +227,20 @@ const DEFAULT_CONFIG: AppConfigFile = {
   // opts in explicitly from Settings → Experimental with copy that
   // sets honest expectations about reliability.
   experimentalFeatures: {
-    visualClick: false
+    visualClick: false,
+    // v2.0 Phase 2 — `auto` does the right thing for most users (uia-then-
+    // vision baseline, but transparently upgrade to sonnet-computer-use
+    // when they happen to be on a capable Anthropic Sonnet model). Power
+    // users override from Settings → Experimental.
+    clickStrategy: 'auto'
   },
   syncFolder: '',
+  syncPaired: false,
+  syncDeviceId: '',
+  syncDeviceName: '',
+  syncVaultFolder: '',
   onboarded: false,
+  browserExtension: { enabled: false },
   panel: { width: 472, height: 0 },
   systemPrompt: DEFAULT_SYSTEM_PROMPT
 }
@@ -277,13 +296,13 @@ function normalize(c: AppConfigFile): AppConfigFile {
     autoMemory: c.chat?.autoMemory ?? legacy.autoMemory ?? DEFAULT_CONFIG.chat.autoMemory,
     private: c.chat?.private ?? legacy.privateChat ?? DEFAULT_CONFIG.chat.private,
     rag: c.chat?.rag ?? legacy.ragEnabled ?? DEFAULT_CONFIG.chat.rag,
-    embeddingProvider:
-      c.chat?.embeddingProvider ?? DEFAULT_CONFIG.chat.embeddingProvider,
+    embeddingProvider: c.chat?.embeddingProvider ?? DEFAULT_CONFIG.chat.embeddingProvider,
     // v1.13.4 — back-compat: existing configs without `autoRoute` get
     // `true` so the router stays on by default. New installs also start
     // ON. User can flip it OFF in Settings → Providers when the router's
     // mid-prompt switching produces worse results than their Active pick.
-    autoRoute: c.chat?.autoRoute ?? DEFAULT_CONFIG.chat.autoRoute
+    autoRoute: c.chat?.autoRoute ?? DEFAULT_CONFIG.chat.autoRoute,
+    pluginHooks: c.chat?.pluginHooks ?? DEFAULT_CONFIG.chat.pluginHooks
   }
   // Strip the legacy keys so they don't linger on disk forever after migration.
   const cleaned: Record<string, unknown> = { ...c }
@@ -315,12 +334,18 @@ function normalize(c: AppConfigFile): AppConfigFile {
     },
     seenModels: c.seenModels ?? DEFAULT_CONFIG.seenModels,
     panel: { ...DEFAULT_CONFIG.panel, ...c.panel },
-    permissions: { ...DEFAULT_CONFIG.permissions, ...c.permissions }
+    permissions: { ...DEFAULT_CONFIG.permissions, ...c.permissions },
+    // v2.0 — pre-2.0 configs lack the field; default to []. Existing
+    // personas pass through verbatim (no per-item migration today).
+    customPersonas: Array.isArray(c.customPersonas) ? c.customPersonas : []
   }
 }
 
 /** Records first-seen timestamps for newly-discovered models, returns the diff. */
-export function recordSeenModels(provider: ProviderId, modelIds: string[]): {
+export function recordSeenModels(
+  provider: ProviderId,
+  modelIds: string[]
+): {
   firstSeen: Record<string, string>
   newSinceLast: string[]
 } {
@@ -355,6 +380,40 @@ export function getConfig(): AppConfigFile {
 
 export function updateConfig(patch: Partial<AppConfigFile>): AppConfigFile {
   return store().set(patch)
+}
+
+/* --------------------------- Persona templates -------------------------- */
+
+/** Read the full list — used by the renderer to populate the picker. */
+export function listCustomPersonas(): PersonaTemplate[] {
+  return store().get().customPersonas
+}
+
+/**
+ * Insert or replace a persona by id. Returns the new list so the renderer
+ * can apply the update without a second round-trip. The id is the unique
+ * key: an import that re-uses an existing id overwrites; importing the
+ * same bundle twice (which mints a fresh id-with-timestamp suffix) lands
+ * as a second entry, which is the expected "save another copy" behaviour.
+ */
+export function upsertCustomPersona(persona: PersonaTemplate): PersonaTemplate[] {
+  const current = store().get().customPersonas
+  const idx = current.findIndex((p) => p.id === persona.id)
+  const next =
+    idx === -1
+      ? [...current, persona]
+      : [...current.slice(0, idx), persona, ...current.slice(idx + 1)]
+  store().set({ customPersonas: next })
+  return next
+}
+
+/** Remove a persona by id. Returns the surviving list. */
+export function removeCustomPersona(id: string): PersonaTemplate[] {
+  const next = store()
+    .get()
+    .customPersonas.filter((p) => p.id !== id)
+  store().set({ customPersonas: next })
+  return next
 }
 
 export function setPanelSize(width: number, height: number): void {
@@ -413,6 +472,7 @@ export function getClientConfig(): ClientConfig {
     activeProvider: c.activeProvider,
     providers,
     activeMode: c.activeMode,
+    customPersonas: c.customPersonas,
     permissions: c.permissions,
     appearance: c.appearance,
     voice: c.voice,
@@ -423,7 +483,15 @@ export function getClientConfig(): ClientConfig {
     experimentalFeatures: c.experimentalFeatures,
     seenModels: c.seenModels,
     syncFolder: c.syncFolder,
+    syncPaired: c.syncPaired ?? false,
+    syncDeviceId: c.syncDeviceId ?? '',
+    syncDeviceName: c.syncDeviceName ?? '',
+    syncVaultFolder: c.syncVaultFolder ?? '',
+    homeAssistant: c.homeAssistant ?? { url: '', enabled: false },
     onboarded: c.onboarded,
-    systemPrompt: c.systemPrompt
+    systemPrompt: c.systemPrompt,
+    // v2.0 — browser-extension bridge config. Falls back to disabled when
+    // the field is missing in the persisted file (pre-2.0 installs).
+    browserExtension: { enabled: c.browserExtension?.enabled ?? false }
   }
 }

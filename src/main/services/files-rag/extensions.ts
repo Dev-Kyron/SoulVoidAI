@@ -68,8 +68,6 @@ export const DOCUMENT_EXTENSIONS: ReadonlySet<string> = new Set(['.pdf', '.docx'
 export function isSupportedExtension(ext: string): boolean {
   const lower = ext.toLowerCase()
   return (
-    PLAIN_TEXT_EXTENSIONS.has(lower) ||
-    CODE_EXTENSIONS.has(lower) ||
-    DOCUMENT_EXTENSIONS.has(lower)
+    PLAIN_TEXT_EXTENSIONS.has(lower) || CODE_EXTENSIONS.has(lower) || DOCUMENT_EXTENSIONS.has(lower)
   )
 }

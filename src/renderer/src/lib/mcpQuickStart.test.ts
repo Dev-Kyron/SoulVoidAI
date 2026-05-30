@@ -34,10 +34,7 @@ function makeEntry(overrides: Partial<McpRegistryEntry> = {}): McpRegistryEntry 
 
 describe('filterZeroConfigEntries', () => {
   it('keeps curated entries with no prompts and no requires', () => {
-    const entries = [
-      makeEntry({ id: 'a' }),
-      makeEntry({ id: 'b' })
-    ]
+    const entries = [makeEntry({ id: 'a' }), makeEntry({ id: 'b' })]
     expect(filterZeroConfigEntries(entries).map((e) => e.id)).toEqual(['a', 'b'])
   })
 
@@ -64,18 +61,12 @@ describe('filterZeroConfigEntries', () => {
   })
 
   it('drops entries with a system requires (uv/docker/etc)', () => {
-    const entries = [
-      makeEntry({ id: 'keep' }),
-      makeEntry({ id: 'drop', requires: 'uv' })
-    ]
+    const entries = [makeEntry({ id: 'keep' }), makeEntry({ id: 'drop', requires: 'uv' })]
     expect(filterZeroConfigEntries(entries).map((e) => e.id)).toEqual(['keep'])
   })
 
   it('drops discovery-only entries (no install command)', () => {
-    const entries = [
-      makeEntry({ id: 'keep' }),
-      makeEntry({ id: 'drop', discoveryOnly: true })
-    ]
+    const entries = [makeEntry({ id: 'keep' }), makeEntry({ id: 'drop', discoveryOnly: true })]
     expect(filterZeroConfigEntries(entries).map((e) => e.id)).toEqual(['keep'])
   })
 
@@ -120,7 +111,10 @@ describe('resolveProfileEntries', () => {
     const loaded = [
       makeEntry({ id: 'a' }),
       makeEntry({ id: 'b' }),
-      makeEntry({ id: 'needs-key', envPrompts: [{ key: 'K', label: '', description: '', secret: true }] })
+      makeEntry({
+        id: 'needs-key',
+        envPrompts: [{ key: 'K', label: '', description: '', secret: true }]
+      })
     ]
     expect(resolveProfileEntries(profile, loaded).map((e) => e.id)).toEqual(['a', 'b'])
   })

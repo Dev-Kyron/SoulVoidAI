@@ -127,7 +127,7 @@ export function UsageSettings(): JSX.Element {
   // loading state — putting hooks after a conditional return is a
   // hooks-order violation that crashes the whole component tree on
   // the second render. Default values cover the !budget loading case.
-  const currentCurrency = ((budget?.currency as CurrencyCode | undefined) ?? 'USD')
+  const currentCurrency = (budget?.currency as CurrencyCode | undefined) ?? 'USD'
   const currentRate = budget?.usdRate ?? 1
   const fmt = useMemo(
     () => makeFormatter(currentCurrency, currentRate),
@@ -154,9 +154,7 @@ export function UsageSettings(): JSX.Element {
     })
     setBudget(persisted)
     // Refresh the budget input to show the equivalent in the new currency.
-    setDraftBudget(
-      persisted.monthlyUsd != null ? (persisted.monthlyUsd * newRate).toFixed(2) : ''
-    )
+    setDraftBudget(persisted.monthlyUsd != null ? (persisted.monthlyUsd * newRate).toFixed(2) : '')
   }
 
   if (!summary || !budget) {
@@ -200,8 +198,7 @@ export function UsageSettings(): JSX.Element {
             </p>
             <p className="text-[10px] text-slate-500">
               across {summary.totalEntries} call{summary.totalEntries === 1 ? '' : 's'}
-              {summary.unknownPricing > 0 &&
-                ` · ${summary.unknownPricing} with unknown pricing`}
+              {summary.unknownPricing > 0 && ` · ${summary.unknownPricing} with unknown pricing`}
             </p>
           </div>
           <button
@@ -230,20 +227,17 @@ export function UsageSettings(): JSX.Element {
                 By provider
                 <SectionHint text="Share of this month's spend split across providers. Stacked bar means one strip per provider sized to their slice of the total." />
               </p>
-              <ProviderShareBar
-                byProvider={summary.byProvider}
-                total={summary.totalCost}
-              />
+              <ProviderShareBar byProvider={summary.byProvider} total={summary.totalCost} />
             </div>
           )}
         </div>
 
         {/* v1.12.0 — Provider performance dashboard. Surfaces the
-          * latency / success-rate / cost trade-off per provider so the
-          * user can pick a favourite based on data, not vibes. Empty
-          * state shows when no rows match (e.g. fresh install with no
-          * recorded calls yet) — keeps the panel from rendering an
-          * empty bordered box. */}
+         * latency / success-rate / cost trade-off per provider so the
+         * user can pick a favourite based on data, not vibes. Empty
+         * state shows when no rows match (e.g. fresh install with no
+         * recorded calls yet) — keeps the panel from rendering an
+         * empty bordered box. */}
         <ProviderPerformanceDashboard
           performance={performance}
           windowDays={performanceWindow}
@@ -260,9 +254,7 @@ export function UsageSettings(): JSX.Element {
               <span
                 className={cn(
                   'flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[9px] font-semibold',
-                  pct >= 100
-                    ? 'bg-rose-500/15 text-rose-300'
-                    : 'bg-amber-400/15 text-amber-300'
+                  pct >= 100 ? 'bg-rose-500/15 text-rose-300' : 'bg-amber-400/15 text-amber-300'
                 )}
               >
                 <AlertTriangle size={9} />
@@ -279,10 +271,10 @@ export function UsageSettings(): JSX.Element {
             </div>
           )}
           {/* v1.12.0 — currency-aware budget controls. Two rows:
-            *   1) currency dropdown + "1 USD = X" rate input (hidden for USD)
-            *   2) amount + Save + remaining
-            * Single Save commits all three so the user can adjust currency,
-            * rate, AND amount in one shot without partial state confusion. */}
+           *   1) currency dropdown + "1 USD = X" rate input (hidden for USD)
+           *   2) amount + Save + remaining
+           * Single Save commits all three so the user can adjust currency,
+           * rate, AND amount in one shot without partial state confusion. */}
           <div className="space-y-1.5">
             <div className="flex items-center gap-1.5">
               <span className="text-[10px] text-slate-500">Currency</span>
@@ -397,8 +389,7 @@ export function UsageSettings(): JSX.Element {
                     {entry.model}
                   </span>
                   <span className="shrink-0 text-slate-500 tabular-nums">
-                    {entry.inputTokens.toLocaleString()}↑{' '}
-                    {entry.outputTokens.toLocaleString()}↓
+                    {entry.inputTokens.toLocaleString()}↑ {entry.outputTokens.toLocaleString()}↓
                   </span>
                   <span className="w-14 shrink-0 text-right text-slate-400 tabular-nums">
                     {relativeTime(entry.ts)}
@@ -446,8 +437,8 @@ export function UsageSettings(): JSX.Element {
         )}
 
         <p className="text-[9px] italic text-slate-600">
-          Estimates only. Token counts are derived from text length and image counts; the actual
-          API bill may differ by a few percent. Pricing refreshed late-2025.
+          Estimates only. Token counts are derived from text length and image counts; the actual API
+          bill may differ by a few percent. Pricing refreshed late-2025.
         </p>
       </div>
     </CollapsibleSection>
@@ -497,8 +488,8 @@ function ProviderPerformanceDashboard({
         <SectionHint text="Per-provider rollup over a rolling window. Calls = total requests; Success = % that returned a usable response; Avg/p95 = wall-clock latency for successful calls; Cost = USD spent. Use it to decide which provider to favour." />
         <span className="text-[9px] text-slate-500">latency · success · cost</span>
         {/* Window toggle — three short pills. Defaulting to 30d matches
-          * the spec; 7d for "what's broken right now" and 90d for "what
-          * has the long track record". */}
+         * the spec; 7d for "what's broken right now" and 90d for "what
+         * has the long track record". */}
         <div className="ml-auto flex items-center gap-0.5 rounded-md border border-white/10 bg-black/30 p-0.5">
           {([7, 30, 90] as const).map((d) => (
             <button
@@ -539,9 +530,7 @@ function ProviderPerformanceDashboard({
                 className="grid grid-cols-[1fr_auto_auto_auto_auto] items-center gap-3 rounded-md bg-white/[0.03] px-2 py-1.5 text-[10px]"
               >
                 <span className="min-w-0 truncate font-mono text-slate-200">{row.provider}</span>
-                <span className="w-10 text-right text-slate-300 tabular-nums">
-                  {row.callCount}
-                </span>
+                <span className="w-10 text-right text-slate-300 tabular-nums">{row.callCount}</span>
                 <span
                   className={cn(
                     'flex w-12 items-center justify-end gap-0.5 font-semibold tabular-nums',
@@ -554,10 +543,10 @@ function ProviderPerformanceDashboard({
                   }
                 >
                   {/* v1.12.5 — guard the green ✓ on actually having data.
-                    * Previously `failureCount === 0` triggered the check even
-                    * when successRate was null (all-legacy entries), so a
-                    * provider with zero v1.12+ samples rendered as
-                    * "✓ —" — misleading "perfectly healthy" next to no data. */}
+                   * Previously `failureCount === 0` triggered the check even
+                   * when successRate was null (all-legacy entries), so a
+                   * provider with zero v1.12+ samples rendered as
+                   * "✓ —" — misleading "perfectly healthy" next to no data. */}
                   {row.successRate == null ? null : row.failureCount === 0 ? (
                     <Check size={9} />
                   ) : row.successRate < 90 ? (
@@ -592,8 +581,8 @@ function ProviderPerformanceDashboard({
             ))}
           </div>
           {/* Footnote — keeps the legend honest. Latency only includes
-            * recorded successful calls (failures don't always capture
-            * timing); p95 only shows with 5+ samples. */}
+           * recorded successful calls (failures don't always capture
+           * timing); p95 only shows with 5+ samples. */}
           <p className="mt-2 text-[9px] italic text-slate-600">
             Latency from successful calls with recorded timing. p95 needs 5+ samples to surface.
           </p>

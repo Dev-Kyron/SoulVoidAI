@@ -25,8 +25,8 @@ export function PermissionsManager(): JSX.Element | null {
       hint="Control what VoidSoul may do on your computer. Everything stays off until you grant it, and you can revoke any of it anytime."
     >
       {/* v1.12.6 — see McpSettings for the same banner; both panels render
-        * inert tool surface when Agent mode is off, so both deserve the
-        * heads-up. */}
+       * inert tool surface when Agent mode is off, so both deserve the
+       * heads-up. */}
       <AgentReadinessNotice />
       {anyGranted && (
         <div className="mb-2 flex justify-end">

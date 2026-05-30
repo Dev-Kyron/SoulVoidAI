@@ -123,18 +123,33 @@ p,
 span,
 code,
 pre,
-h1, h2, h3, h4, h5, h6,
-li, td, th,
-blockquote, label,
-.markdown, .markdown *,
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+li,
+td,
+th,
+blockquote,
+label,
+.markdown,
+.markdown *,
 .selectable,
-input, textarea, [contenteditable] {
+input,
+textarea,
+[contenteditable] {
   user-select: text;
 }
-button, button *,
-[role='button'], [role='button'] *,
-[role='tab'], [role='tab'] *,
-[role='menuitem'], [role='menuitem'] * {
+button,
+button *,
+[role='button'],
+[role='button'] *,
+[role='tab'],
+[role='tab'] *,
+[role='menuitem'],
+[role='menuitem'] * {
   user-select: none;
 }
 /* SVG icons (Lucide) inside text containers shouldn't get a text
@@ -270,40 +285,96 @@ svg {
  * Specificity bumped via `:root[data-theme='light']` so we don't need
  * !important — Tailwind's single-class rules lose to the prefixed ones.
  */
-:root[data-theme='light'] .bg-black\/10 { background-color: rgba(15, 23, 42, 0.04); }
-:root[data-theme='light'] .bg-black\/20 { background-color: rgba(15, 23, 42, 0.05); }
-:root[data-theme='light'] .bg-black\/25 { background-color: rgba(15, 23, 42, 0.06); }
-:root[data-theme='light'] .bg-black\/30 { background-color: rgba(15, 23, 42, 0.07); }
-:root[data-theme='light'] .bg-black\/40 { background-color: rgba(15, 23, 42, 0.08); }
-:root[data-theme='light'] .bg-black\/50 { background-color: rgba(15, 23, 42, 0.1); }
-:root[data-theme='light'] .bg-black\/65 { background-color: rgba(15, 23, 42, 0.4); }
-:root[data-theme='light'] .bg-black\/80 { background-color: rgba(15, 23, 42, 0.55); }
-:root[data-theme='light'] .bg-white\/5 { background-color: rgba(15, 23, 42, 0.04); }
-:root[data-theme='light'] .bg-white\/10 { background-color: rgba(15, 23, 42, 0.06); }
-:root[data-theme='light'] .bg-white\/15 { background-color: rgba(15, 23, 42, 0.08); }
-:root[data-theme='light'] .bg-void-700 { background-color: #f5f6fb; }
+:root[data-theme='light'] .bg-black\/10 {
+  background-color: rgba(15, 23, 42, 0.04);
+}
+:root[data-theme='light'] .bg-black\/20 {
+  background-color: rgba(15, 23, 42, 0.05);
+}
+:root[data-theme='light'] .bg-black\/25 {
+  background-color: rgba(15, 23, 42, 0.06);
+}
+:root[data-theme='light'] .bg-black\/30 {
+  background-color: rgba(15, 23, 42, 0.07);
+}
+:root[data-theme='light'] .bg-black\/40 {
+  background-color: rgba(15, 23, 42, 0.08);
+}
+:root[data-theme='light'] .bg-black\/50 {
+  background-color: rgba(15, 23, 42, 0.1);
+}
+:root[data-theme='light'] .bg-black\/65 {
+  background-color: rgba(15, 23, 42, 0.4);
+}
+:root[data-theme='light'] .bg-black\/80 {
+  background-color: rgba(15, 23, 42, 0.55);
+}
+:root[data-theme='light'] .bg-white\/5 {
+  background-color: rgba(15, 23, 42, 0.04);
+}
+:root[data-theme='light'] .bg-white\/10 {
+  background-color: rgba(15, 23, 42, 0.06);
+}
+:root[data-theme='light'] .bg-white\/15 {
+  background-color: rgba(15, 23, 42, 0.08);
+}
+:root[data-theme='light'] .bg-void-700 {
+  background-color: #f5f6fb;
+}
 
-:root[data-theme='light'] .border-white\/5 { border-color: rgba(15, 23, 42, 0.06); }
-:root[data-theme='light'] .border-white\/10 { border-color: rgba(15, 23, 42, 0.1); }
-:root[data-theme='light'] .border-white\/15 { border-color: rgba(15, 23, 42, 0.12); }
-:root[data-theme='light'] .border-white\/25 { border-color: rgba(15, 23, 42, 0.18); }
+:root[data-theme='light'] .border-white\/5 {
+  border-color: rgba(15, 23, 42, 0.06);
+}
+:root[data-theme='light'] .border-white\/10 {
+  border-color: rgba(15, 23, 42, 0.1);
+}
+:root[data-theme='light'] .border-white\/15 {
+  border-color: rgba(15, 23, 42, 0.12);
+}
+:root[data-theme='light'] .border-white\/25 {
+  border-color: rgba(15, 23, 42, 0.18);
+}
 
-:root[data-theme='light'] .text-white { color: #0f172a; }
-:root[data-theme='light'] .text-slate-100 { color: #0f172a; }
-:root[data-theme='light'] .text-slate-200 { color: #1f2937; }
-:root[data-theme='light'] .text-slate-300 { color: #334155; }
-:root[data-theme='light'] .text-slate-400 { color: #475569; }
-:root[data-theme='light'] .text-slate-500 { color: #64748b; }
-:root[data-theme='light'] .text-slate-600 { color: #94a3b8; }
+:root[data-theme='light'] .text-white {
+  color: #0f172a;
+}
+:root[data-theme='light'] .text-slate-100 {
+  color: #0f172a;
+}
+:root[data-theme='light'] .text-slate-200 {
+  color: #1f2937;
+}
+:root[data-theme='light'] .text-slate-300 {
+  color: #334155;
+}
+:root[data-theme='light'] .text-slate-400 {
+  color: #475569;
+}
+:root[data-theme='light'] .text-slate-500 {
+  color: #64748b;
+}
+:root[data-theme='light'] .text-slate-600 {
+  color: #94a3b8;
+}
 :root[data-theme='light'] .placeholder\:text-slate-500::placeholder,
-:root[data-theme='light'] .placeholder\:text-slate-600::placeholder { color: #94a3b8; }
+:root[data-theme='light'] .placeholder\:text-slate-600::placeholder {
+  color: #94a3b8;
+}
 
 /* The faint hover backgrounds also need flipping; the same darkening on
    a light surface reads as a depressed/pressed state — what we want. */
-:root[data-theme='light'] .hover\:bg-white\/5:hover { background-color: rgba(15, 23, 42, 0.05); }
-:root[data-theme='light'] .hover\:bg-white\/10:hover { background-color: rgba(15, 23, 42, 0.08); }
-:root[data-theme='light'] .hover\:bg-black\/30:hover { background-color: rgba(15, 23, 42, 0.08); }
-:root[data-theme='light'] .hover\:text-white:hover { color: #0f172a; }
+:root[data-theme='light'] .hover\:bg-white\/5:hover {
+  background-color: rgba(15, 23, 42, 0.05);
+}
+:root[data-theme='light'] .hover\:bg-white\/10:hover {
+  background-color: rgba(15, 23, 42, 0.08);
+}
+:root[data-theme='light'] .hover\:bg-black\/30:hover {
+  background-color: rgba(15, 23, 42, 0.08);
+}
+:root[data-theme='light'] .hover\:text-white:hover {
+  color: #0f172a;
+}
 
 /* highlight.js — a lean theme-aware palette. Dark uses muted neon tones that
    match the accent; light uses a softer set so contrast stays comfortable. */

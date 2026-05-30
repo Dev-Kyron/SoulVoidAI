@@ -1,0 +1,57 @@
+name: validate-mcp-registry
+
+# Runs on every PR that touches the MCP registry or the validator
+# itself, plus pushes to main so a direct commit can't slip past.
+# Same shape as validate-plugin-registry.yml; kept as a sibling
+# workflow rather than merged so the path filters stay tight (only
+# the relevant validator runs on each PR).
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'mcp-registry/**'
+      - 'scripts/validate-mcp-registry.mjs'
+      - '.github/workflows/validate-mcp-registry.yml'
+      # The validator mirrors fields from McpRegistryEntry in
+      # shared/types.ts. A rename or new field there without a
+      # matching validator update would silently let invalid rows
+      # through — trigger here too so the drift surfaces at the
+      # source change, not in a community PR.
+      - 'src/shared/types.ts'
+  pull_request:
+    paths:
+      - 'mcp-registry/**'
+      - 'scripts/validate-mcp-registry.mjs'
+      - '.github/workflows/validate-mcp-registry.yml'
+      - 'src/shared/types.ts'
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # fetch-depth: 1 — the validator reads one file, doesn't need
+      # repo history. Cuts ~5-10s off each PR's checkout step.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      # No npm install — the validator script is pure Node + native
+      # `fs`/`path`/`URL`. Keeps PR validation under a few seconds.
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Validate MCP registry shape
+        run: node scripts/validate-mcp-registry.mjs
+
+      # When a community PR adds a row, the maintainer needs to
+      # re-sign the registry before merge so the new content matches
+      # the bundled public key. We don't fail the PR on signature
+      # mismatch (the submitter can't sign — only the maintainer
+      # can), but we leave an explanatory log line for the reviewer.
+      - name: Note signature freshness
+        if: github.event_name == 'pull_request'
+        run: |
+          echo "::notice::If this PR adds or modifies registry entries, the maintainer must re-run \`node scripts/sign-mcp-registry.mjs\` before merge so the Ed25519 signature covers the new content."

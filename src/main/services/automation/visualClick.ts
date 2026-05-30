@@ -27,11 +27,6 @@
  *   in PowerShell runs DPI-unaware and accepts logical coords directly —
  *   matching `display.size.width`/`height` (which are themselves logical).
  */
-import { desktopCapturer, screen } from 'electron'
-import type { NativeImage } from 'electron'
-import { writeFile, mkdir } from 'node:fs/promises'
-import { join } from 'node:path'
-import { dataPath } from '../storage/store'
 import { log } from '../logger'
 import { broadcast } from '../../events'
 import { assertGranted, PermissionDeniedError } from '../permissions/permissions'
@@ -39,41 +34,17 @@ import { moveMouse, mouseClick } from './input'
 import { locateElement } from '../vision/locate'
 import { requestPreview } from './clickPreview'
 import { enumerateClickableElements } from './uia'
-import { matchUiaElement } from './uiaMatch'
+import { matchUiaElement, prettyControlType } from './uiaMatch'
 import { enumerateWindows, focusWindow } from './windowManager'
 import { matchWindow } from './windowMatch'
+import { captureScreen, REFINE_CROP } from './screenCapture'
+import { isSonnetComputerUseCapable, locateViaComputerUse } from './computerUseLocate'
+import { locateViaUiaPick } from './uiaPickLocate'
+import { findTaughtByDescription, recordTaughtHit, resolveTaughtClick } from './taughtClicks'
+import { getConfig } from '../storage/config'
+import type { CapturedScreen } from './screenCapture'
+import type { UiaElement } from './uia'
 import type { ActionResult } from '@shared/types'
-
-/**
- * Screenshot target width in LOGICAL pixels. v1.8.0 used 1600 to cap wire
- * cost, but beta showed the model returns coordinates off by 30-80 pixels
- * on small targets (chat send buttons, toolbar icons) at that resolution.
- * v1.8.1 raises the cap to 2400 — most desktops are 1920×1080, so this
- * effectively means "no downscale" for the common case and a modest
- * downscale on 4K. Worth the extra ~150KB of base64 payload per call.
- */
-const SCREENSHOT_TARGET_WIDTH = 2400
-
-/**
- * Two-pass refinement crop size. After the first locate predicts a point,
- * we crop a REFINE_CROP×REFINE_CROP region centred on it and ask the
- * model to refine. 500 is wide enough to keep the target in frame even
- * if the first pass was 200px off, but narrow enough that the model
- * sees the target at ~5× higher effective pixel density (since the
- * vision input is normalised to a fixed resolution by every provider).
- *
- * v1.9.6 — REFINEMENT IS AUTHORITATIVE. v1.9.5 had a first-pass-only
- * fallback that clicked the original guess when refinement failed,
- * thinking the preview HUD would catch errors. In practice the model
- * (made commit-biased by v1.9.5's prompt) confidently first-passed
- * wrong locations; refinement correctly said "target not in this
- * crop"; the fallback clicked the wrong location anyway at the
- * inflated first-pass confidence. We now treat refinement's "no" as
- * the strongest possible signal that the first pass was wrong and
- * refuse the click. The user gets a clear failure toast and can
- * retry with a tighter description.
- */
-const REFINE_CROP = 500
 
 /** Pause between closing the preview window and firing the actual click.
  *  Without this, the click can land on the still-fading HUD on slow systems.
@@ -81,57 +52,20 @@ const REFINE_CROP = 500
  *  measured on Windows. */
 const PRE_CLICK_DELAY_MS = 150
 
-interface CapturedScreen {
-  /** Source NativeImage — kept so the refinement pass can crop without
-   *  needing a second screen capture (faster + guarantees the crop
-   *  matches what was located against). */
-  image: NativeImage
-  dataUrl: string
-  /** Screenshot pixel dimensions (downscaled). */
-  width: number
-  height: number
-  /** Logical display dimensions, used to project model coords back to the
-   *  cursor coordinate space. */
-  displayWidth: number
-  displayHeight: number
-  /** On-disk path so the screenshot is auditable later (debug + review). */
-  path: string
-}
+/** v2.0 Phase 2 — computer-use never returns a per-action confidence,
+ *  but `fireClick` renders `Math.round(confidence * 100)` on the preview
+ *  HUD badge. Showing 0 or 10% would mislead — the tool wouldn't have
+ *  emitted a click action if it wasn't confident. Default high. */
+const COMPUTER_USE_DEFAULT_CONFIDENCE = 0.9
 
-async function captureForVisualClick(): Promise<CapturedScreen> {
-  const display = screen.getPrimaryDisplay()
-  // Logical width — Windows reports this even on a 200%-scaled monitor (e.g.
-  // a 4K 200% display reports 1920x1080 here). We downscale further for the
-  // wire cost cap but keep the projection math in logical space.
-  const logicalW = display.size.width
-  const logicalH = display.size.height
-  const targetW = Math.min(SCREENSHOT_TARGET_WIDTH, logicalW)
-  const ratio = targetW / Math.max(1, logicalW)
-  const targetH = Math.round(logicalH * ratio)
-
-  const sources = await desktopCapturer.getSources({
-    types: ['screen'],
-    thumbnailSize: { width: targetW, height: targetH }
-  })
-  if (sources.length === 0) {
-    throw new Error('No screen source available for visual click.')
-  }
-  const image = sources[0].thumbnail
-  const png = image.toPNG()
-  const dir = dataPath('visual-click')
-  await mkdir(dir, { recursive: true })
-  const filePath = join(dir, `target-${Date.now()}.png`)
-  await writeFile(filePath, png)
-  return {
-    image,
-    dataUrl: `data:image/png;base64,${png.toString('base64')}`,
-    width: targetW,
-    height: targetH,
-    displayWidth: logicalW,
-    displayHeight: logicalH,
-    path: filePath
-  }
-}
+/** v2.0 Phase 3 — uia-pick has no per-call confidence either. Slightly
+ *  lower than computer-use's default because picking from a curated
+ *  list is structurally easier (you only succeed when the model says
+ *  "id N") but the model's "I picked id N" doesn't tell us HOW certain
+ *  it was. 0.85 keeps the preview HUD badge in the "high" band without
+ *  matching the computer-use number 1:1, so users can read the badge
+ *  + the trail and tell which engine produced the click. */
+const UIA_PICK_DEFAULT_CONFIDENCE = 0.85
 
 /**
  * Two-pass refinement. Crops a {@link REFINE_CROP}-sized region around the
@@ -141,6 +75,15 @@ async function captureForVisualClick(): Promise<CapturedScreen> {
  * and says "target not here", we return null and the caller refuses the
  * click — never fall back to first-pass coords (that just clicks somewhere
  * we already know is wrong).
+ *
+ * v1.9.6 — REFINEMENT IS AUTHORITATIVE. v1.9.5 had a first-pass-only
+ * fallback that clicked the original guess when refinement failed,
+ * thinking the preview HUD would catch errors. In practice the model
+ * confidently first-passed wrong locations; refinement correctly said
+ * "target not in this crop"; the fallback clicked the wrong location
+ * anyway at the inflated first-pass confidence. We now treat refinement's
+ * "no" as the strongest possible signal that the first pass was wrong
+ * and refuse the click.
  */
 async function refineLocate(args: {
   shot: CapturedScreen
@@ -154,7 +97,10 @@ async function refineLocate(args: {
   // negative or out-of-bounds crop rect.
   const cropSize = Math.min(REFINE_CROP, shot.width, shot.height)
   const cropX = Math.max(0, Math.min(Math.round(firstPass.x - cropSize / 2), shot.width - cropSize))
-  const cropY = Math.max(0, Math.min(Math.round(firstPass.y - cropSize / 2), shot.height - cropSize))
+  const cropY = Math.max(
+    0,
+    Math.min(Math.round(firstPass.y - cropSize / 2), shot.height - cropSize)
+  )
 
   const cropped = shot.image.crop({ x: cropX, y: cropY, width: cropSize, height: cropSize })
   const cropDataUrl = `data:image/png;base64,${cropped.toPNG().toString('base64')}`
@@ -198,67 +144,6 @@ export interface VisualClickArgs {
   /** Caller-supplied abort signal — forwarded to the vision call so Stop
    *  in chat cancels mid-vision. */
   signal?: AbortSignal
-}
-
-/**
- * Captures a screenshot scoped to a specific window's screen bounds. The
- * resulting NativeImage is exactly the pixels of that window, projected
- * onto the same target width as the global path. Vision sees only the
- * target window's content.
- */
-async function captureForWindow(window: {
-  x: number
-  y: number
-  w: number
-  h: number
-}): Promise<CapturedScreen> {
-  const display = screen.getPrimaryDisplay()
-  const logicalW = display.size.width
-  const logicalH = display.size.height
-  // We capture the full display, then crop to the window bounds via
-  // nativeImage.crop. desktopCapturer can't constrain to a sub-rect
-  // directly, but the crop is cheap.
-  const targetW = Math.min(SCREENSHOT_TARGET_WIDTH, logicalW)
-  const ratio = targetW / Math.max(1, logicalW)
-  const targetH = Math.round(logicalH * ratio)
-  const sources = await desktopCapturer.getSources({
-    types: ['screen'],
-    thumbnailSize: { width: targetW, height: targetH }
-  })
-  if (sources.length === 0) {
-    throw new Error('No screen source available for visual click.')
-  }
-  const fullImage = sources[0].thumbnail
-  // Map window logical-pixel bounds into the downscaled screenshot space.
-  const cropX = Math.max(0, Math.round(window.x * ratio))
-  const cropY = Math.max(0, Math.round(window.y * ratio))
-  const cropW = Math.min(targetW - cropX, Math.round(window.w * ratio))
-  const cropH = Math.min(targetH - cropY, Math.round(window.h * ratio))
-  if (cropW <= 0 || cropH <= 0) {
-    throw new Error('Window bounds intersect screen at zero pixels.')
-  }
-  const image = fullImage.crop({ x: cropX, y: cropY, width: cropW, height: cropH })
-  const png = image.toPNG()
-  const dir = dataPath('visual-click')
-  await mkdir(dir, { recursive: true })
-  const filePath = join(dir, `target-${Date.now()}.png`)
-  await writeFile(filePath, png)
-  const size = image.getSize()
-  return {
-    image,
-    dataUrl: `data:image/png;base64,${png.toString('base64')}`,
-    width: size.width,
-    height: size.height,
-    // displayWidth/Height here are the WINDOW'S logical bounds, not
-    // the display's — the projection from screenshot pixels back to
-    // logical coords needs window space, not display space. Plus we
-    // need to remember the window's screen offset so the click lands
-    // at the right absolute position. Stored as such; fireClick adds
-    // the offset before issuing moveMouse.
-    displayWidth: window.w,
-    displayHeight: window.h,
-    path: filePath
-  }
 }
 
 /**
@@ -308,8 +193,7 @@ export async function performVisualClick(args: VisualClickArgs): Promise<ActionR
         ok: false,
         type: 'visual-click',
         needsPermission: 'screenCapture',
-        error:
-          'click_on_screen needs Screen Capture permission to see the screen before clicking.'
+        error: 'click_on_screen needs Screen Capture permission to see the screen before clicking.'
       }
     }
     throw err
@@ -347,9 +231,7 @@ export async function performVisualClick(args: VisualClickArgs): Promise<ActionR
         'automation',
         `[visual-click] in_window="${args.inWindow}" matched no open window — falling back to global search. Visible windows: ${titles || 'none'}`
       )
-      pushProgress(
-        `No window matched "${args.inWindow}" — searching all windows…`
-      )
+      pushProgress(`No window matched "${args.inWindow}" — searching all windows…`)
       // targetWindow stays null → downstream uses the global UIA +
       // full-screen screenshot path.
     } else {
@@ -370,7 +252,204 @@ export async function performVisualClick(args: VisualClickArgs): Promise<ActionR
           'automation',
           `[visual-click] focus call ${focused ? 'sent' : 'failed'} for hwnd ${targetWindow.hwnd}`
         )
+        // v2.0 polish — if Windows refuses the foreground steal (common
+        // when VoidSoul wasn't the source of recent user input), bail
+        // with a clear toast instead of running UIA against a still-
+        // background window. The pipeline would otherwise enumerate a
+        // stale/offscreen tree, fall through to vision against a
+        // screenshot of whatever the user actually had focused, and
+        // fire the click in the wrong app.
+        if (!focused) {
+          return failWithToast(
+            what,
+            `Could not bring "${targetWindow.title.slice(0, 48)}" to the foreground (Windows blocked the focus steal). Click into the window once and retry.`
+          )
+        }
         await wait(250)
+      }
+    }
+  }
+
+  // 0.3) v2.0 Phase 4 — taught-click short-circuit. If the user has
+  //      previously taught Soul a click for this exact description,
+  //      look up the UIA element directly from their teaching and
+  //      click it without ANY model call. Zero latency, zero cost,
+  //      zero ambiguity — the win that makes hover-to-teach worth
+  //      shipping. Falls through silently when no entry matches or
+  //      the taught element isn't visible on screen right now.
+  try {
+    // Look up by description + inWindow scope so a click taught for
+    // Slack ("send in slack" with entry.inWindow=Slack) doesn't match
+    // when the AI calls click_on_screen with a different in_window
+    // (or none). resolveTaughtClick then walks the entry's saved
+    // window — not the current call's — so the safety holds even if
+    // the AI later passes a contradictory in_window.
+    const taught = findTaughtByDescription(what, args.inWindow ?? null)
+    // v2.0 polish — `scopedHwnd` lookup used to `throw` and rely on the
+    // outer catch as a goto. That confused the error log ("taught-click
+    // consult threw") and made the storage-corruption path indistinguishable
+    // from the expected "window not open" fall-through. Now we resolve to a
+    // nullable `scopedHwnd` and gate the actual lookup with a boolean.
+    if (taught) {
+      let scopedHwnd: number | null = targetWindow?.hwnd ?? null
+      let scopeOk = true
+      if (taught.inWindow) {
+        const windows = await enumerateWindows()
+        const winMatch = matchWindow(windows, taught.inWindow)
+        if (winMatch) {
+          scopedHwnd = winMatch.window.hwnd
+        } else {
+          // Saved window isn't open — refuse to silently click
+          // somewhere else, fall through to the regular pipeline.
+          log(
+            'info',
+            'automation',
+            `[visual-click] taught entry "${what}" wants window "${taught.inWindow}" but it isn't open — falling through`
+          )
+          scopeOk = false
+        }
+      } else if (scopedHwnd === null) {
+        // v2.0 polish — when the taught entry is window-scoped to "any"
+        // (taught.inWindow null) AND the AI didn't pass in_window, fall
+        // back to the foreground window. Walking the global UIA tree
+        // means a "close" taught entry would match VS Code's tab close
+        // X, Settings' close, AND a Discord dialog X — ambiguous,
+        // resolveTaughtClick returns null, we fall through to vision,
+        // and the taught-click's zero-latency win is lost.
+        const windows = await enumerateWindows()
+        const focused = windows.find((w) => w.focused)
+        if (focused) {
+          scopedHwnd = focused.hwnd
+          log(
+            'info',
+            'automation',
+            `[visual-click] taught entry "${what}" has no window scope — defaulting to foreground "${focused.title.slice(0, 40)}"`
+          )
+        }
+      }
+      const resolved = scopeOk ? await resolveTaughtClick(taught, scopedHwnd) : null
+      if (resolved) {
+        log(
+          'success',
+          'automation',
+          `[visual-click] taught-click hit: "${what}" → "${resolved.element.name}" (${resolved.element.controlType}) at (${resolved.element.x}, ${resolved.element.y})`
+        )
+        pushProgress(`Found "${resolved.element.name || what}" (taught) — confirm to click…`)
+        recordTaughtHit(taught.id)
+        return await fireClick({
+          x: resolved.element.x + Math.round(resolved.element.w / 2),
+          y: resolved.element.y + Math.round(resolved.element.h / 2),
+          description: what,
+          // Taught entries earn full confidence — the user themselves
+          // pointed at this element and assigned the description.
+          confidence: 1,
+          button,
+          sourceLabel: `taught: ${taught.rawDescription}`,
+          source: 'uia',
+          totalStartedAt: startedAt
+        })
+      }
+      if (scopeOk) {
+        // Distinct from the "saved window isn't open" branch which
+        // logged its own reason — this is "window IS open but the
+        // taught element vanished from inside it" (UI rearranged,
+        // virtualized list scrolled, etc).
+        log(
+          'info',
+          'automation',
+          `[visual-click] taught entry "${what}" matched but didn't resolve (window scrolled, app updated, or element gone) — falling through to pipeline`
+        )
+      }
+    }
+  } catch (err) {
+    // Storage corruption or UIA crash — log + fall through. We never
+    // let the taught-click path BLOCK the regular pipeline.
+    log(
+      'warn',
+      'automation',
+      `[visual-click] taught-click consult threw: ${err instanceof Error ? err.message : String(err)} — using regular pipeline`
+    )
+  }
+
+  // 0.4) v2.0 Phase 2 — provider-aware routing decision.
+  //
+  // When the user is on a capable Anthropic Sonnet AND has selected
+  // `auto` (the default) or explicitly forced `sonnet-computer-use`,
+  // we route to the native computer-use tool instead of running the
+  // UIA-then-vision baseline. Computer-use's grounded-click training
+  // outperforms the generic vision-locate path on the failure cases
+  // that motivated this work (browser web content, icon-only
+  // buttons, busy chat UIs).
+  //
+  // When `sonnet-computer-use` is forced but the active provider
+  // doesn't support it, we surface a clear failure toast instead of
+  // silently falling back — otherwise a user who deliberately picked
+  // computer-use would be confused when the baseline runs anyway.
+  // Config read is a synchronous JsonStore lookup — let it throw if the
+  // file is corrupt. Swallowing here would hide a forced-mode failure
+  // from the user who deliberately picked `sonnet-computer-use`.
+  const config = getConfig()
+  const mode = config.experimentalFeatures.clickStrategy ?? 'auto'
+  const provider = config.activeProvider
+  const modelId = config.providers[provider]?.model ?? ''
+  const capable = isSonnetComputerUseCapable(provider, modelId)
+  if (mode === 'sonnet-computer-use' && !capable) {
+    return failWithToast(
+      what,
+      `click strategy forced to Sonnet computer-use but active provider (${provider} / ${modelId || 'no model'}) doesn't support it. Switch to an Anthropic Sonnet 3.5+ or change the strategy to "auto" in Settings → Experimental.`
+    )
+  }
+
+  // Lazy capture — neither routeViaComputerUse nor the vision fallback
+  // pay for a screenshot when UIA matches first. Both code paths share
+  // ONE capture when both fire (the v2.0 polish fix for the Phase 2
+  // double-capture bug: previously routeViaComputerUse captured, didn't
+  // commit, and the vision fallback captured again).
+  let cachedShot: CapturedScreen | null = null
+  const getShot = async (): Promise<CapturedScreen> => {
+    if (cachedShot) return cachedShot
+    cachedShot = targetWindow
+      ? await captureScreen({ window: targetWindow })
+      : await captureScreen()
+    return cachedShot
+  }
+
+  if (mode !== 'uia-then-vision' && capable) {
+    try {
+      const routed = await routeViaComputerUse({
+        what,
+        button,
+        getShot,
+        modelId,
+        signal: args.signal,
+        totalStartedAt: startedAt
+      })
+      if (routed) return routed
+      // routed === null means "computer-use didn't commit to a click".
+      // For `auto` we fall through to the UIA+vision baseline so we
+      // still try. For the explicitly-forced `sonnet-computer-use`
+      // mode, fail loudly — silently routing through a different
+      // engine violates what the user asked for.
+      if (mode === 'sonnet-computer-use') {
+        return failWithToast(
+          what,
+          `Sonnet computer-use didn't commit to a click and the strategy is locked to it. Switch to "auto" in Settings → Experimental to allow fallback to UIA + vision.`
+        )
+      }
+    } catch (err) {
+      // Network / parse / abort — same contract as above: auto falls
+      // through, forced mode surfaces the failure.
+      const msg = err instanceof Error ? err.message : String(err)
+      log(
+        'warn',
+        'automation',
+        `[visual-click] computer-use route threw: ${msg} — ${mode === 'sonnet-computer-use' ? 'aborting (forced mode)' : 'using baseline'}`
+      )
+      if (mode === 'sonnet-computer-use') {
+        return failWithToast(
+          what,
+          `Sonnet computer-use failed (${msg}) and the strategy is locked to it. Switch to "auto" in Settings → Experimental to allow fallback to UIA + vision.`
+        )
       }
     }
   }
@@ -378,13 +457,14 @@ export async function performVisualClick(args: VisualClickArgs): Promise<ActionR
   // 0.5) UIA-first locate (Windows). See uia.ts / uiaMatch.ts for design.
   //      Scoped to the target window when in_window was supplied — only
   //      that window's accessibility tree is walked.
+  //
+  // Hoisted outside the try so the Phase 3 uia-pick step at 0.6 can
+  // reuse the enumeration when matchUiaElement misses, without paying
+  // for a second PowerShell round-trip.
+  let uiaElements: UiaElement[] = []
   try {
     const uiaStart = Date.now()
-    const uiaElements = await enumerateClickableElements(
-      undefined,
-      undefined,
-      targetWindow?.hwnd ?? null
-    )
+    uiaElements = await enumerateClickableElements(undefined, undefined, targetWindow?.hwnd ?? null)
     const uiaMs = Date.now() - uiaStart
     log(
       'info',
@@ -419,12 +499,12 @@ export async function performVisualClick(args: VisualClickArgs): Promise<ActionR
       const sampleNames = uiaElements
         .filter((e) => e.name)
         .slice(0, 3)
-        .map((e) => `"${e.name}" (${e.controlType.replace('ControlType.', '')})`)
+        .map((e) => `"${e.name}" (${prettyControlType(e.controlType)})`)
         .join(', ')
       log(
         'info',
         'automation',
-        `[visual-click] UIA had ${uiaElements.length} candidates but none matched "${what}" — falling to vision (sample: ${sampleNames || 'no named elements'})`
+        `[visual-click] UIA had ${uiaElements.length} candidates but none matched "${what}" — trying uia-pick (sample: ${sampleNames || 'no named elements'})`
       )
     } else {
       log(
@@ -441,39 +521,84 @@ export async function performVisualClick(args: VisualClickArgs): Promise<ActionR
     )
   }
 
-  // 1) Screenshot. (vision fallback)
-  pushProgress(`Asking the model where to click "${what}"…`)
-  let shot: CapturedScreen
-  let windowOriginX = 0
-  let windowOriginY = 0
-  try {
-    if (targetWindow) {
-      // Windowed screenshot — vision sees ONLY the target window's
-      // pixels at full normalized resolution. Coords come back in
-      // window-local space; we add the window's screen origin before
-      // clicking so the cursor lands at the absolute position.
-      shot = await captureForWindow(targetWindow)
-      windowOriginX = targetWindow.x
-      windowOriginY = targetWindow.y
+  // 0.6) v2.0 Phase 3 — UIA-pick (textual Set-of-Marks). When UIA had
+  //      candidates but matchUiaElement returned none, ask the vision
+  //      model to PICK from the candidate list with the screenshot as
+  //      visual context. Coords come from UIA's bbox (zero pixel
+  //      error when the model picks correctly); falls through to
+  //      free-form vision-locate when the model says "none".
+  //
+  //      Reached when control falls through step 0.5 — which happens
+  //      for `auto` mode always, for `uia-then-vision` mode always
+  //      (well, until the gate below excludes it), and for forced
+  //      `sonnet-computer-use` only when the route capability gate
+  //      didn't apply (forced-no-commit aborts above, before getting
+  //      here). Skipped when UIA returned zero elements (vision-only
+  //      is the only remaining path) or when the user explicitly
+  //      forced `uia-then-vision` (that mode's contract is "run the
+  //      v1.x baseline" — inserting an LLM round-trip would violate
+  //      the user's opt-out).
+  if (uiaElements.length > 0 && mode !== 'uia-then-vision') {
+    pushProgress(`Picking from ${uiaElements.length} candidates…`)
+    try {
+      const pickShot = await getShot()
+      const pick = await locateViaUiaPick({
+        shot: pickShot,
+        description: what,
+        elements: uiaElements,
+        signal: args.signal
+      })
+      if (pick.predicted && pick.pickedElement) {
+        log(
+          'success',
+          'automation',
+          `[visual-click] uia-pick → "${pick.pickedElement.name || pick.pickedElement.automationId}" (${pick.pickedElement.controlType}) at (${pick.predicted.x}, ${pick.predicted.y}) in ${pick.msElapsed}ms`
+        )
+        pushProgress(`Found "${pick.pickedElement.name || what}" — confirm to click…`)
+        return await fireClick({
+          x: pick.predicted.x,
+          y: pick.predicted.y,
+          description: what,
+          confidence: UIA_PICK_DEFAULT_CONFIDENCE,
+          button,
+          sourceLabel: pick.pickedElement.name || pick.pickedElement.automationId || 'uia-pick',
+          source: 'uia',
+          totalStartedAt: startedAt
+        })
+      }
       log(
         'info',
         'automation',
-        `[visual-click] window-scoped screenshot ${shot.width}×${shot.height} (window origin ${windowOriginX}, ${windowOriginY})`
+        `[visual-click] uia-pick didn't commit (${pick.trail}) — falling to vision`
       )
-    } else {
-      shot = await captureForVisualClick()
+    } catch (err) {
       log(
-        'info',
+        'warn',
         'automation',
-        `[visual-click] screenshot captured ${shot.width}×${shot.height} (display ${shot.displayWidth}×${shot.displayHeight})`
+        `[visual-click] uia-pick threw: ${err instanceof Error ? err.message : String(err)} — falling to vision`
       )
     }
+  }
+
+  // 1) Screenshot. (vision fallback) — pulls the cached shot when the
+  //    router branch already captured, else captures fresh.
+  pushProgress(`Asking the model where to click "${what}"…`)
+  let shot: CapturedScreen
+  try {
+    shot = await getShot()
+    log(
+      'info',
+      'automation',
+      `[visual-click] vision fallback shot ${shot.width}×${shot.height} (display ${shot.displayWidth}×${shot.displayHeight}, origin ${shot.windowOriginX}, ${shot.windowOriginY}${cachedShot ? ', reused' : ''})`
+    )
   } catch (err) {
     return failWithToast(
       what,
       `Screen capture failed: ${err instanceof Error ? err.message : String(err)}`
     )
   }
+  const windowOriginX = shot.windowOriginX
+  const windowOriginY = shot.windowOriginY
 
   // 2a) First-pass vision lookup.
   const firstPassStart = Date.now()
@@ -560,6 +685,72 @@ function pushProgress(message: string): void {
     description: '',
     reason: message,
     progress: true
+  })
+}
+
+/**
+ * v2.0 Phase 2 — ask Sonnet (computer-use) for the click coord using
+ * the shared lazy screenshot, then route into the preview-and-click
+ * tail. Returns:
+ *   - ActionResult on a successful (or user-cancelled) click
+ *   - null when computer-use didn't commit — caller falls through to
+ *     the UIA+vision baseline
+ *
+ * Takes `getShot` rather than capturing internally so the baseline
+ * vision fallback (which may run if Sonnet doesn't commit) reuses the
+ * same NativeImage — without this, a Sonnet-no-commit click paid for
+ * two compositor flushes + two PNG encodes + two disk writes.
+ */
+async function routeViaComputerUse(args: {
+  what: string
+  button: 'left' | 'right'
+  getShot: () => Promise<CapturedScreen>
+  modelId: string
+  signal?: AbortSignal
+  totalStartedAt: number
+}): Promise<ActionResult | null> {
+  pushProgress(`Asking Sonnet to click "${args.what}"…`)
+  let shot: CapturedScreen
+  try {
+    shot = await args.getShot()
+  } catch (err) {
+    log(
+      'warn',
+      'automation',
+      `[visual-click] computer-use route capture failed: ${err instanceof Error ? err.message : String(err)} — falling back to baseline`
+    )
+    return null
+  }
+  const result = await locateViaComputerUse({
+    shot,
+    description: args.what,
+    modelId: args.modelId,
+    signal: args.signal
+  })
+  if (!result.predicted) {
+    log(
+      'info',
+      'automation',
+      `[visual-click] computer-use didn't commit: ${result.trail} — falling back to baseline`
+    )
+    return null
+  }
+  log(
+    'success',
+    'automation',
+    `[visual-click] computer-use → (${result.predicted.x}, ${result.predicted.y}) via ${args.modelId} in ${result.msElapsed}ms`
+  )
+  pushProgress(`Sonnet located "${args.what}" — confirm to click…`)
+  return fireClick({
+    x: result.predicted.x,
+    y: result.predicted.y,
+    description: args.what,
+    confidence: COMPUTER_USE_DEFAULT_CONFIDENCE,
+    button: args.button,
+    sourceLabel: 'sonnet computer-use',
+    source: 'vision',
+    totalStartedAt: args.totalStartedAt,
+    extraData: { screenshotPath: shot.path, engine: 'sonnet-computer-use' }
   })
 }
 
@@ -669,9 +860,7 @@ function failWithToast(
   return {
     ok: false,
     type: 'visual-click',
-    output:
-      extra?.output ??
-      `Couldn't click "${description}" — ${reason}`,
+    output: extra?.output ?? `Couldn't click "${description}" — ${reason}`,
     error: reason,
     data: extra?.data
   }

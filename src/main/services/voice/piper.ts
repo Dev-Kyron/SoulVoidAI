@@ -34,6 +34,7 @@ import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { log } from '../logger'
 import { ensureDataPath } from '../storage/store'
+import { getConfig } from '../storage/config'
 import type { ToneTag } from '@shared/voiceMarkers'
 
 /* ------------------------------ paths --------------------------------- */
@@ -75,22 +76,12 @@ function personaDir(persona: VoicePersona): string {
 
 /* ---------------------------- voice discovery ------------------------- */
 
-export type VoicePersona = 'void' | 'soul'
-
-export interface InstalledVoice {
-  /** Absolute path to the .onnx model file — what piper consumes. */
-  modelPath: string
-  /** Display name pulled from the model filename (e.g., "en_US-amy-medium"). */
-  id: string
-  /** Friendly name extracted from the .onnx.json metadata, or the id. */
-  name: string
-  /** File size in bytes — surfaced in the settings card so the user knows. */
-  sizeBytes: number
-  /** Optional language tag from metadata (e.g., "en_US"). */
-  language?: string
-  /** Quality tier — "x_low", "low", "medium", "high" — read from the path. */
-  quality?: string
-}
+// v2.0 — single source of truth for VoicePersona + InstalledVoice lives
+// in shared/types.ts. Re-exported here so consumers that already imported
+// from this module (notably `src/main/ipc/index.ts`) keep compiling
+// without a chase through every call site.
+import type { InstalledVoice, VoicePersona } from '@shared/types'
+export type { InstalledVoice, VoicePersona }
 
 /**
  * Walk a persona's voice folder and return the model files we find. Each
@@ -150,12 +141,52 @@ export function listInstalledVoices(persona: VoicePersona): InstalledVoice[] {
 }
 
 /**
- * Returns the FIRST installed voice for a persona, or null if none.
+ * Per-process dedupe set for stale-voice warnings. activeVoice() runs
+ * on every synth call; a long agent loop with TTS on could fire the
+ * "selected voice missing" warning dozens of times for the same id.
+ * One warning per (persona, id) per process lifetime is enough to
+ * surface the problem in the Logs tab without spamming it.
+ */
+const warnedStaleVoiceIds = new Set<string>()
+
+/**
+ * Returns the active installed voice for a persona, or null if none.
+ *
+ * v2.0 — honours `config.voice.selectedVoiceByPersona[persona]` when
+ * the user has picked a specific voice in Settings. Falls back to the
+ * first installed voice when:
+ *   - no selection is stored (back-compat with pre-2.0 configs)
+ *   - the stored id no longer matches any installed file (user deleted
+ *     the .onnx, or migrated machines without copying voices)
+ *
  * Settings UI uses this to populate the current-voice card; synthesis
  * uses it to resolve which .onnx file to pass to piper.
  */
 export function activeVoice(persona: VoicePersona): InstalledVoice | null {
-  return listInstalledVoices(persona)[0] ?? null
+  const voices = listInstalledVoices(persona)
+  if (voices.length === 0) return null
+  // Read config lazily so the resolver picks up live changes (the
+  // settings UI saves the new id and the next synth call sees it
+  // without needing a process restart).
+  const selectedId = getConfig().voice.selectedVoiceByPersona?.[persona]
+  if (selectedId) {
+    const match = voices.find((v) => v.id === selectedId)
+    if (match) return match
+    // Stored id is stale (file removed?). Falls through to the first
+    // voice + a one-shot warning log so the Settings UI eventually
+    // shows the user what happened (their pick reverted) without
+    // flooding the log when the same call repeats per agent step.
+    const dedupeKey = `${persona}:${selectedId}`
+    if (!warnedStaleVoiceIds.has(dedupeKey)) {
+      warnedStaleVoiceIds.add(dedupeKey)
+      log(
+        'warn',
+        'system',
+        `Piper: selected voice "${selectedId}" missing for persona "${persona}" — falling back to first installed.`
+      )
+    }
+  }
+  return voices[0]
 }
 
 /* ----------------------------- migration ------------------------------ */
@@ -174,6 +205,14 @@ export function activeVoice(persona: VoicePersona): InstalledVoice | null {
  * audit trail.
  */
 export async function migrateLegacyVoices(): Promise<{ copied: number }> {
+  // v2.0 round-7 multi-platform — in packaged builds `app.getAppPath()`
+  // returns the path to app.asar (an archive, not a real directory), so
+  // `existsSync` was always false there and this migration was already a
+  // silent no-op. The intent was always "one-shot import for dev users
+  // who dropped voices alongside the repo"; gate explicitly on
+  // `!app.isPackaged` so the behaviour matches the intent + a future
+  // refactor doesn't accidentally start reading asar-internal paths.
+  if (app.isPackaged) return { copied: 0 }
   const legacyRoot = join(app.getAppPath(), 'Voices')
   if (!existsSync(legacyRoot)) return { copied: 0 }
 
@@ -249,11 +288,14 @@ export async function migrateLegacyVoices(): Promise<{ copied: number }> {
  * Baselines match piper's documented defaults (0.667 / 0.8) for `casual`
  * so the existing rate-only path keeps sounding identical.
  */
-export const TONE_PRESETS: Record<ToneTag, {
-  length_scale: number
-  noise_scale: number
-  noise_w: number
-}> = {
+export const TONE_PRESETS: Record<
+  ToneTag,
+  {
+    length_scale: number
+    noise_scale: number
+    noise_w: number
+  }
+> = {
   // --- v1.3.0 originals ---
   casual: { length_scale: 1.0, noise_scale: 0.667, noise_w: 0.8 },
   focused: { length_scale: 0.92, noise_scale: 0.5, noise_w: 0.7 },
@@ -443,11 +485,16 @@ export function synthesise(opts: SynthesiseOptions): Promise<Buffer> {
     // --length_scale by the argparse but the others weren't. Stick to
     // hyphens for all three to match the documented CLI exactly.
     const args = [
-      '--model', voice.modelPath,
-      '--output_file', outPath,
-      '--length-scale', lengthScale.toFixed(3),
-      '--noise-scale', noiseScale.toFixed(3),
-      '--noise-w', preset.noise_w.toFixed(3)
+      '--model',
+      voice.modelPath,
+      '--output_file',
+      outPath,
+      '--length-scale',
+      lengthScale.toFixed(3),
+      '--noise-scale',
+      noiseScale.toFixed(3),
+      '--noise-w',
+      preset.noise_w.toFixed(3)
     ]
     // Diagnostic: full piper command so failures past this point are
     // reproducible by hand from a terminal. Skipped at log level 'info'
@@ -571,24 +618,27 @@ export function synthesise(opts: SynthesiseOptions): Promise<Buffer> {
 
 /* ------------------------- summary for renderer ----------------------- */
 
-export interface VoiceSetupStatus {
-  /** Whether the piper binary is bundled + reachable from this process. */
-  binaryAvailable: boolean
-  /** First installed voice per persona, or null if none. */
-  void: InstalledVoice | null
-  soul: InstalledVoice | null
-}
+// v2.0 — single source of truth for VoiceSetupStatus lives in
+// shared/types.ts; the local duplicate was removed so adding fields
+// (e.g. `installed`) doesn't require touching two definitions.
+import type { VoiceSetupStatus } from '@shared/types'
 
 /**
- * One-call summary the settings UI renders. Cheaper than three separate
- * IPCs (binary check + two listings) and atomically reflects the same
- * disk state across all three values.
+ * One-call summary the settings UI renders. Cheaper than four separate
+ * IPCs (binary check + two active lookups + two listings) and atomically
+ * reflects the same disk state across all values.
+ *
+ * v2.0 added `installed` so the picker UI can render every .onnx the
+ * user has dropped in per-persona, not just the currently-active one.
  */
 export function getVoiceSetupStatus(): VoiceSetupStatus {
+  const voidVoices = listInstalledVoices('void')
+  const soulVoices = listInstalledVoices('soul')
   return {
     binaryAvailable: existsSync(piperBinaryPath()),
     void: activeVoice('void'),
-    soul: activeVoice('soul')
+    soul: activeVoice('soul'),
+    installed: { void: voidVoices, soul: soulVoices }
   }
 }
 

@@ -138,10 +138,9 @@ export function GlobalSearchDialog({ open, onClose }: Props): JSX.Element | null
           {loading && <span className="text-[10px] text-slate-500">…</span>}
           {!loading && query.length > 0 && (
             <span className="text-[10px] text-slate-500">
-              {t(
-                hits.length === 1 ? 'chat.search_matches_one' : 'chat.search_matches_many',
-                { count: hits.length }
-              )}
+              {t(hits.length === 1 ? 'chat.search_matches_one' : 'chat.search_matches_many', {
+                count: hits.length
+              })}
             </span>
           )}
           <button
@@ -185,9 +184,7 @@ export function GlobalSearchDialog({ open, onClose }: Props): JSX.Element | null
                           year: 'numeric'
                         })}`}
                     </span>
-                    <span className="text-[12px] leading-snug text-slate-200">
-                      {hit.snippet}
-                    </span>
+                    <span className="text-[12px] leading-snug text-slate-200">{hit.snippet}</span>
                   </button>
                 ))}
               </div>

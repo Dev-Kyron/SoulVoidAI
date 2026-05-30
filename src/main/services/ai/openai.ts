@@ -2,7 +2,14 @@
  * OpenAI Chat Completions provider (also compatible with OpenAI-style
  * endpoints via a custom base URL).
  */
-import { readSSE, httpError, parseToolArgs, readJsonOrError, invokeAbortSignal, rethrowAsTimeout } from './stream'
+import {
+  readSSE,
+  httpError,
+  parseToolArgs,
+  readJsonOrError,
+  invokeAbortSignal,
+  rethrowAsTimeout
+} from './stream'
 import { ProviderError } from './types'
 import type { AIProvider, CompletionOptions, CompletionResult, InvokeOptions } from './types'
 import type { ChatTurn } from '@shared/types'

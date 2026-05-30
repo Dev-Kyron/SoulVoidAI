@@ -12,11 +12,13 @@ import { registerIpc, applyAppearance, disposeIpc } from './ipc'
 import { getConfig } from './services/storage/config'
 import { loadPlugins } from './services/plugins/plugins'
 import { initMcp, disposeMcp } from './services/mcp/manager'
+import { startExtensionBridge, stopExtensionBridge } from './services/extension-bridge/server'
 import { refreshAllModels } from './services/ai'
 import { autoDetectAndAdopt } from './services/ai/detect'
 import { closeDb } from './services/storage/db'
 import { disposeWorker } from './services/rag-worker'
 import { initScheduler, disposeScheduler } from './services/scheduler'
+import { initSync, disposeSync } from './services/sync/engine'
 import { initUpdater } from './services/updater'
 import { stopScreenAwareness } from './services/screen/awareness'
 import { isGranted } from './services/permissions/permissions'
@@ -33,6 +35,13 @@ const SUMMON_SHORTCUT = 'CommandOrControl+Shift+Space'
  * or hidden; the renderer summons the panel if collapsed.
  */
 const QUICK_AI_SHORTCUT = 'CommandOrControl+Shift+J'
+/**
+ * v2.0 — Conversational voice mode global hotkey. Tap to start a
+ * Jarvis-style hands-free session from anywhere; tap again to exit.
+ * Distinct from QUICK_AI_SHORTCUT (one-shot quick answer) and SUMMON
+ * (panel toggle) — voice mode is a *session*, not a one-shot.
+ */
+const CONVERSATION_SHORTCUT = 'CommandOrControl+Shift+V'
 
 if (!app.requestSingleInstanceLock()) {
   // Another instance is already running — hand focus to it and exit.
@@ -84,11 +93,36 @@ if (!app.requestSingleInstanceLock()) {
       broadcast('quick-ai:open', undefined)
     })
 
+    // v2.0 — Conversation mode hotkey. Same showWindow pattern as
+    // Quick AI so a tray-only user can start the voice loop from
+    // anywhere; the renderer's store toggles in/out on each press.
+    globalShortcut.register(CONVERSATION_SHORTCUT, () => {
+      const win = getWindow()
+      if (win && !win.isVisible()) showWindow()
+      broadcast('conversation:toggle', undefined)
+    })
+
     log('info', 'system', 'VoidSoul AI Companion started.')
 
     // Connect to any configured MCP servers in the background — slow servers
     // must not delay UI readiness, so we fire and forget.
     void initMcp()
+
+    // v2.0 — browser-extension bridge. Off by default; only spin up the
+    // local IPC server when the user has explicitly enabled it from
+    // Settings → Tools → Browser Extension. Stale-socket cleanup happens
+    // inside startExtensionBridge so a previous unclean exit doesn't
+    // wedge the bind.
+    if (getConfig().browserExtension?.enabled) {
+      void startExtensionBridge().catch((err) => {
+        log(
+          'error',
+          'system',
+          'Browser-extension bridge failed to start',
+          err instanceof Error ? err.message : String(err)
+        )
+      })
+    }
 
     // Probe localhost for Ollama / LM Studio. If a local daemon is running and
     // the user has no working remote provider, switch the active provider to
@@ -104,6 +138,10 @@ if (!app.requestSingleInstanceLock()) {
     // The same tick loop now also evaluates v1.5.0 proactive watch tasks
     // (idle-duration + time-of-day) — they live in services/proactive/.
     initScheduler()
+
+    // v2.0 — E2E cross-device sync. No-op if the user hasn't paired
+    // this device with a vault. Boots a 60s push/pull loop when paired.
+    void initSync()
 
     // v1.5.0 — seed the 4 built-in watch tasks (Task complete, Long idle,
     // Stuck loop, Morning recap). All ship disabled-by-default; user
@@ -126,6 +164,15 @@ if (!app.requestSingleInstanceLock()) {
     // unpackaged dev. See `services/updater/index.ts` + `electron-builder.yml`
     // `publish:` block for the source-of-truth on which repo it queries.
     initUpdater()
+
+    // v2.0 — opportunistic SQLite VACUUM. Wakes every few hours, runs
+    // only when no chat / tool / agent step is in flight, and only if
+    // the last vacuum was over a week ago. Keeps the chat DB compact
+    // for users with long history. See storage/vacuum.ts for the
+    // throttling rationale.
+    void import('./services/storage/vacuum').then(({ startVacuumSchedule }) => {
+      startVacuumSchedule()
+    })
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {
@@ -155,8 +202,16 @@ if (!app.requestSingleInstanceLock()) {
     if (shuttingDown) return
     shuttingDown = true
     stopScreenAwareness()
+    // v2.0 polish — the screen-watch loop ALSO has its own setInterval
+    // (separate from screenAwareness's). Without this stop, the
+    // interval kept firing past closeDb(), and any vision tick reading
+    // getConfig() through the closing SQLite handle crashed shutdown.
+    void import('./services/proactive/screenWatch').then(({ stopScreenWatch }) => {
+      stopScreenWatch()
+    })
     stopAgentProgressPolling()
     disposeScheduler()
+    disposeSync()
     event.preventDefault()
     const FLUSH_BUDGET_MS = 1500
     const SHUTDOWN_BUDGET_MS = 3500
@@ -189,11 +244,7 @@ if (!app.requestSingleInstanceLock()) {
         try {
           const paused = pauseAllRunningCheckpoints()
           if (paused > 0) {
-            log(
-              'info',
-              'system',
-              `Paused ${paused} in-flight agent run(s) for graceful shutdown.`
-            )
+            log('info', 'system', `Paused ${paused} in-flight agent run(s) for graceful shutdown.`)
           }
         } catch (err) {
           log(
@@ -205,7 +256,11 @@ if (!app.requestSingleInstanceLock()) {
         }
         disposeIpc()
         await Promise.race([
-          Promise.all([disposeMcp(), disposeWorker()]),
+          // v2.0 — also tear down the browser-extension bridge so a stale
+          // socket file doesn't survive into the next launch. The bridge
+          // server unbinds + closes all native-host connections inside
+          // its own dispose, with no further I/O after that.
+          Promise.all([disposeMcp(), disposeWorker(), stopExtensionBridge()]),
           new Promise<void>((resolve) => setTimeout(resolve, SHUTDOWN_BUDGET_MS))
         ])
       } catch (err) {

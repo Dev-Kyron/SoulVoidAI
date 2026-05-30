@@ -1,0 +1,588 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#0b0612" />
+    <title>VoidSoul — your local AI companion</title>
+    <meta
+      name="description"
+      content="Local-first AI desktop companion with voice, vision, hover-to-teach clicks, screen awareness, and a sandboxed Python kernel. Keys on your machine. One-click unlock to the full Jarvis experience."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <!-- Animated background — fixed-position orbs that drift behind everything. -->
+    <div class="bg-canvas" aria-hidden="true">
+      <div class="orb orb-1"></div>
+      <div class="orb orb-2"></div>
+      <div class="orb orb-3"></div>
+      <div class="grid-overlay"></div>
+    </div>
+
+    <!-- Top nav — translucent, sticky. -->
+    <header class="nav">
+      <a class="brand" href="#top">
+        <span class="brand-mark">
+          <span class="brand-orb"></span>
+        </span>
+        <span class="brand-text">VoidSoul</span>
+      </a>
+      <nav class="nav-links" aria-label="Primary">
+        <a href="#features">Features</a>
+        <a href="#click">click_on_screen</a>
+        <a href="#privacy">Privacy</a>
+        <a href="#pricing">Pricing</a>
+      </nav>
+      <a class="cta-pill" href="#pricing">Get VoidSoul</a>
+    </header>
+
+    <!-- Hero -->
+    <section class="hero" id="top">
+      <div class="hero-eyebrow">
+        <span class="dot"></span>
+        v2.0 — five-step click pipeline, semantic screen awareness, hover-to-teach
+      </div>
+      <h1 class="hero-title">
+        Your local AI companion.
+        <span class="hero-grad">Voice, vision, hands — yours.</span>
+      </h1>
+      <p class="hero-sub">
+        VoidSoul is a desktop AI that lives on your machine. It speaks, listens, reads what's on
+        your screen, clicks for you, and can be taught to take a shortcut once and never ask
+        again. Keys stay encrypted in your OS keychain. No subscription required.
+      </p>
+      <div class="hero-cta">
+        <a class="btn-primary" href="#pricing">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+          Unlock Void & Soul
+        </a>
+        <a class="btn-ghost" href="#features">
+          See what it can do
+          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+        </a>
+      </div>
+      <div class="hero-meta">
+        <span><svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg> Keys encrypted on-device</span>
+        <span><svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></svg> Windows · Mac · Linux</span>
+        <span><svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20"/><path d="m17 5-5-3-5 3"/><path d="m17 19-5 3-5-3"/></svg> Open source core</span>
+      </div>
+
+      <!-- Animated mock-screen card — the actual app's settings panel,
+           rebuilt in static HTML so it renders without the runtime. -->
+      <div class="hero-card glass">
+        <div class="hero-card-top">
+          <span class="dot-row">
+            <span></span>
+            <span></span>
+            <span></span>
+          </span>
+          <span class="hero-card-title">Settings · click_on_screen</span>
+        </div>
+        <div class="hero-card-body">
+          <div class="row-pipeline">
+            <div class="pip-step">
+              <span class="pip-num">1</span>
+              <span class="pip-label">Taught</span>
+              <span class="pip-detail">0 ms · zero tokens</span>
+            </div>
+            <div class="pip-step">
+              <span class="pip-num">2</span>
+              <span class="pip-label">Sonnet computer-use</span>
+              <span class="pip-detail">grounded click</span>
+            </div>
+            <div class="pip-step">
+              <span class="pip-num">3</span>
+              <span class="pip-label">UIA match</span>
+              <span class="pip-detail">accessibility tree</span>
+            </div>
+            <div class="pip-step">
+              <span class="pip-num">4</span>
+              <span class="pip-label">UIA pick</span>
+              <span class="pip-detail">vision picks from list</span>
+            </div>
+            <div class="pip-step">
+              <span class="pip-num">5</span>
+              <span class="pip-label">Vision locate</span>
+              <span class="pip-detail">two-pass refinement</span>
+            </div>
+          </div>
+          <div class="row-toggle">
+            <div class="toggle-card">
+              <span class="toggle-label">click_on_screen</span>
+              <span class="toggle-on" aria-label="On"></span>
+            </div>
+            <div class="toggle-card">
+              <span class="toggle-label">Semantic awareness</span>
+              <span class="toggle-on" aria-label="On"></span>
+            </div>
+            <div class="toggle-card">
+              <span class="toggle-label">Wake word</span>
+              <span class="toggle-on" aria-label="On"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Trust band -->
+    <section class="trust">
+      <div class="trust-item">
+        <span class="trust-num">5</span>
+        <span class="trust-label">click strategies</span>
+      </div>
+      <div class="trust-item">
+        <span class="trust-num">8</span>
+        <span class="trust-label">distinct permissions</span>
+      </div>
+      <div class="trust-item">
+        <span class="trust-num">0 ms</span>
+        <span class="trust-label">taught-click latency</span>
+      </div>
+      <div class="trust-item">
+        <span class="trust-num">0</span>
+        <span class="trust-label">required cloud sign-ups</span>
+      </div>
+    </section>
+
+    <!-- Features grid -->
+    <section class="section" id="features">
+      <div class="section-head">
+        <span class="eyebrow">What it does</span>
+        <h2>Everything a local-first AI should do.</h2>
+        <p class="lede">
+          One install, every capability ready to flip on. No add-on store. No per-seat charge.
+        </p>
+      </div>
+      <div class="grid grid-3">
+        <article class="card glass">
+          <span class="card-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
+          </span>
+          <h3>Voice in, voice out</h3>
+          <p>
+            Piper TTS for replies, Whisper or Porcupine for the wake word, full-duplex
+            conversation mode for back-and-forth. Pick a different voice per persona. Tone
+            markers in the prompt drive delivery.
+          </p>
+        </article>
+        <article class="card glass">
+          <span class="card-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+          </span>
+          <h3>Sees your screen</h3>
+          <p>
+            Continuous awareness of the focused window plus local OCR on every change — the
+            assistant knows you're editing a specific file or reading a specific tab without you
+            having to copy-paste.
+          </p>
+        </article>
+        <article class="card glass">
+          <span class="card-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 11-6 6v3h9l3-3"/><path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4"/></svg>
+          </span>
+          <h3>Clicks for you</h3>
+          <p>
+            Describe a click in plain English. The pipeline tries taught shortcuts, then Sonnet
+            computer-use, then UIA, then vision. A 3-second cancellable preview ring fires before
+            the click so wrong locates fail safe.
+          </p>
+        </article>
+        <article class="card glass">
+          <span class="card-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></svg>
+          </span>
+          <h3>Runs Python</h3>
+          <p>
+            Each chat thread gets its own persistent Jupyter-style kernel. State, imports and
+            plots survive across tool calls within the same conversation. Workspace dirs are real
+            folders you can open.
+          </p>
+        </article>
+        <article class="card glass">
+          <span class="card-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2Z"/><path d="M12 6v6l4 2"/></svg>
+          </span>
+          <h3>Speaks unprompted</h3>
+          <p>
+            Cron-fired briefings and condition-driven watch tasks (idle duration, sentiment
+            shifts, task completion) let Soul speak when something useful happens — not just
+            when you ask.
+          </p>
+        </article>
+        <article class="card glass">
+          <span class="card-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8V7l-3 2-3-2v1"/><path d="M3 17v-1l3 2 3-2v1"/><path d="M14 4h7v7"/><path d="m21 4-9 9"/><path d="M3 13a9 9 0 0 0 14 7l4-4"/></svg>
+          </span>
+          <h3>Talks to your stuff</h3>
+          <p>
+            Home Assistant native integration, MCP servers from curated and community
+            marketplaces, scheduled tasks, browser-extension bridge for active-tab tools — all
+            in one panel.
+          </p>
+        </article>
+      </div>
+    </section>
+
+    <!-- click_on_screen feature focus -->
+    <section class="section section-alt" id="click">
+      <div class="section-head">
+        <span class="eyebrow">Spotlight</span>
+        <h2>click_on_screen — five strategies, one tool call.</h2>
+        <p class="lede">
+          Describe a click. The pipeline picks the cheapest strategy that works. Teach it once
+          and the next identical click fires in milliseconds with no model spend.
+        </p>
+      </div>
+      <div class="grid grid-2">
+        <article class="card glass">
+          <span class="card-step">1 · Taught</span>
+          <h3>Teach a click once</h3>
+          <p>
+            Point your cursor at any button, press F8, type what to call it ("send in slack").
+            Future identical descriptions short-circuit to a direct UIA click. Zero model
+            tokens, instant.
+          </p>
+        </article>
+        <article class="card glass">
+          <span class="card-step">2 · Sonnet computer-use</span>
+          <h3>Grounded clicks from Claude</h3>
+          <p>
+            When you're on a capable Anthropic Sonnet, the pipeline auto-routes through native
+            computer-use — wins on browser content and icon-only buttons where free-form vision
+            mis-clicks by 50-200 pixels.
+          </p>
+        </article>
+        <article class="card glass">
+          <span class="card-step">3 · UIA match</span>
+          <h3>Accessibility-tree first</h3>
+          <p>
+            Reads the Windows UIA tree, matches the user's description against accessibility
+            names. The fast path for any native app with proper labels — Discord, Slack, Office,
+            VS Code, File Explorer.
+          </p>
+        </article>
+        <article class="card glass">
+          <span class="card-step">4 · UIA candidate pick</span>
+          <h3>Vision picks from a list</h3>
+          <p>
+            When UIA enumerated candidates but none matched, the vision model picks an id from
+            the list with the screenshot as context. Coords come from UIA's bbox so accuracy is
+            pixel-exact when the pick is right.
+          </p>
+        </article>
+        <article class="card glass">
+          <span class="card-step">5 · Vision locate</span>
+          <h3>Free-form fallback</h3>
+          <p>
+            Two-pass refinement — first pass picks a region, second pass zooms in for the precise
+            point. Authoritative refinement (refused refinement = no click) prevents the
+            confidently-wrong failure mode.
+          </p>
+        </article>
+        <article class="card glass">
+          <span class="card-step">Safety</span>
+          <h3>3-second cancellable preview</h3>
+          <p>
+            Every click is preceded by a translucent cyan ring at the target. Press Esc to abort.
+            Wrong locates fail safe; nothing fires until you let the countdown finish.
+          </p>
+        </article>
+      </div>
+    </section>
+
+    <!-- Long-form feature breakdown -->
+    <section class="section" id="deep">
+      <div class="section-head">
+        <span class="eyebrow">Under the hood</span>
+        <h2>Built for power users who don't want a SaaS.</h2>
+      </div>
+
+      <div class="long-row">
+        <div class="long-left">
+          <h3>Provider freedom — bring any LLM, mix and match.</h3>
+          <p>
+            OpenAI, Anthropic, Gemini, Groq, xAI, OpenRouter, Mistral, DeepSeek, Ollama,
+            LM Studio, llama.cpp — all first-class. API keys are encrypted with your OS
+            keychain (DPAPI on Windows, Keychain on macOS, libsecret on Linux) and never leave
+            this machine. Auto-fallback handles 429s and 5xxs by retrying on a different
+            provider. Auto-router can switch providers mid-prompt for speed or cost. Or turn
+            both off and every send goes verbatim to your active pick.
+          </p>
+        </div>
+        <div class="long-right glass">
+          <pre><code>provider: anthropic
+model:    claude-sonnet-4-5
+fallback: openrouter / openai
+local:    ollama (✓ detected)
+budget:   $20 / month (8% used)</code></pre>
+        </div>
+      </div>
+
+      <div class="long-row reverse">
+        <div class="long-left">
+          <h3>Memory in three layers.</h3>
+          <p>
+            Explicit facts you teach the AI; passive biographical extracted in the background
+            from your conversations; emotional context from a daily sentiment classifier that
+            biases tone. Edit, scope to specific modes, or wipe entirely. The summariser knobs
+            control when older messages roll into a "story so far" recap — raise the trigger
+            for coding sessions where recent edits matter, lower it for creative writing where
+            arc continuity wins.
+          </p>
+        </div>
+        <div class="long-right glass">
+          <div class="mem-pill">
+            <span class="mem-tag">fact</span>
+            <span>Working on Spiritless, a UE5 game (solo)</span>
+          </div>
+          <div class="mem-pill">
+            <span class="mem-tag bio">bio</span>
+            <span>Prefers code over hedging language</span>
+          </div>
+          <div class="mem-pill">
+            <span class="mem-tag emo">emotion</span>
+            <span>Productive · 4/5 intensity</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="long-row">
+        <div class="long-left">
+          <h3>RAG over your files, plus a persistent Python kernel.</h3>
+          <p>
+            Point at folders; files get chunked, embedded with your picked engine (OpenAI,
+            Ollama, or fully-local Transformers.js), and stored in SQLite. The vector-store
+            browser shows you which chunks landed and which ones got retrieved for the most
+            recent reply — useful when an answer feels off. Each chat thread also gets its own
+            long-running Python kernel: variables, imports, plots all survive across tool calls.
+          </p>
+        </div>
+        <div class="long-right glass">
+          <pre><code># In thread A
+import pandas as pd
+df = pd.read_csv('sales.csv')
+
+# Next turn, same thread:
+df.groupby('region').sum()
+# → still has the DataFrame</code></pre>
+        </div>
+      </div>
+
+      <div class="long-row reverse">
+        <div class="long-left">
+          <h3>Proactive when it should be.</h3>
+          <p>
+            Cron-fired tasks for daily briefings and scheduled research. Watch tasks fire on
+            conditions: you went idle for N minutes, your sentiment shifted, a long-running tool
+            finished. Soul speaks unprompted with a short, skippable line — Do Not Disturb mutes
+            voice and dims the orb during your quiet hours. The same scheduler bridges into
+            deep-research mode: kick off a "study this market" task at 8am and a synthesised
+            brief lands in a new chat thread when it's done.
+          </p>
+        </div>
+        <div class="long-right glass">
+          <div class="task-row">
+            <span class="task-time">08:00</span>
+            <span class="task-name">Morning brief</span>
+            <span class="task-state">cron · daily</span>
+          </div>
+          <div class="task-row">
+            <span class="task-time">~30m</span>
+            <span class="task-name">Idle nudge</span>
+            <span class="task-state">watch · idle-duration</span>
+          </div>
+          <div class="task-row">
+            <span class="task-time">on shift</span>
+            <span class="task-name">Stuck check-in</span>
+            <span class="task-state">watch · sentiment-shift</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Privacy -->
+    <section class="section section-alt" id="privacy">
+      <div class="section-head">
+        <span class="eyebrow">Privacy</span>
+        <h2>Local-first by default. Cloud only when you ask.</h2>
+      </div>
+      <div class="grid grid-3">
+        <article class="card glass">
+          <h3>Keys on your machine.</h3>
+          <p>
+            Every API key is encrypted with your OS keychain. The renderer can ask whether a key
+            exists, never read it.
+          </p>
+        </article>
+        <article class="card glass">
+          <h3>8 explicit permissions.</h3>
+          <p>
+            Terminal, filesystem, browser, app control, input, microphone, screen capture, Home
+            Assistant — each granted individually with a risk badge.
+          </p>
+        </article>
+        <article class="card glass">
+          <h3>Encrypted sync vault.</h3>
+          <p>
+            Cross-device sync without our backend. Point at a folder Dropbox/iCloud syncs;
+            VoidSoul writes X25519+ChaCha20 ciphertext into it.
+          </p>
+        </article>
+      </div>
+    </section>
+
+    <!-- Pricing — the funnel destination -->
+    <section class="section pricing" id="pricing">
+      <div class="section-head">
+        <span class="eyebrow">Pricing</span>
+        <h2>One purchase. Yours.</h2>
+        <p class="lede">
+          No subscription. No per-seat. Bring your own provider keys — model spend is between
+          you and your provider, not us.
+        </p>
+      </div>
+      <div class="price-row">
+        <article class="price-card glass">
+          <span class="price-tag">Free forever</span>
+          <h3>Core</h3>
+          <div class="price-amount">$0</div>
+          <p class="price-sub">Open-source build · self-hosted</p>
+          <ul class="price-list">
+            <li>· Every feature on this page</li>
+            <li>· Bring-your-own LLM keys</li>
+            <li>· Local providers free (Ollama, LM Studio)</li>
+            <li>· Community Discord</li>
+          </ul>
+          <a class="btn-ghost full" href="https://github.com/Dev-Kyron/SoulVoidAI" target="_blank" rel="noopener">Get on GitHub</a>
+        </article>
+        <article class="price-card price-featured glass">
+          <span class="price-tag price-tag-hot">Recommended</span>
+          <h3>Signed Installer</h3>
+          <div class="price-amount">$29 <span class="price-once">once</span></div>
+          <p class="price-sub">Code-signed Windows / Mac installers · auto-updates</p>
+          <ul class="price-list">
+            <li>· Everything in Core</li>
+            <li>· Code-signed installers (no SmartScreen)</li>
+            <li>· Auto-update channel</li>
+            <li>· Priority issue triage</li>
+            <li>· One-click Unlock Everything button</li>
+          </ul>
+          <a class="btn-primary full" href="#" data-cta="buy">Unlock VoidSoul</a>
+        </article>
+        <article class="price-card glass">
+          <span class="price-tag">Lifetime</span>
+          <h3>Studio</h3>
+          <div class="price-amount">$99 <span class="price-once">once</span></div>
+          <p class="price-sub">For makers + small teams</p>
+          <ul class="price-list">
+            <li>· Everything in Signed</li>
+            <li>· Per-persona commercial license</li>
+            <li>· Private MCP/plugin signing kit</li>
+            <li>· Direct Discord support channel</li>
+            <li>· Naming credit in the About panel</li>
+          </ul>
+          <a class="btn-ghost full" href="#" data-cta="studio">Talk to us</a>
+        </article>
+      </div>
+      <p class="price-footnote">
+        Model spend (Anthropic, OpenAI, etc.) is billed by the provider directly. Set a monthly
+        cap inside the app — Soul nudges you at 75 / 90 / 100 %.
+      </p>
+    </section>
+
+    <!-- FAQ -->
+    <section class="section" id="faq">
+      <div class="section-head">
+        <span class="eyebrow">Common questions</span>
+        <h2>Quick answers.</h2>
+      </div>
+      <div class="faq">
+        <details class="faq-item">
+          <summary>Is this a subscription?</summary>
+          <p>
+            No. Core is free + open source. The signed installer is a one-time $29. You can
+            switch back to a self-built binary any time without losing data.
+          </p>
+        </details>
+        <details class="faq-item">
+          <summary>Do my conversations leave my machine?</summary>
+          <p>
+            Only when you use a cloud LLM provider — those calls go directly from your machine
+            to that provider's API. VoidSoul has no backend. We can't see your prompts; we don't
+            relay them.
+          </p>
+        </details>
+        <details class="faq-item">
+          <summary>Will it click in apps I don't trust?</summary>
+          <p>
+            Every click_on_screen action shows a 3-second cancellable preview ring. The
+            <code>inputAccess</code> permission can be revoked at any time, after which the AI
+            can't drive your mouse at all.
+          </p>
+        </details>
+        <details class="faq-item">
+          <summary>What if I'm offline?</summary>
+          <p>
+            Local providers (Ollama, LM Studio, llama.cpp) work entirely offline. Voice
+            (Piper / Whisper), OCR (tesseract.js), and RAG embeddings (Transformers.js
+            mini-LM) can all run with no network too.
+          </p>
+        </details>
+        <details class="faq-item">
+          <summary>What's the difference between Soul and Void?</summary>
+          <p>
+            Personas. Pick either one as the default voice, swap per-thread, or build your own
+            custom persona bundle. Same engine underneath.
+          </p>
+        </details>
+      </div>
+    </section>
+
+    <!-- Final CTA -->
+    <section class="final-cta">
+      <h2>Ready to unlock the full Jarvis?</h2>
+      <p>
+        One click flips every capability on at once — permissions, screen awareness,
+        click_on_screen, wake word, browser bridge. Maximum reach in a single action.
+      </p>
+      <a class="btn-primary big" href="#pricing">Get VoidSoul</a>
+    </section>
+
+    <footer class="footer">
+      <div class="footer-cols">
+        <div>
+          <p class="footer-brand">VoidSoul</p>
+          <p class="footer-mini">A local-first AI companion. Solo-built.</p>
+        </div>
+        <div>
+          <p class="footer-head">Product</p>
+          <a href="#features">Features</a>
+          <a href="#click">click_on_screen</a>
+          <a href="#pricing">Pricing</a>
+        </div>
+        <div>
+          <p class="footer-head">Open source</p>
+          <a href="https://github.com/Dev-Kyron/SoulVoidAI" target="_blank" rel="noopener">GitHub</a>
+          <a href="#">Plugin SDK</a>
+          <a href="#">MCP registry</a>
+        </div>
+        <div>
+          <p class="footer-head">Legal</p>
+          <a href="#">Privacy</a>
+          <a href="#">Terms</a>
+          <a href="#">Security</a>
+        </div>
+      </div>
+      <p class="footer-credit">© 2026 VoidSoul · Built with Electron + a lot of polish.</p>
+    </footer>
+
+    <script src="./script.js" defer></script>
+  </body>
+</html>

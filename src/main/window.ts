@@ -9,11 +9,7 @@ import { join } from 'node:path'
 import { setMainWindow, registerWindow } from './events'
 import { installContextMenu } from './contextMenu'
 import { isQuitting } from './lifecycle'
-import {
-  getConfig,
-  setPanelSize,
-  setSettingsWindowBounds
-} from './services/storage/config'
+import { getConfig, setPanelSize, setSettingsWindowBounds } from './services/storage/config'
 
 const COLLAPSED = { width: 76, height: 76 }
 const SCREEN_MARGIN = 28
@@ -158,8 +154,19 @@ export function createMainWindow(): BrowserWindow {
     }
   })
 
-  win.setAlwaysOnTop(true, 'screen-saver')
-  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+  // v2.0 round-7 multi-platform — honour the user's stored alwaysOnTop
+  // preference at create time. Before this we always pinned the widget
+  // at the `screen-saver` z-order and flagged it `visibleOnFullScreen`,
+  // which on macOS surfaces the widget over fullscreen Keynote / Safari
+  // even when the user had alwaysOnTop=false in config. The IPC
+  // re-application happened AFTER show(), causing a brief flash. Now
+  // the initial flag reflects the stored preference; the screen-saver
+  // level only applies when the user actually wants it on top.
+  const initialAlwaysOnTop = getConfig().appearance.alwaysOnTop ?? true
+  if (initialAlwaysOnTop) {
+    win.setAlwaysOnTop(true, 'screen-saver')
+    win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+  }
   applySpellCheckerLanguages(win)
   installContextMenu(win)
 

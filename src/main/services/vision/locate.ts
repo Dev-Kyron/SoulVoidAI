@@ -102,46 +102,40 @@ const POSITIONAL_HINTS: PositionalHint[] = [
       'SEND / SUBMIT / POST buttons in chat / messaging apps:\n' +
       '- LOCATION: almost always at the BOTTOM-RIGHT of the message compose area, immediately to the right of the text input field. The compose area itself is at the BOTTOM of the chat window — never in the message scroll region above.\n' +
       '- SIZE: typically 24-48 pixels square (sometimes a circle).\n' +
-      '- SHAPE: COULD BE almost any small icon — paper-plane (✈), right-pointing arrow (→ / ➤), chevron, triangle, plus, circle-with-arrow-inside (common in Messenger/WhatsApp), upward arrow, even just a coloured circle. Do NOT refuse just because the icon shape doesn\'t look exactly like a paper plane — ANY small interactive-looking icon at the bottom-right of the compose area is almost certainly the Send target. Position is a much stronger signal than icon shape for this category.\n' +
-      '- COLOUR: frequently the app\'s brand accent (blue for Messenger/Discord/Twitter, purple for Slack, red for Gmail), but plenty of apps use white-on-grey or muted styles. Colour is a tiebreaker, not a requirement.\n' +
-      '- COMMIT RULE: if you see any clickable-looking icon at the conventional position (bottom-right of compose, right of text input), commit to it with confidence 0.5-0.7. The user has a preview HUD to cancel if you\'re wrong.\n' +
+      "- SHAPE: COULD BE almost any small icon — paper-plane (✈), right-pointing arrow (→ / ➤), chevron, triangle, plus, circle-with-arrow-inside (common in Messenger/WhatsApp), upward arrow, even just a coloured circle. Do NOT refuse just because the icon shape doesn't look exactly like a paper plane — ANY small interactive-looking icon at the bottom-right of the compose area is almost certainly the Send target. Position is a much stronger signal than icon shape for this category.\n" +
+      "- COLOUR: frequently the app's brand accent (blue for Messenger/Discord/Twitter, purple for Slack, red for Gmail), but plenty of apps use white-on-grey or muted styles. Colour is a tiebreaker, not a requirement.\n" +
+      "- COMMIT RULE: if you see any clickable-looking icon at the conventional position (bottom-right of compose, right of text input), commit to it with confidence 0.5-0.7. The user has a preview HUD to cancel if you're wrong.\n" +
       '- DO NOT confuse with: timestamp text like "Sent 3d ago" / "Sent at 4:05pm" (informational, not interactive — these sit next to message bubbles in the scroll area, NOT in the compose area). Emoji-picker icons (smiley face — usually just LEFT of the Send button). The text input field itself.'
   },
   {
     // Close / Dismiss / X
     pattern: /\b(?:close|dismiss|cancel(?:lation)?|x button)\b/i,
-    hint:
-      'CLOSE / DISMISS / X buttons: almost always in the TOP-RIGHT corner of the window or dialog they belong to. Typically a small X shape (20-40 px). On modal dialogs the X is in the dialog\'s own top-right, not the parent window\'s.'
+    hint: "CLOSE / DISMISS / X buttons: almost always in the TOP-RIGHT corner of the window or dialog they belong to. Typically a small X shape (20-40 px). On modal dialogs the X is in the dialog's own top-right, not the parent window's."
   },
   {
     // Reply / Forward / message actions
     pattern: /\b(?:reply|forward|reaction|react|thread)\b/i,
-    hint:
-      'REPLY / FORWARD / REACTION buttons: appear adjacent to or below individual message bubbles, often in a small hover-revealed toolbar row. Look in the immediate vicinity of message content rather than at window edges. They\'re usually icon-only (curved arrow for reply, right-arrow with line for forward, smiley for reaction).'
+    hint: "REPLY / FORWARD / REACTION buttons: appear adjacent to or below individual message bubbles, often in a small hover-revealed toolbar row. Look in the immediate vicinity of message content rather than at window edges. They're usually icon-only (curved arrow for reply, right-arrow with line for forward, smiley for reaction)."
   },
   {
     // Settings / Preferences / gear
     pattern: /\b(?:settings|preferences|options|gear|cog)\b/i,
-    hint:
-      'SETTINGS buttons: usually a gear/cog icon (⚙). Commonly found in the top-right area of a window, in a sidebar, or in a menu bar. Sometimes accessed via a three-dots overflow menu.'
+    hint: 'SETTINGS buttons: usually a gear/cog icon (⚙). Commonly found in the top-right area of a window, in a sidebar, or in a menu bar. Sometimes accessed via a three-dots overflow menu.'
   },
   {
     // Hamburger / menu
     pattern: /\b(?:menu|hamburger|three.dots?|more options?|overflow)\b/i,
-    hint:
-      'MENU buttons: usually a hamburger icon (☰) or three dots (⋮ vertical, ⋯ horizontal). Hamburger menus are typically top-left; three-dots overflow menus are often top-right of toolbars or adjacent to individual items.'
+    hint: 'MENU buttons: usually a hamburger icon (☰) or three dots (⋮ vertical, ⋯ horizontal). Hamburger menus are typically top-left; three-dots overflow menus are often top-right of toolbars or adjacent to individual items.'
   },
   {
     // Search
     pattern: /\bsearch\b/i,
-    hint:
-      'SEARCH inputs: usually at the top of the window, often top-left or top-centered, with a magnifying glass icon (🔍). Either a button that opens a search field or an always-visible text input.'
+    hint: 'SEARCH inputs: usually at the top of the window, often top-left or top-centered, with a magnifying glass icon (🔍). Either a button that opens a search field or an always-visible text input.'
   },
   {
     // New / Compose / +
     pattern: /\b(?:new (?:message|email|chat|conversation|note|tab)|compose|create new)\b/i,
-    hint:
-      'NEW / COMPOSE buttons: prominently placed, usually top-left of a list pane or as a floating action button bottom-right. Often a + (plus) icon, a pencil/edit icon, or a labeled "New" / "Compose" button. Stands out from the surrounding UI.'
+    hint: 'NEW / COMPOSE buttons: prominently placed, usually top-left of a list pane or as a floating action button bottom-right. Often a + (plus) icon, a pencil/edit icon, or a labeled "New" / "Compose" button. Stands out from the surrounding UI.'
   }
 ]
 
@@ -196,7 +190,9 @@ export async function locateElement(args: {
   // UI patterns. Helps the model bias toward the conventional location
   // for icon-only buttons it would otherwise miss.
   const hints = getPositionalHints(description)
-  const hintsBlock = hints ? `\nPOSITIONAL HINTS (use as priors, not hard rules — visual evidence wins if it disagrees):\n${hints}\n` : ''
+  const hintsBlock = hints
+    ? `\nPOSITIONAL HINTS (use as priors, not hard rules — visual evidence wins if it disagrees):\n${hints}\n`
+    : ''
 
   const promptBody = args.refinement
     ? // Refinement pass — model is told this is a crop centred on a prior
@@ -286,11 +282,7 @@ export async function locateElement(args: {
  * screenshot bounds so a hallucinated (99999, 99999) can't drive the mouse
  * off-screen. Exported for unit tests.
  */
-export function parseLocateResponse(
-  raw: string,
-  width: number,
-  height: number
-): LocateOutcome {
+export function parseLocateResponse(raw: string, width: number, height: number): LocateOutcome {
   const cleaned = raw
     .replace(/^\s*```(?:json)?\s*/i, '')
     .replace(/```\s*$/, '')
@@ -305,9 +297,10 @@ export function parseLocateResponse(
   }
 
   if (json.found !== true) {
-    const reason = typeof json.reason === 'string' && json.reason.trim()
-      ? json.reason.trim().slice(0, 200)
-      : 'Model could not locate the element.'
+    const reason =
+      typeof json.reason === 'string' && json.reason.trim()
+        ? json.reason.trim().slice(0, 200)
+        : 'Model could not locate the element.'
     return { ok: false, reason }
   }
 

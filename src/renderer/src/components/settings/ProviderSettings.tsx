@@ -61,9 +61,7 @@ export function ProviderSettings(): JSX.Element | null {
   if (!config || !provider) return null
 
   const modelOptions = [
-    ...new Set(
-      [provider.model, ...(models[provider.id] ?? provider.defaultModels)].filter(Boolean)
-    )
+    ...new Set([provider.model, ...(models[provider.id] ?? provider.defaultModels)].filter(Boolean))
   ]
 
   // Models discovered in the last week are "new" — surfaced as a callout and
@@ -117,13 +115,13 @@ export function ProviderSettings(): JSX.Element | null {
       </select>
 
       {/* v1.13.4 — Auto-route toggle. When ON (default), the router can
-        * override the Active provider above based on per-prompt
-        * capability/cost/speed signals (e.g. push tool-heavy prompts to
-        * a fast/cheap model). When OFF, every send goes to the Active
-        * pick verbatim. Added after users reported the router routing
-        * tool-heavy prompts to gpt-4o-mini and that model refusing tool
-        * calls — locking Active = Claude is the workaround, but only
-        * works once the user can actually turn the router off. */}
+       * override the Active provider above based on per-prompt
+       * capability/cost/speed signals (e.g. push tool-heavy prompts to
+       * a fast/cheap model). When OFF, every send goes to the Active
+       * pick verbatim. Added after users reported the router routing
+       * tool-heavy prompts to gpt-4o-mini and that model refusing tool
+       * calls — locking Active = Claude is the workaround, but only
+       * works once the user can actually turn the router off. */}
       <label className="mb-3 flex cursor-pointer items-start gap-2 rounded-lg border border-white/10 bg-black/20 px-2.5 py-2">
         <input
           type="checkbox"
@@ -293,7 +291,9 @@ export function ProviderSettings(): JSX.Element | null {
             // Append a "✨ NEW" suffix to datalist labels so browsers that show
             // them (Chromium does) hint at fresh releases inline.
             const isNew = newModels.includes(model)
-            return <option key={model} value={model} label={isNew ? `${model}  ✨ NEW` : undefined} />
+            return (
+              <option key={model} value={model} label={isNew ? `${model}  ✨ NEW` : undefined} />
+            )
           })}
         </datalist>
       </div>
@@ -404,8 +404,8 @@ function EndpointRow({
       )}
       {providerId === 'lmstudio' && (
         <p className="mt-1 text-[10px] text-slate-500">
-          In LM Studio, open the Developer tab and click <em>Start Server</em>. VoidSoul talks to
-          it on the OpenAI-compatible endpoint above.
+          In LM Studio, open the Developer tab and click <em>Start Server</em>. VoidSoul talks to it
+          on the OpenAI-compatible endpoint above.
         </p>
       )}
     </>

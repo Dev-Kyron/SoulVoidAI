@@ -42,7 +42,17 @@ describe('extractFromHtml', () => {
       </body></html>
     `
     const text = extractFromHtml(html, 'u').text
-    for (const noise of ['NAV CONTENTS', 'HEADER CONTENTS', 'alert', 'color: red', 'SIDEBAR', 'FOOTER', 'FORM', 'SVG', 'IFRAME']) {
+    for (const noise of [
+      'NAV CONTENTS',
+      'HEADER CONTENTS',
+      'alert',
+      'color: red',
+      'SIDEBAR',
+      'FOOTER',
+      'FORM',
+      'SVG',
+      'IFRAME'
+    ]) {
       expect(text).not.toContain(noise)
     }
     expect(text).toContain('real content')

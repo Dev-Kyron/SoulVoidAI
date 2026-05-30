@@ -66,18 +66,11 @@ interface InstallRow {
   error?: string
 }
 
-export function QuickStartDialog({
-  open,
-  onClose,
-  entries
-}: QuickStartDialogProps): JSX.Element {
+export function QuickStartDialog({ open, onClose, entries }: QuickStartDialogProps): JSX.Element {
   const dialogRef = useRef<HTMLDivElement>(null)
   useDialog(dialogRef, onClose)
   const servers = useMcpStore((s) => s.servers)
-  const installedNames = useMemo(
-    () => new Set(servers.map((s) => s.name)),
-    [servers]
-  )
+  const installedNames = useMemo(() => new Set(servers.map((s) => s.name)), [servers])
   const [phase, setPhase] = useState<Phase>('picking')
   const [profile, setProfile] = useState<QuickStartProfile | null>(null)
   const [rows, setRows] = useState<InstallRow[]>([])
@@ -194,8 +187,8 @@ export function QuickStartDialog({
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header — title + close. The icon (rocket) is the same on all
-              * phases so the user has a consistent "this is the Quick Start
-              * dialog" anchor as the inner content swaps. */}
+             * phases so the user has a consistent "this is the Quick Start
+             * dialog" anchor as the inner content swaps. */}
             <div className="flex items-center gap-2 border-b border-white/10 px-5 py-3">
               <Rocket size={15} className="text-[var(--accent)]" />
               <h2 className="flex-1 font-display text-[13px] font-semibold text-white">
@@ -212,7 +205,13 @@ export function QuickStartDialog({
             </div>
 
             {phase === 'picking' && (
-              <PickingView entries={entries} onPick={(p) => { setProfile(p); setPhase('confirming') }} />
+              <PickingView
+                entries={entries}
+                onPick={(p) => {
+                  setProfile(p)
+                  setPhase('confirming')
+                }}
+              />
             )}
 
             {phase === 'confirming' && profile && (
@@ -221,17 +220,30 @@ export function QuickStartDialog({
                 entries={pickedEntries}
                 installedNames={installedNames}
                 onBack={() => setPhase('picking')}
-                onConfirm={() => void startInstall(profile)}
+                onConfirm={() => {
+                  // Guided profiles can't be bulk-installed (their entries
+                  // need credentials). The marketplace under this dialog
+                  // is where the per-entry install configure flow lives,
+                  // so we close out and let the user pick each one up
+                  // from there. handleClose toasts a hint pointing them
+                  // at the right spot.
+                  if (profile.mode === 'guided') {
+                    useUiStore
+                      .getState()
+                      .pushToast(
+                        'info',
+                        'Productivity Pack — install each from the Marketplace below (they need credentials).'
+                      )
+                    onClose()
+                    return
+                  }
+                  void startInstall(profile)
+                }}
               />
             )}
 
             {(phase === 'installing' || phase === 'done') && (
-              <InstallingView
-                rows={rows}
-                phase={phase}
-                summary={summary}
-                onClose={handleClose}
-              />
+              <InstallingView rows={rows} phase={phase} summary={summary} onClose={handleClose} />
             )}
           </motion.div>
         </motion.div>
@@ -249,48 +261,59 @@ function PickingView({
   entries: McpRegistryEntry[]
   onPick: (profile: QuickStartProfile) => void
 }): JSX.Element {
+  // Resolve once per `entries` change rather than 5x per render — each
+  // resolveProfileEntries call filters the full marketplace list, builds a
+  // Map, and iterates the profile's entryIds. PickingView re-renders on
+  // hover state via parent, so without the memo the filter would run
+  // 5 × profile-count per mouse-move tick.
+  const profileLists = useMemo(
+    () =>
+      QUICK_START_PROFILES.map((profile) => ({
+        profile,
+        list: resolveProfileEntries(profile, entries)
+      })),
+    [entries]
+  )
+
   return (
     <div className="scrollbar-void flex-1 overflow-y-auto px-5 py-4">
       {/* Heads-up panel — single screen explanation so we don't burn a
-        * whole step on "are you sure". Confirmation step still gates the
-        * actual install with the full server list. */}
+       * whole step on "are you sure". Confirmation step still gates the
+       * actual install with the full server list. */}
       <div className="mb-4 flex items-start gap-2 rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-100">
         <AlertTriangle size={13} className="mt-0.5 shrink-0 text-amber-300" />
         <p className="leading-snug">
-          Pick a workflow to bulk-install several MCP servers at once. Each one adds tools
-          the AI can use — file access, web fetching, memory, etc. None of these need API
-          keys or credentials. You can remove any later from Settings → MCP.
+          Pick a workflow to set up several MCP servers at once. Most are zero-config and install in
+          one click. The Productivity Pack connects to your real accounts (Notion, Slack, Gmail,
+          etc.) and walks you through auth per entry. You can remove any later from Settings → MCP.
         </p>
       </div>
 
       <div className="grid grid-cols-2 gap-2.5">
-        {QUICK_START_PROFILES.map((profile) => {
-          const list = resolveProfileEntries(profile, entries)
-          return (
-            <button
-              key={profile.id}
-              type="button"
-              onClick={() => onPick(profile)}
-              disabled={list.length === 0}
-              className={cn(
-                'glass-soft group flex flex-col items-start gap-1 rounded-lg p-3 text-left transition',
-                list.length === 0
-                  ? 'cursor-not-allowed opacity-50'
-                  : 'hover:border-[var(--accent-ring)] hover:bg-white/5'
-              )}
-            >
-              <div className="flex w-full items-center gap-1.5">
-                <Sparkles size={11} className="text-[var(--accent)]" />
-                <p className="flex-1 text-[12px] font-semibold text-white">{profile.name}</p>
-                <span className="rounded-full bg-white/10 px-1.5 text-[9px] font-mono text-slate-300">
-                  {list.length}
-                </span>
-              </div>
-              <p className="text-[10px] font-medium text-slate-300">{profile.tagline}</p>
-              <p className="text-[10px] leading-snug text-slate-500">{profile.description}</p>
-            </button>
-          )
-        })}
+        {profileLists.map(({ profile, list }) => (
+          <button
+            key={profile.id}
+            type="button"
+            onClick={() => onPick(profile)}
+            disabled={list.length === 0}
+            className={cn(
+              'glass-soft group flex flex-col items-start gap-1 rounded-lg p-3 text-left transition',
+              list.length === 0
+                ? 'cursor-not-allowed opacity-50'
+                : 'hover:border-[var(--accent-ring)] hover:bg-white/5'
+            )}
+          >
+            <div className="flex w-full items-center gap-1.5">
+              <Sparkles size={11} className="text-[var(--accent)]" />
+              <p className="flex-1 text-[12px] font-semibold text-white">{profile.name}</p>
+              <span className="rounded-full bg-white/10 px-1.5 text-[9px] font-mono text-slate-300">
+                {list.length}
+              </span>
+            </div>
+            <p className="text-[10px] font-medium text-slate-300">{profile.tagline}</p>
+            <p className="text-[10px] leading-snug text-slate-500">{profile.description}</p>
+          </button>
+        ))}
       </div>
     </div>
   )
@@ -311,6 +334,7 @@ function ConfirmingView({
   onBack: () => void
   onConfirm: () => void
 }): JSX.Element {
+  const isGuided = profile.mode === 'guided'
   const toInstall = entries.filter((e) => !installedNames.has(e.name))
   const alreadyInstalled = entries.length - toInstall.length
 
@@ -322,6 +346,21 @@ function ConfirmingView({
           <p className="mt-0.5 text-[10px] leading-snug text-slate-400">{profile.description}</p>
         </div>
 
+        {/* Guided profiles can't be bulk-installed because each entry
+            needs credentials — surface that upfront so the user knows
+            the next step is per-entry setup in the Marketplace, not a
+            one-click avalanche. */}
+        {isGuided && entries.length > 0 && (
+          <div className="mb-3 flex items-start gap-2 rounded-lg border border-sky-400/30 bg-sky-500/10 px-3 py-2 text-[10px] leading-snug text-sky-100">
+            <AlertTriangle size={11} className="mt-0.5 shrink-0 text-sky-300" />
+            <p>
+              These connect to real accounts and need a token or one-time browser sign-in. After
+              closing this dialog, click each in the Marketplace below — VoidSoul will walk you
+              through the auth step per entry.
+            </p>
+          </div>
+        )}
+
         {entries.length === 0 ? (
           <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-[11px] text-amber-200">
             None of this profile&apos;s servers are available in the current marketplace fetch.
@@ -331,6 +370,18 @@ function ConfirmingView({
           <div className="space-y-1.5">
             {entries.map((entry) => {
               const skip = installedNames.has(entry.name)
+              // Auth shorthand for guided rows: surface envPrompt label
+              // count + the OAuth-vs-token hint the description carries
+              // — so each row reads "Notion · API token" rather than
+              // forcing the user to expand to find out.
+              const authHint =
+                entry.envPrompts.length > 0
+                  ? entry.envPrompts.length === 1
+                    ? entry.envPrompts[0].label
+                    : `${entry.envPrompts.length} credentials`
+                  : entry.argPrompts.length > 0
+                    ? 'config'
+                    : 'browser OAuth on first run'
               return (
                 <div
                   key={entry.id}
@@ -349,6 +400,11 @@ function ConfirmingView({
                   <div className="min-w-0 flex-1">
                     <p className="text-[11px] font-semibold text-white">{entry.name}</p>
                     <p className="text-[10px] leading-snug text-slate-400">{entry.description}</p>
+                    {isGuided && !skip && (
+                      <p className="mt-0.5 text-[9px] font-medium text-sky-300">
+                        Needs: {authHint}
+                      </p>
+                    )}
                   </div>
                   {skip && (
                     <span className="shrink-0 rounded-full bg-emerald-500/10 px-1.5 text-[9px] text-emerald-300">
@@ -362,8 +418,8 @@ function ConfirmingView({
         )}
 
         <p className="mt-3 text-[10px] leading-snug text-slate-500">
-          Each server runs as a local process when its tools are invoked. Nothing connects
-          to remote services except where the server itself needs to (e.g., Cloudflare API).
+          Each server runs as a local process when its tools are invoked. Nothing connects to remote
+          services except where the server itself needs to (e.g., Cloudflare API).
         </p>
       </div>
 
@@ -379,14 +435,16 @@ function ConfirmingView({
         <button
           type="button"
           onClick={onConfirm}
-          disabled={toInstall.length === 0}
+          disabled={!isGuided && toInstall.length === 0}
           className="flex items-center gap-1 rounded-md bg-[var(--accent)] px-3 py-1 text-[11px] font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <Rocket size={11} />
-          {toInstall.length === 0
-            ? 'Nothing to install'
-            : `Install ${toInstall.length} server${toInstall.length === 1 ? '' : 's'}`}
-          {alreadyInstalled > 0 && (
+          {isGuided
+            ? 'Open in Marketplace'
+            : toInstall.length === 0
+              ? 'Nothing to install'
+              : `Install ${toInstall.length} server${toInstall.length === 1 ? '' : 's'}`}
+          {!isGuided && alreadyInstalled > 0 && (
             <span className="ml-1 rounded-full bg-white/15 px-1.5 text-[9px] font-normal">
               {alreadyInstalled} skipped
             </span>
@@ -445,9 +503,7 @@ function InstallingView({
               <div className="flex h-4 w-4 shrink-0 items-center justify-center">
                 {row.status === 'done' && <Check size={12} className="text-emerald-400" />}
                 {row.status === 'skipped' && <Check size={12} className="text-slate-400" />}
-                {row.status === 'failed' && (
-                  <AlertTriangle size={12} className="text-rose-400" />
-                )}
+                {row.status === 'failed' && <AlertTriangle size={12} className="text-rose-400" />}
                 {row.status === 'installing' && (
                   <Loader2 size={12} className="animate-spin text-[var(--accent)]" />
                 )}
@@ -457,9 +513,7 @@ function InstallingView({
               </div>
               <div className="min-w-0 flex-1">
                 <p className="text-[11px] font-semibold text-white">{row.entry.name}</p>
-                {row.error && (
-                  <p className="text-[10px] leading-snug text-rose-300">{row.error}</p>
-                )}
+                {row.error && <p className="text-[10px] leading-snug text-rose-300">{row.error}</p>}
                 {row.status === 'skipped' && (
                   <p className="text-[10px] leading-snug text-slate-500">
                     already installed — left as-is

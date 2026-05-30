@@ -45,6 +45,7 @@ interface ConfigState {
   setPrivateChat: (enabled: boolean) => Promise<void>
   setRagEnabled: (enabled: boolean) => Promise<void>
   setAutoRoute: (enabled: boolean) => Promise<void>
+  setPluginHooks: (enabled: boolean) => Promise<void>
   setMemory: (patch: Partial<MemoryConfig>) => Promise<void>
   setProactiveVoice: (patch: Partial<ProactiveVoiceConfig>) => Promise<void>
   setScreenWatch: (patch: Partial<ScreenWatchConfig>) => Promise<void>
@@ -120,6 +121,10 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
 
   setAutoRoute: async (enabled) => {
     set({ config: await vs.config.setAutoRoute(enabled) })
+  },
+
+  setPluginHooks: async (enabled) => {
+    set({ config: await vs.config.setPluginHooks(enabled) })
   },
 
   setMemory: async (patch) => {

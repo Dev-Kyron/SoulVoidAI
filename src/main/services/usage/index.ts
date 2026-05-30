@@ -4,14 +4,7 @@
  * thresholds are crossed (75% / 90% / 100%).
  */
 import { randomUUID } from 'node:crypto'
-import {
-  appendEntry,
-  clearEntries,
-  getBudget,
-  getEntries,
-  markWarned,
-  setBudget
-} from './store'
+import { appendEntry, clearEntries, getBudget, getEntries, markWarned, setBudget } from './store'
 import { pricingFor, estimateTokensFromText, TOKENS_PER_IMAGE } from '../pricing/models'
 import { broadcast } from '../../events'
 import type {
@@ -65,8 +58,7 @@ export function recordUsage(input: RecordInput): UsageEntry {
   let cost: number | null = null
   if (pricing) {
     const tokenCost =
-      (inputTokens / 1_000_000) * pricing.input +
-      (outputTokens / 1_000_000) * pricing.output
+      (inputTokens / 1_000_000) * pricing.input + (outputTokens / 1_000_000) * pricing.output
     const imageCost = (pricing.image ?? 0) * (input.imageCount ?? 0)
     cost = tokenCost + imageCost
   }
@@ -112,11 +104,7 @@ export function getSummary(): UsageSummary {
   // Daily totals — one bucket per calendar day in this month so the chart can
   // render zero-spend days at the same width as the others. Local timezone
   // matters here (a late-night session shouldn't split across two bars).
-  const daysInMonth = new Date(
-    since.getFullYear(),
-    since.getMonth() + 1,
-    0
-  ).getDate()
+  const daysInMonth = new Date(since.getFullYear(), since.getMonth() + 1, 0).getDate()
   const dailyCost: Array<{ date: string; cost: number }> = []
   for (let d = 1; d <= daysInMonth; d++) {
     const date = new Date(since.getFullYear(), since.getMonth(), d)

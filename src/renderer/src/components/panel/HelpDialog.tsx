@@ -43,10 +43,10 @@ const SECTIONS: Section[] = [
     title: 'Nexus',
     body: (
       <>
-        Your home screen — orb, quick actions, telemetry. Tap the orb to open the
-        conversation. Add custom shortcuts via the <strong>+</strong> tile or in
-        Settings → Memory → Quick Actions. Two layouts in Settings → Appearance:{' '}
-        <strong>Simple</strong> (phone-style) and <strong>Advanced</strong> (radial HUD).
+        Your home screen — orb, quick actions, telemetry. Tap the orb to open the conversation. Add
+        custom shortcuts via the <strong>+</strong> tile or in Settings → Memory → Quick Actions.
+        Two layouts in Settings → Appearance: <strong>Simple</strong> (phone-style) and{' '}
+        <strong>Advanced</strong> (radial HUD).
       </>
     )
   },
@@ -55,10 +55,10 @@ const SECTIONS: Section[] = [
     title: 'Conversation',
     body: (
       <>
-        Each chat lives in its own <strong>thread</strong> — open the sidebar with the
-        panel icon. New chat, rename, pin, delete from there. The header carries{' '}
-        <strong>Search</strong> (this thread), <strong>Copy as Markdown</strong>,
-        and the <strong>Private</strong> and <strong>Agent</strong> toggles.
+        Each chat lives in its own <strong>thread</strong> — open the sidebar with the panel icon.
+        New chat, rename, pin, delete from there. The header carries <strong>Search</strong> (this
+        thread), <strong>Copy as Markdown</strong>, and the <strong>Private</strong> and{' '}
+        <strong>Agent</strong> toggles.
       </>
     )
   },
@@ -69,10 +69,18 @@ const SECTIONS: Section[] = [
       <>
         Four layers stack to make VoidSoul remember you:
         <ul className="mt-1 list-disc space-y-0.5 pl-4 text-slate-400">
-          <li><strong>Threads</strong> — every chat is saved.</li>
-          <li><strong>Story so far</strong> — long chats auto-summarised.</li>
-          <li><strong>Facts</strong> — durable bullets injected into every prompt (mode-taggable).</li>
-          <li><strong>RAG</strong> — embeds past messages so older snippets resurface.</li>
+          <li>
+            <strong>Threads</strong> — every chat is saved.
+          </li>
+          <li>
+            <strong>Story so far</strong> — long chats auto-summarised.
+          </li>
+          <li>
+            <strong>Facts</strong> — durable bullets injected into every prompt (mode-taggable).
+          </li>
+          <li>
+            <strong>RAG</strong> — embeds past messages so older snippets resurface.
+          </li>
         </ul>
         Manage everything in Settings → Memory.
       </>
@@ -83,9 +91,9 @@ const SECTIONS: Section[] = [
     title: 'Agent mode',
     body: (
       <>
-        When on, VoidSoul can <strong>act on your machine</strong> — open apps, run shell
-        commands, manage files, read the screen. Every sensitive tool call asks
-        permission first, and the run lands in the Logs tab. Toggle on the chat header.
+        When on, VoidSoul can <strong>act on your machine</strong> — open apps, run shell commands,
+        manage files, read the screen. Every sensitive tool call asks permission first, and the run
+        lands in the Logs tab. Toggle on the chat header.
       </>
     )
   },
@@ -94,9 +102,9 @@ const SECTIONS: Section[] = [
     title: 'Private mode',
     body: (
       <>
-        Flip the shield on the chat header. The current chat <strong>isn’t saved</strong>,
-        no facts are extracted, the screen-awareness line is suppressed in the prompt.
-        Use for sensitive material.
+        Flip the shield on the chat header. The current chat <strong>isn’t saved</strong>, no facts
+        are extracted, the screen-awareness line is suppressed in the prompt. Use for sensitive
+        material.
       </>
     )
   },
@@ -105,8 +113,8 @@ const SECTIONS: Section[] = [
     title: 'Logs',
     body: (
       <>
-        Every AI call, automation action and permission change is recorded with full
-        transparency. Filter by level, by category, or free-text search.
+        Every AI call, automation action and permission change is recorded with full transparency.
+        Filter by level, by category, or free-text search.
       </>
     )
   },
@@ -116,9 +124,8 @@ const SECTIONS: Section[] = [
     body: (
       <>
         Hover any title for a hint. Memory is split into <strong>AI Memory</strong>,{' '}
-        <strong>Quick Actions</strong> and <strong>Workspace</strong> sub-tabs.
-        Backup & Sync exports everything (config, memory, plugins, chat history) as one
-        portable JSON.
+        <strong>Quick Actions</strong> and <strong>Workspace</strong> sub-tabs. Backup & Sync
+        exports everything (config, memory, plugins, chat history) as one portable JSON.
       </>
     )
   }

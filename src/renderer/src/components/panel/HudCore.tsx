@@ -341,11 +341,7 @@ function SpiritVoiceButton({
   const streaming = useChatStore((s) => s.streaming)
   const recording = status === 'recording'
   const transcribing = status === 'transcribing'
-  const title = transcribing
-    ? 'Transcribing…'
-    : recording
-      ? 'Stop and transcribe'
-      : 'Tap to talk'
+  const title = transcribing ? 'Transcribing…' : recording ? 'Stop and transcribe' : 'Tap to talk'
 
   // v1.6.2 — anchored to the BOTTOM of the HUD container (not centred)
   // so the avatar sits directly above the gauges in the parent panel.

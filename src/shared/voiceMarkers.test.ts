@@ -158,9 +158,7 @@ describe('StreamingVoiceExtractor', () => {
 
   it('emits two segments across two feeds when both close in their chunks', () => {
     const ex = new StreamingVoiceExtractor()
-    expect(ex.feed('a <voice tone="dry">one</voice>')).toEqual([
-      { tone: 'dry', text: 'one' }
-    ])
+    expect(ex.feed('a <voice tone="dry">one</voice>')).toEqual([{ tone: 'dry', text: 'one' }])
     expect(ex.feed(' b <voice tone="serious">two</voice>')).toEqual([
       { tone: 'serious', text: 'two' }
     ])
@@ -186,17 +184,13 @@ describe('StreamingVoiceExtractor', () => {
     // Open tag broken across chunks — extractor must wait for the `>`
     // before claiming a complete open tag.
     expect(ex.feed('chat <voice tone="ex')).toEqual([])
-    expect(ex.feed('cited">yay</voice>')).toEqual([
-      { tone: 'excited', text: 'yay' }
-    ])
+    expect(ex.feed('cited">yay</voice>')).toEqual([{ tone: 'excited', text: 'yay' }])
   })
 
   it('handles a chunk split mid-attribute value', () => {
     const ex = new StreamingVoiceExtractor()
     expect(ex.feed('<voice tone="ser')).toEqual([])
-    expect(ex.feed('ious">heavy</voice>')).toEqual([
-      { tone: 'serious', text: 'heavy' }
-    ])
+    expect(ex.feed('ious">heavy</voice>')).toEqual([{ tone: 'serious', text: 'heavy' }])
   })
 
   it('handles a chunk ending with a partial close tag', () => {
@@ -248,8 +242,7 @@ describe('StreamingVoiceExtractor', () => {
 
   it('flush stays silent when no segments seen and reply is code-heavy', () => {
     const ex = new StreamingVoiceExtractor()
-    const codeHeavy =
-      'Here:\n\n```ts\n' + 'const x = 1;\n'.repeat(50) + '```\n\nDone.'
+    const codeHeavy = 'Here:\n\n```ts\n' + 'const x = 1;\n'.repeat(50) + '```\n\nDone.'
     ex.feed(codeHeavy)
     expect(ex.flush()).toEqual([])
   })

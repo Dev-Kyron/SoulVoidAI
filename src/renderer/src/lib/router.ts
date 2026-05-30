@@ -100,20 +100,56 @@ export interface RouterPick {
 /* ------------------------- task classifier --------------------------- */
 
 const REASONING_KEYWORDS = [
-  'analyse', 'analyze', 'reason', 'reasoning', 'prove', 'derive',
-  'step by step', 'step-by-step', 'think through', 'think step',
-  'explain why', 'work out', 'solve', 'calculate', 'math', 'theorem'
+  'analyse',
+  'analyze',
+  'reason',
+  'reasoning',
+  'prove',
+  'derive',
+  'step by step',
+  'step-by-step',
+  'think through',
+  'think step',
+  'explain why',
+  'work out',
+  'solve',
+  'calculate',
+  'math',
+  'theorem'
 ]
 
 const CODING_KEYWORDS = [
-  'code', 'function', 'class', 'method', 'variable', 'compile',
-  'debug', 'refactor', 'implement', 'unit test', 'typescript', 'python',
-  'rust', 'java', 'electron', 'react', 'sql', 'regex', 'algorithm'
+  'code',
+  'function',
+  'class',
+  'method',
+  'variable',
+  'compile',
+  'debug',
+  'refactor',
+  'implement',
+  'unit test',
+  'typescript',
+  'python',
+  'rust',
+  'java',
+  'electron',
+  'react',
+  'sql',
+  'regex',
+  'algorithm'
 ]
 
 const FAST_KEYWORDS = [
-  'quick', 'tldr', 'tl;dr', 'short answer', 'one-liner', 'in a sentence',
-  'briefly', 'just tell me', 'yes or no'
+  'quick',
+  'tldr',
+  'tl;dr',
+  'short answer',
+  'one-liner',
+  'in a sentence',
+  'briefly',
+  'just tell me',
+  'yes or no'
 ]
 
 function lowercased(s: string): string {
@@ -185,7 +221,11 @@ const SHORT_PROMPT_CHARS = 80
  *  4. Conversational opener on a short prompt (→ fast/cheap).
  *  5. Default: general.
  */
-export function classifyTask(input: { prompt: string; hasImages: boolean; agentMode: boolean }): TaskHint {
+export function classifyTask(input: {
+  prompt: string
+  hasImages: boolean
+  agentMode: boolean
+}): TaskHint {
   const { prompt, hasImages, agentMode } = input
   const lower = lowercased(prompt)
   const hasFilepath = looksLikeFilepath(prompt)
@@ -286,7 +326,12 @@ interface Candidate {
   reasonBits: string[]
 }
 
-function scoreCandidate(task: TaskHint, provider: AvailableProvider, activeId: ProviderId, budget?: { nearCap: boolean }): Candidate | null {
+function scoreCandidate(
+  task: TaskHint,
+  provider: AvailableProvider,
+  activeId: ProviderId,
+  budget?: { nearCap: boolean }
+): Candidate | null {
   const caps = capabilitiesOf(provider.model, provider.isLocal)
 
   // Hard requirements — eliminate if missing.
@@ -383,7 +428,14 @@ function scoreCandidate(task: TaskHint, provider: AvailableProvider, activeId: P
   // a clear reason.
   if (provider.id === activeId) score += 1
 
-  return { providerId: provider.id, modelId: provider.model, caps, isLocal: provider.isLocal, score, reasonBits }
+  return {
+    providerId: provider.id,
+    modelId: provider.model,
+    caps,
+    isLocal: provider.isLocal,
+    score,
+    reasonBits
+  }
 }
 
 /* ---------------------------- main entry ------------------------------ */
@@ -450,7 +502,11 @@ export function pickProvider(input: RouterInput): RouterPick | null {
  * the ClientConfig. Keeps the routing layer ignorant of the config
  * shape — call sites map their config into AvailableProvider[].
  */
-export function toAvailable(runtime: Record<ProviderId, ProviderRuntime>, providerIds: ProviderId[], detected: Set<ProviderId>): AvailableProvider[] {
+export function toAvailable(
+  runtime: Record<ProviderId, ProviderRuntime>,
+  providerIds: ProviderId[],
+  detected: Set<ProviderId>
+): AvailableProvider[] {
   return providerIds.map((id) => {
     const r = runtime[id]
     if (!r) {
@@ -479,7 +535,10 @@ export const BUDGET_THRESHOLD = 0.8
  * Pure function for testability — the caller fetches the numbers via
  * the usage IPC and hands them in.
  */
-export function deriveBudgetState(totalSpentUsd: number, monthlyCapUsd: number | null): { nearCap: boolean } | undefined {
+export function deriveBudgetState(
+  totalSpentUsd: number,
+  monthlyCapUsd: number | null
+): { nearCap: boolean } | undefined {
   if (monthlyCapUsd === null || monthlyCapUsd <= 0) return undefined
   return { nearCap: totalSpentUsd / monthlyCapUsd >= BUDGET_THRESHOLD }
 }

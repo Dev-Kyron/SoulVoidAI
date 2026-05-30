@@ -75,7 +75,7 @@ async function checkFileRead(granted: boolean): Promise<SmokeCheck> {
     {
       id: 'fileRead',
       label: 'Read a file',
-      what: 'Reads the app\'s package.json via the same path the read_file tool uses.',
+      what: "Reads the app's package.json via the same path the read_file tool uses.",
       permissionId: 'filesystem'
     },
     granted,
@@ -140,9 +140,17 @@ async function checkFileWrite(granted: boolean): Promise<SmokeCheck> {
     await writeFile(target, payload, 'utf-8')
     const echo = await readFile(target, 'utf-8')
     if (echo !== payload) {
-      return { ...spec, status: 'fail', detail: 'Round-trip mismatch: file content read back differently than written.' }
+      return {
+        ...spec,
+        status: 'fail',
+        detail: 'Round-trip mismatch: file content read back differently than written.'
+      }
     }
-    return { ...spec, status: 'pass', detail: `Wrote and re-read ${payload.length} chars in a temp folder.` }
+    return {
+      ...spec,
+      status: 'pass',
+      detail: `Wrote and re-read ${payload.length} chars in a temp folder.`
+    }
   } catch (err) {
     return { ...spec, status: 'fail', detail: err instanceof Error ? err.message : String(err) }
   } finally {

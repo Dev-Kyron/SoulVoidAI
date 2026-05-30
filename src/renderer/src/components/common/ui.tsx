@@ -71,7 +71,10 @@ export function Toggle({
 export function SectionHint({ text }: { text: string }): JSX.Element {
   return (
     <span className="group relative inline-flex items-center">
-      <Info size={11} className="cursor-help text-slate-500 transition group-hover:text-[var(--accent)]" />
+      <Info
+        size={11}
+        className="cursor-help text-slate-500 transition group-hover:text-[var(--accent)]"
+      />
       <span className="pointer-events-none absolute left-0 top-5 z-50 w-56 rounded-lg border border-white/10 bg-void-800 px-2.5 py-2 text-[10px] font-normal normal-case leading-relaxed tracking-normal text-slate-300 opacity-0 shadow-panel transition-opacity duration-150 group-hover:opacity-100">
         {text}
       </span>
@@ -139,16 +142,10 @@ export function EmptyState({
 }): JSX.Element {
   return (
     <div className="flex flex-col items-center justify-center gap-2 px-6 py-10 text-center">
-      <div className="rounded-full bg-white/5 p-3 text-slate-400 ring-1 ring-white/10">
-        {icon}
-      </div>
-      {title ? (
-        <p className="mt-1 text-[12px] font-semibold text-slate-200">{title}</p>
-      ) : null}
+      <div className="rounded-full bg-white/5 p-3 text-slate-400 ring-1 ring-white/10">{icon}</div>
+      {title ? <p className="mt-1 text-[12px] font-semibold text-slate-200">{title}</p> : null}
       {hint || text ? (
-        <p className="max-w-[280px] text-[11px] leading-relaxed text-slate-500">
-          {hint ?? text}
-        </p>
+        <p className="max-w-[280px] text-[11px] leading-relaxed text-slate-500">{hint ?? text}</p>
       ) : null}
       {action ? (
         <button

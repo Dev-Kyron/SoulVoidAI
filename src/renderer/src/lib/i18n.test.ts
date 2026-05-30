@@ -22,9 +22,7 @@ describe('i18n.t', () => {
     // public surface — assert directly against the literal we want.
     // (The substitution logic is what matters; the corpus is exercised
     //  separately.)
-    expect(
-      t('common.cancel', { name: 'ignored' })
-    ).toBe('Cancel')
+    expect(t('common.cancel', { name: 'ignored' })).toBe('Cancel')
   })
 
   it('leaves a literal {name} placeholder when the param is missing', () => {

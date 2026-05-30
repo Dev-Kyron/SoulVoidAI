@@ -112,7 +112,7 @@ function handleCosineSearch(req: CosineSearchRequest): CosineSearchHit[] {
     if (score < req.threshold) continue
     hits.push({
       messageId: row.id,
-      source: (row.source === 'file' ? 'file' : 'chat'),
+      source: row.source === 'file' ? 'file' : 'chat',
       threadId: row.thread_id,
       filePath: row.file_path,
       chunkIndex: row.chunk_index,
@@ -322,9 +322,7 @@ function getAsrPipeline(): Promise<AsrPipeline> {
   return asrPipelinePromise
 }
 
-async function handleTranscribeAudio(
-  req: TranscribeAudioRequest
-): Promise<TranscribeAudioResult> {
+async function handleTranscribeAudio(req: TranscribeAudioRequest): Promise<TranscribeAudioResult> {
   if (req.sampleRate !== 16_000) {
     // The renderer should always resample to 16k; if it didn't, that's a bug
     // upstream — fail loudly rather than silently producing garbage transcripts.

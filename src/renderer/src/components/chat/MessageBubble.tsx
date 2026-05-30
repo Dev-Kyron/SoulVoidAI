@@ -3,16 +3,35 @@
  * assistant messages render markdown in a glass bubble. Image attachments are
  * shown as thumbnails; an empty streaming reply shows animated dots.
  */
+import { useMemo, type MouseEvent as ReactMouseEvent } from 'react'
 import { motion } from 'framer-motion'
-import { FileText, Volume2, VolumeX, Wrench, Check, X, Maximize2 } from 'lucide-react'
+import {
+  FileText,
+  Volume2,
+  VolumeX,
+  Wrench,
+  Check,
+  X,
+  Maximize2,
+  Play,
+  PanelRight,
+  Loader2
+} from 'lucide-react'
 import { Markdown } from './Markdown'
 import { useConfigStore } from '../../store/useConfigStore'
 import { useChatStore } from '../../store/useChatStore'
+import { useUiStore } from '../../store/useUiStore'
+import { useComposerStore } from '../../store/useComposerStore'
 import { speakWith, stopSpeaking } from '../../lib/voice'
-import { useIsSpeaking } from '../../hooks/useCurrentSpoken'
+import { useSpeakerState } from '../../hooks/useCurrentSpoken'
 import { cn, formatTime } from '../../lib/utils'
 import { stripVoiceTagsOnly } from '@shared/voiceMarkers'
-import type { ChatMessage, ToolInvocation, VoiceConfig } from '@shared/types'
+import {
+  WELCOME_MESSAGE_ID,
+  type ChatMessage,
+  type ToolInvocation,
+  type VoiceConfig
+} from '@shared/types'
 
 function argsSummary(args: Record<string, unknown>): string {
   const parts = Object.values(args).map((v) => {
@@ -88,21 +107,18 @@ function ToolCalls({ calls }: { calls: ToolInvocation[] }): JSX.Element {
           <div className="flex items-start gap-1.5">
             <Wrench size={11} className="mt-0.5 shrink-0 text-[var(--accent)]" />
             <div className="min-w-0 flex-1">
-              <span className="font-mono font-semibold text-slate-200">
-                {toolLabel(call.name)}
-              </span>
+              <span className="font-mono font-semibold text-slate-200">{toolLabel(call.name)}</span>
               {Object.keys(call.args).length > 0 && (
                 <span className="text-slate-500"> · {argsSummary(call.args)}</span>
               )}
               {/* v1.12.7 — render multi-line result tools in a scrollable
-                * code panel instead of the default one-line truncate.
-                * Previously run_python's stdout (up to 8000 chars per the
-                * tool impl) showed as a single "Read 3 files..." crumb;
-                * the user couldn't see what the script actually printed.
-                * Failed calls always get the expanded view too so error
-                * stack traces aren't lost to truncation. */}
-              {call.result &&
-              (EXPANDABLE_OUTPUT_TOOLS.has(call.name) || !call.ok) ? (
+               * code panel instead of the default one-line truncate.
+               * Previously run_python's stdout (up to 8000 chars per the
+               * tool impl) showed as a single "Read 3 files..." crumb;
+               * the user couldn't see what the script actually printed.
+               * Failed calls always get the expanded view too so error
+               * stack traces aren't lost to truncation. */}
+              {call.result && (EXPANDABLE_OUTPUT_TOOLS.has(call.name) || !call.ok) ? (
                 <pre className="scrollbar-void mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-md bg-black/40 px-2 py-1.5 font-mono text-[10px] leading-snug text-slate-300">
                   {call.result}
                 </pre>
@@ -131,8 +147,12 @@ function ToolCalls({ calls }: { calls: ToolInvocation[] }): JSX.Element {
 }
 
 function StreamingDots(): JSX.Element {
+  // v2.0 a11y — purely decorative animation; the parent bubble's
+  // `aria-busy="true"` already conveys "in progress" to screen readers
+  // and the LiveRegion will announce the completed reply. Marking the
+  // dots aria-hidden stops the AT from announcing "three dots".
   return (
-    <div className="flex items-center gap-1 py-1">
+    <div aria-hidden="true" className="flex items-center gap-1 py-1">
       {[0, 1, 2].map((i) => (
         <motion.span
           key={i}
@@ -205,21 +225,40 @@ export function MessageBubble({
   // tokens out before rendering — the content inside the tags STAYS
   // visible in chat (the voice layer is a subset of the chat layer, not
   // a parallel narrative), only the angle-bracket wrappers come out.
-  const displayContent = stripVoiceTagsOnly(message.content + streamingExtra)
+  //
+  // v2.0 round-6 perf — split into a memoized static-part strip + a
+  // per-token tail strip. Previously the regex ran over the FULL
+  // accumulated body on every render (including unrelated re-renders
+  // from sibling bubbles). For a long assistant reply that's an O(N)
+  // pass per render × many renders. Static content is memoized so it
+  // only re-runs when `message.content` actually changes; the small
+  // streaming tail is the only piece that re-strips per token.
+  const staticStripped = useMemo(() => stripVoiceTagsOnly(message.content), [message.content])
+  const displayContent = streamingExtra
+    ? staticStripped + stripVoiceTagsOnly(streamingExtra)
+    : staticStripped
   const images = (message.attachments ?? []).filter((a) => a.kind === 'image' && a.dataUrl)
   const textFiles = (message.attachments ?? []).filter((a) => a.kind === 'text')
   // Two flavours: preview-eligible (has dataUrl) and oversize (text-only).
   const pdfFilesWithPreview = (message.attachments ?? []).filter(
     (a) => a.kind === 'pdf' && a.dataUrl
   )
-  const pdfFilesTextOnly = (message.attachments ?? []).filter(
-    (a) => a.kind === 'pdf' && !a.dataUrl
-  )
+  const pdfFilesTextOnly = (message.attachments ?? []).filter((a) => a.kind === 'pdf' && !a.dataUrl)
   const canSpeak = !isUser && !message.streaming && !message.error && displayContent.length > 0
 
   return (
     <motion.div
       data-message-id={message.id}
+      // v2.0 a11y — `article` role lets screen-reader users navigate
+      // bubble-by-bubble with the AT's "next article" shortcut (D in
+      // NVDA, jaws). `aria-busy` flips to true while the streaming
+      // bubble is still filling in so the AT knows not to re-read
+      // the partial content mid-stream; the dedicated LiveRegion
+      // announces "Reply ready" once the stream completes (see
+      // useChatStore's success branch).
+      role="article"
+      aria-label={isUser ? 'You said' : message.error ? 'Assistant error' : 'Assistant replied'}
+      aria-busy={message.streaming || undefined}
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       className={cn('flex flex-col', isUser ? 'items-end' : 'items-start')}
@@ -232,8 +271,7 @@ export function MessageBubble({
             : message.error
               ? 'rounded-bl-sm border border-rose-500/40 bg-rose-500/10 text-rose-100'
               : 'glass-soft rounded-bl-sm text-slate-100',
-          highlighted &&
-            'ring-2 ring-offset-2 ring-offset-transparent ring-[var(--accent)]'
+          highlighted && 'ring-2 ring-offset-2 ring-offset-transparent ring-[var(--accent)]'
         )}
       >
         {images.length > 0 && (
@@ -318,6 +356,21 @@ export function MessageBubble({
         ) : (
           <StreamingDots />
         )}
+
+        {!isUser && message.paused && !message.streaming && (
+          // v2.0 — Resume button for step-cap pauses. Pre-2.0 users had to
+          // read the pause prefix and manually type "continue" to extend
+          // the run. Now they tap Resume; the store fires the same magic
+          // word into send(). Hidden while ANY message is streaming so
+          // the user can't queue a continue mid-reply (send() early-
+          // returns in that case anyway, but the disabled state makes
+          // the constraint visible instead of silent). The button itself
+          // captures the active thread id at render and re-checks at
+          // click time — guards against the (rare) race where a thread
+          // switch races the click and would otherwise inject "continue"
+          // into the wrong thread.
+          <ResumeButton />
+        )}
       </div>
       <div
         className={cn(
@@ -327,10 +380,7 @@ export function MessageBubble({
       >
         <span className="text-[9px] text-slate-500">{formatTime(message.createdAt)}</span>
         {!isUser && message.model && (
-          <span
-            className="text-[9px] text-slate-500/80"
-            title={`Generated by ${message.model}`}
-          >
+          <span className="text-[9px] text-slate-500/80" title={`Generated by ${message.model}`}>
             · {message.model}
           </span>
         )}
@@ -347,41 +397,183 @@ export function MessageBubble({
             Auto
           </span>
         )}
-        {canSpeak && voice && (
-          <SpeakerButton voice={voice} text={displayContent} />
-        )}
+        {canSpeak && voice && <SpeakerButton voice={voice} text={displayContent} />}
+        {!isUser &&
+          !message.streaming &&
+          !message.error &&
+          message.id !== WELCOME_MESSAGE_ID &&
+          displayContent.length > 0 && (
+            // v2.0 — Composer drop button. Shovels the assistant's reply
+            // straight into the markdown side-panel. Hidden on:
+            //   - streaming bubbles (mid-stream → partial doc)
+            //   - error bubbles (the user doesn't want "⚠ 429 — rate
+            //     limited" landing in their draft)
+            //   - the synthetic welcome message (every other consumer
+            //     in the codebase filters this out for the same reason)
+            //   - empty bubbles
+            // Toasts on plain-click because the side panel may not be
+            // open at the moment of click.
+            <ComposerDropButton text={displayContent} />
+          )}
       </div>
     </motion.div>
   )
 }
 
 /**
- * Per-message speaker control / mute toggle. Beta testers asked for a
- * quick way to silence a reply mid-read without hunting for global stop,
- * so the same button doubles as mute while TTS is active.
+ * Per-message speaker control. Three visual states:
+ *   idle     — speaker icon, click to start reading
+ *   warming  — spinner, "Preparing voice…" (Piper synth in flight or
+ *              audio decoded but not yet playing; can be 1-3s on cold
+ *              caches or long inputs — previously the button stayed
+ *              in `idle` here and the click felt ignored)
+ *   speaking — mute icon, click to stop
  *
- * Subscribes to the boolean `useIsSpeaking` rather than `useCurrentSpoken`
- * so a 50-sentence reply doesn't trigger a re-render in every visible
- * bubble each time the synth ticks to the next sentence — only the
- * speaking ↔ idle transition flips the icon, so the boolean is all we need.
+ * Subscribes to `useSpeakerState` rather than `useIsSpeaking` so the
+ * warming state can be surfaced. State flips on transitions only —
+ * sentence-by-sentence ticks during a long reply don't re-render
+ * every visible bubble.
+ *
+ * Click handler routes warming → stop too, so a user who regrets
+ * pressing Read Aloud doesn't have to wait for synth to finish
+ * before being able to cancel.
  */
 function SpeakerButton({ voice, text }: { voice: VoiceConfig; text: string }): JSX.Element {
-  const speaking = useIsSpeaking()
+  const state = useSpeakerState()
+  const busy = state !== 'idle'
+  const tooltip =
+    state === 'warming'
+      ? 'Preparing voice…'
+      : state === 'speaking'
+        ? 'Mute — stop reading aloud'
+        : 'Read aloud'
+  // Mirror the visible tooltip — "Stop" alone leaves SR users guessing
+  // what's being stopped during the warming window.
+  const ariaLabel =
+    state === 'speaking' ? 'Mute' : state === 'warming' ? 'Stop preparing voice' : 'Read aloud'
   return (
     <button
       type="button"
-      onClick={() => (speaking ? stopSpeaking() : speakWith(voice, text))}
-      title={speaking ? 'Mute — stop reading aloud' : 'Read aloud'}
-      aria-label={speaking ? 'Mute' : 'Read aloud'}
-      aria-pressed={speaking}
+      onClick={() => (busy ? stopSpeaking() : speakWith(voice, text))}
+      title={tooltip}
+      aria-label={ariaLabel}
+      aria-pressed={state === 'speaking'}
+      aria-busy={state === 'warming'}
       className={cn(
         'transition',
-        speaking
+        busy
           ? 'text-[var(--accent)] hover:text-rose-400'
           : 'text-slate-500 hover:text-[var(--accent)]'
       )}
     >
-      {speaking ? <VolumeX size={11} /> : <Volume2 size={11} />}
+      {state === 'warming' ? (
+        <Loader2 size={11} className="animate-spin" />
+      ) : state === 'speaking' ? (
+        <VolumeX size={11} />
+      ) : (
+        <Volume2 size={11} />
+      )}
+    </button>
+  )
+}
+
+/**
+ * v2.0 — Resume button rendered on assistant bubbles that hit the
+ * MAX_AGENT_STEPS ceiling. Sends the literal string "continue" through
+ * the standard send() path — the agent loop sees the full conversation
+ * history with its earlier tool-call breadcrumbs and picks up from
+ * where it stopped. Disabled while ANY reply is streaming so the user
+ * can't queue a duplicate continue mid-reply.
+ *
+ * Why disable rather than hide on streaming: the bubble is staying
+ * paused either way; hiding the button would imply the pause was
+ * resolved on its own. Disabled-with-tooltip explains "wait for the
+ * current reply to finish" without lying about state.
+ *
+ * Thread-id guard: the bubble belongs to the active thread (that's
+ * how messages are filtered to it). We capture the active thread id
+ * at render and re-check at click time — protects against the
+ * race where a thread switch lands between paint and click, which
+ * would otherwise see send() inject "continue" into the wrong thread.
+ */
+function ResumeButton(): JSX.Element {
+  const send = useChatStore((s) => s.send)
+  const streaming = useChatStore((s) => s.streaming)
+  const ownerThreadId = useChatStore((s) => s.activeThreadId)
+  const pushToast = useUiStore((s) => s.pushToast)
+  const handleClick = (): void => {
+    // Re-read activeThreadId at click time. The captured `ownerThreadId`
+    // is the value at render; mismatch means a thread switch happened
+    // between paint and click. Bail with a clarifying toast rather than
+    // silently driving the wrong conversation.
+    const currentThread = useChatStore.getState().activeThreadId
+    if (currentThread !== ownerThreadId) {
+      pushToast('info', 'Switch back to the paused thread to resume from there.')
+      return
+    }
+    void send('continue')
+  }
+  return (
+    <div className="mt-2 flex">
+      <button
+        type="button"
+        disabled={streaming}
+        onClick={handleClick}
+        title={
+          streaming ? 'Wait for the current reply to finish first.' : 'Resume the paused agent run'
+        }
+        className={cn(
+          'inline-flex items-center gap-1.5 rounded-md border border-[var(--accent-ring)] bg-[var(--accent-soft)] px-2.5 py-1 text-[11px] font-medium text-[var(--accent)] transition',
+          streaming
+            ? 'cursor-not-allowed opacity-50'
+            : 'hover:border-[var(--accent)] hover:bg-[var(--accent)] hover:text-white'
+        )}
+      >
+        <Play size={11} fill="currentColor" />
+        Resume
+      </button>
+    </div>
+  )
+}
+
+/**
+ * v2.0 — drops an assistant reply into the Composer side-panel.
+ *
+ * Two click modes that share one button:
+ *   - Plain click → REPLACE the document content with this reply.
+ *   - Alt/Option-click → APPEND this reply to the existing document
+ *     (with a blank line separator). Useful when the user is iterating
+ *     and wants to keep stacking output rather than discard prior edits.
+ *
+ * Always opens the panel as a side-effect so the user sees their
+ * action take effect even if the panel was closed at click time.
+ * Pushes a toast on plain-click because the panel-open animation
+ * doesn't always make the destination obvious from the chat side.
+ */
+function ComposerDropButton({ text }: { text: string }): JSX.Element {
+  const setContent = useComposerStore((s) => s.setContent)
+  const appendContent = useComposerStore((s) => s.appendContent)
+  const setOpen = useComposerStore((s) => s.setOpen)
+  const pushToast = useUiStore((s) => s.pushToast)
+  const handleClick = (e: ReactMouseEvent<HTMLButtonElement>): void => {
+    if (e.altKey) {
+      appendContent(text)
+      setOpen(true)
+      return
+    }
+    setContent(text)
+    setOpen(true)
+    pushToast('success', 'Sent to Composer.')
+  }
+  return (
+    <button
+      type="button"
+      onClick={handleClick}
+      title="Send to Composer (Alt-click to append)"
+      aria-label="Send this reply to the Composer side-panel"
+      className="text-slate-500 transition hover:text-[var(--accent)]"
+    >
+      <PanelRight size={11} />
     </button>
   )
 }

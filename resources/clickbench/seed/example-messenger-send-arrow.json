@@ -1,0 +1,11 @@
+{
+  "id": "example-messenger-send-arrow",
+  "label": "Messenger (browser) — Send arrow",
+  "prompt": "Send button on Messenger",
+  "category": "browser-web",
+  "inWindow": "Messenger",
+  "referenceScreenshotPath": null,
+  "groundTruth": null,
+  "notes": "PLACEHOLDER. THE original v1.10.2 regression target. Open messenger.com (or Messenger via Facebook) in your browser, focus a conversation, type a character so the Send arrow lights up, then capture. UIA will fail (DOM is opaque to UIA). Vision-only and uia-then-vision will both fall through to vision; this is where the harness's signal matters most.",
+  "capturedAt": null
+}

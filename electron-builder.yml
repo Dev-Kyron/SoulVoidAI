@@ -18,12 +18,22 @@ files:
   # out of the installer so it doesn't bloat the download.
   - '!tools/discord-mcp/**'
 
-# `asarUnpack` already places `resources/**` under `app.asar.unpacked/` so the
-# main process can read them via the normal path. A previous build config
-# also listed `extraResources: resources/**`, which doubled the inclusion
-# and inflated installer size — removed.
+# `asarUnpack` places `resources/**` under `app.asar.unpacked/` so the main
+# process can spawn native binaries (Piper) and read sidecar dirs (the
+# espeak-ng phoneme tables) via real filesystem paths. A previous build
+# config also listed `extraResources: resources/**`, which doubled the
+# inclusion and inflated installer size — removed.
+#
+# v2.0 fix — `resources/clickbench/` is read-only seed JSON consumed by
+# `benchmarksIo.ts` via `readFileSync` after `app.getAppPath()`. Electron's
+# asar shim handles that read transparently inside the archive, so the
+# files don't need a second unpacked copy. Mac/Linux's hard-link semantics
+# threw EEXIST when the unpack tried to dual-write these files (Windows
+# silently overwrote and hid the bug); excluding clickbench from the
+# unpack list makes the build pass on every platform.
 asarUnpack:
   - resources/**
+  - '!resources/clickbench/**'
 
 # v2.0 — bundle the browser-extension's native-messaging host (bridge.cjs
 # + install.mjs + manifest template) into the installer so the desktop

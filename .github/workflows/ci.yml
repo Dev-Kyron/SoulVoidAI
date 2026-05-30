@@ -108,6 +108,18 @@ jobs:
       # without setting up the toolchain locally.
       - name: Package installer
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          # v2.0 fix — electron-builder v25 enumerates `resources/**` twice
+          # when packaging (once via the default `files` glob, once via the
+          # `asarUnpack` glob), then tries to `link()` each match into
+          # `app.asar.unpacked/` a second time and fails with EEXIST. Windows
+          # silently masks this because builder-util uses `copyFile` there;
+          # macOS + Linux CI default to hard links (`USE_HARD_LINKS=true`
+          # when `isCI && process.platform !== 'win32'`) and fail loudly.
+          # Forcing copyFile here matches the Windows behavior and unblocks
+          # the build. Tracked as a follow-up to find the source of the
+          # double-enumeration in electron-builder's file-walk.
+          USE_HARD_LINKS: 'false'
         run: npx electron-builder --publish=never
 
       - name: Upload installer artifacts

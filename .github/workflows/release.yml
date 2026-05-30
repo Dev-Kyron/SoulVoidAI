@@ -84,8 +84,15 @@ jobs:
         # GH_TOKEN is the standard auth env var electron-builder reads;
         # GitHub Actions injects the default token automatically and it
         # has the `contents: write` permission below.
+        #
+        # USE_HARD_LINKS=false — see ci.yml's matching note. electron-builder
+        # v25 double-enumerates `resources/**`; macOS + Linux hit EEXIST on
+        # the second `link()` while Windows masks the bug via `copyFile`.
+        # Forcing copyFile on every platform keeps the release build green
+        # until the underlying double-walk is patched upstream.
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          USE_HARD_LINKS: 'false'
         run: npx electron-builder --publish=always
 
     permissions:

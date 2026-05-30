@@ -40,29 +40,36 @@ import type { ToneTag } from '@shared/voiceMarkers'
 /* ------------------------------ paths --------------------------------- */
 
 /**
- * Absolute path to the bundled Piper executable for the current platform.
+ * Folder containing the bundled Piper executable + its DLLs /
+ * espeak-ng-data for the current platform.
  *
  * In dev mode (`electron-vite dev`): `app.getAppPath()` points at the
  * project root, so the binary lives under `resources/piper/...` next to
  * the source tree.
  *
- * In a packaged build: `app.getAppPath()` returns `<install>/resources/
- * app.asar`. Because `resources/**` is listed under `asarUnpack` in
- * electron-builder.yml, the real files live at
- * `<install>/resources/app.asar.unpacked/resources/piper/...`. We rewrite
- * the path so spawn() can actually find the binary.
+ * In a packaged build: `process.resourcesPath` is the install's
+ * `resources/` dir (`<install>/resources/`), and because `resources/**`
+ * is listed under `asarUnpack` in electron-builder.yml, the real files
+ * live at `<install>/resources/app.asar.unpacked/resources/piper/...`.
+ *
+ * v2.0 round 10 — switched from `app.getAppPath().replace('app.asar',
+ * 'app.asar.unpacked')` to `process.resourcesPath` because the .replace
+ * silently mangles any install location whose path happens to contain
+ * the substring 'app.asar' (e.g. a user folder name). `app.isPackaged`
+ * distinguishes the two layouts without string surgery.
  */
-function piperBinaryPath(): string {
-  const root = app.getAppPath().replace('app.asar', 'app.asar.unpacked')
-  const exe = process.platform === 'win32' ? 'piper.exe' : 'piper'
-  return join(root, 'resources', 'piper', process.platform, 'piper', exe)
+function piperBinaryDir(): string {
+  const root = app.isPackaged
+    ? join(process.resourcesPath, 'app.asar.unpacked', 'resources', 'piper')
+    : join(app.getAppPath(), 'resources', 'piper')
+  return join(root, process.platform, 'piper')
 }
 
-/** Folder containing the piper binary + its DLLs / espeak-ng-data. We
- *  spawn with this as CWD so piper finds its phoneme tables. */
-function piperBinaryDir(): string {
-  const root = app.getAppPath().replace('app.asar', 'app.asar.unpacked')
-  return join(root, 'resources', 'piper', process.platform, 'piper')
+/** Absolute path to the bundled Piper executable for the current
+ *  platform. Just `piperBinaryDir() + piper(.exe)`. */
+function piperBinaryPath(): string {
+  const exe = process.platform === 'win32' ? 'piper.exe' : 'piper'
+  return join(piperBinaryDir(), exe)
 }
 
 /** Per-user voices directory. Created on first access. */

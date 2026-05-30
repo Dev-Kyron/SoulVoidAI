@@ -17,6 +17,17 @@ files:
   # community server, not for end users of the installed app. Keep it
   # out of the installer so it doesn't bloat the download.
   - '!tools/discord-mcp/**'
+  # v2.0 round 10 — drop ~140 MB of dev-only payload from every
+  # installer. Voices/ holds the studio's two reference .onnx voice
+  # bundles (Soul/Amy, Void/Arctic) that piper.ts:69 expects under
+  # <userData>/voices/<persona>/, not under the asar. eng.traineddata
+  # is a Tesseract OCR weights blob used only by a one-off setup
+  # script — runtime OCR pulls it on demand into userData. Both were
+  # silently shipping into asar via the default `**/*` glob and
+  # accounted for the bulk of the v2.0.0 installer bloat (310 MB
+  # Windows / 369 MB mac / 396 MB Linux).
+  - '!Voices/**'
+  - '!eng.traineddata'
 
 # `asarUnpack` places `resources/**` under `app.asar.unpacked/` so the main
 # process can spawn native binaries (Piper) and read sidecar dirs (the
@@ -62,13 +73,12 @@ win:
   # back to a generic Electron icon without a real .ico.
   icon: build/icon.ico
   artifactName: VoidSoul-AI-Companion-Setup.${ext}
-  # v2.0 round-8 — `predist` downloads Piper for all five platforms so
-  # any target installer can be built from a single host. Per-target
-  # filters here trim out the other platforms' binaries (~12-15MB each)
-  # so the Windows installer doesn't bundle mac/linux Piper.
-  files:
-    - '!resources/piper/darwin/**'
-    - '!resources/piper/linux/**'
+  # v2.0 round 10 — dropped the per-target `!resources/piper/<other>/**`
+  # filters that round 8 added. They were dead config in CI: release.yml
+  # runs `npm run piper` (host-only) not `npm run dist`, so the
+  # other-platform piper dirs never exist on disk to be excluded.
+  # `npm run dist` locally now also runs single-platform via the
+  # script change in package.json — see the predist comment there.
 
 nsis:
   # One-click install — no wizard, no per-user/per-machine choice page
@@ -84,20 +94,14 @@ mac:
   category: public.app-category.productivity
   icon: build/icon.png
   artifactName: VoidSoul-AI-Companion.${ext}
-  # v2.0 round-8 — strip Win + Linux piper from the mac installer.
-  files:
-    - '!resources/piper/win32/**'
-    - '!resources/piper/linux/**'
+  # v2.0 round 10 — dead-config piper filters removed (see win: block).
 
 linux:
   target: AppImage
   category: Utility
   icon: build/icon.png
   artifactName: VoidSoul-AI-Companion.${ext}
-  # v2.0 round-8 — strip Win + Mac piper from the linux installer.
-  files:
-    - '!resources/piper/win32/**'
-    - '!resources/piper/darwin/**'
+  # v2.0 round 10 — dead-config piper filters removed (see win: block).
 
 # Auto-update channel. electron-updater reads the same `publish` block at
 # runtime to know which `latest.yml` / `latest-mac.yml` / `latest-linux.yml`

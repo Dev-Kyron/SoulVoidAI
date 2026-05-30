@@ -58,11 +58,19 @@ jobs:
       # every cold install. Caching by lockfile hash dodges that on
       # unchanged-dependency runs.
       - name: Cache Electron downloads
+        # v2.0 round 10 — added the macOS cache paths
+        # (~/Library/Caches/{electron,electron-builder}) so the mac leg
+        # actually hits its cache instead of always re-downloading the
+        # 100 MB Electron archive. Linux uses XDG ~/.cache, Windows uses
+        # AppData\Local, macOS uses Library/Caches — actions/cache@v4
+        # silently skips paths that don't exist on the current runner.
         uses: actions/cache@v4
         with:
           path: |
             ~/.cache/electron
             ~/.cache/electron-builder
+            ~/Library/Caches/electron
+            ~/Library/Caches/electron-builder
             ~/AppData/Local/electron/Cache
             ~/AppData/Local/electron-builder/Cache
           key: electron-${{ runner.os }}-${{ hashFiles('package-lock.json') }}

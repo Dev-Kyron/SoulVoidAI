@@ -39,6 +39,10 @@ import { runWebSearch } from './search'
 import { extractFromHtml } from './readability'
 import { checkUrlSafe } from './urlSafety'
 import { getSecret } from '../storage/keys'
+// v2.0 round 10 — promoted to src/shared so the renderer's bio + fact
+// extractors can share the balanced-brace scanner. They were using a
+// greedy /\{[\s\S]*\}/ regex that silently failed on chatty providers.
+import { extractFirstBalancedJsonObject } from '@shared/jsonExtract'
 import type { ActionResult, ChatTurn, ProviderId } from '@shared/types'
 
 /** Returns the active provider id + model, or null when no model is
@@ -259,51 +263,6 @@ async function planQueries(
   } catch {
     return []
   }
-}
-
-/**
- * Find the first top-level `{ ... }` object in a string by scanning
- * for balanced braces. Returns the matched substring (including the
- * outer braces) or null. Respects double-quoted strings so a `}`
- * inside `"key": "value with }"` doesn't close the object early.
- *
- * Lives here rather than in a shared util because deep-research is
- * the only consumer; if planner-style JSON extraction grows another
- * caller, promote this to lib/jsonExtract.ts.
- */
-function extractFirstBalancedJsonObject(text: string): string | null {
-  let depth = 0
-  let start = -1
-  let inString = false
-  let escape = false
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i]
-    if (inString) {
-      if (escape) {
-        escape = false
-      } else if (ch === '\\') {
-        escape = true
-      } else if (ch === '"') {
-        inString = false
-      }
-      continue
-    }
-    if (ch === '"') {
-      inString = true
-      continue
-    }
-    if (ch === '{') {
-      if (depth === 0) start = i
-      depth++
-    } else if (ch === '}') {
-      if (depth === 0) continue
-      depth--
-      if (depth === 0 && start !== -1) {
-        return text.slice(start, i + 1)
-      }
-    }
-  }
-  return null
 }
 
 async function fetchSource(

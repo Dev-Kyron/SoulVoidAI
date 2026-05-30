@@ -16,6 +16,7 @@ import { uid, createLock } from './utils'
 import { useConfigStore } from '../store/useConfigStore'
 import { useMemoryStore } from '../store/useMemoryStore'
 import { MODES } from '@shared/modes'
+import { extractFirstBalancedJsonObject } from '@shared/jsonExtract'
 import type { ChatMessage, ChatTurn, ModeId } from '@shared/types'
 
 const KNOWN_MODE_IDS = new Set<ModeId>(MODES.map((m) => m.id))
@@ -150,8 +151,14 @@ export async function extractFacts(
       void vs.logs.write('warn', 'memory', 'Fact extractor returned no text')
       return 0
     }
-    const match = result.text.match(/\{[\s\S]*\}/)
-    if (!match) {
+    // v2.0 round 10 — was `result.text.match(/\{[\s\S]*\}/)` which is
+    // greedy: on chatty providers that prefix the JSON with prose or
+    // wrap it in ```json fences, the regex spans the entire reply,
+    // JSON.parse throws, and "Remember that …" silently no-ops.
+    // Switched to the shared balanced-brace scanner that also lives in
+    // src/shared/jsonExtract.ts (and is used by deepResearch.ts).
+    const block = extractFirstBalancedJsonObject(result.text)
+    if (!block) {
       // v1.9.2 — quietly skip when the model returned conversational
       // text instead of JSON. This was firing as a `warn` after every
       // chat turn the extractor ran on, flooding the Logs tab with
@@ -162,7 +169,7 @@ export async function extractFacts(
     }
     let parsed: { facts?: unknown }
     try {
-      parsed = JSON.parse(match[0]) as { facts?: unknown }
+      parsed = JSON.parse(block) as { facts?: unknown }
     } catch (err) {
       void vs.logs.write(
         'warn',

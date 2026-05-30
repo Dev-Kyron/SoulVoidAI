@@ -211,7 +211,15 @@ if (!app.requestSingleInstanceLock()) {
     })
     stopAgentProgressPolling()
     disposeScheduler()
-    disposeSync()
+    // v2.0 round 10 — disposeSync() is async and the previous
+    // fire-and-forget pattern let app.quit() race past the in-flight
+    // push/pull. A debounced push that fired right before the user hit
+    // Quit could half-write a chunk; the partial blob's mtime then made
+    // it the LWW winner on the peer's next pull, clobbering newer
+    // edits on the other device. Awaited inside the Promise.race below
+    // (alongside disposeMcp / disposeWorker / stopExtensionBridge) so
+    // the 3.5 s shutdown budget applies uniformly.
+    const syncDisposal = disposeSync()
     event.preventDefault()
     const FLUSH_BUDGET_MS = 1500
     const SHUTDOWN_BUDGET_MS = 3500
@@ -260,7 +268,15 @@ if (!app.requestSingleInstanceLock()) {
           // socket file doesn't survive into the next launch. The bridge
           // server unbinds + closes all native-host connections inside
           // its own dispose, with no further I/O after that.
-          Promise.all([disposeMcp(), disposeWorker(), stopExtensionBridge()]),
+          // v2.0 round 10 — syncDisposal awaited here so an in-flight
+          // sync push/pull settles before SQLite closes (see disposeSync
+          // call above for why this matters).
+          Promise.all([
+            disposeMcp(),
+            disposeWorker(),
+            stopExtensionBridge(),
+            syncDisposal.catch(() => {})
+          ]),
           new Promise<void>((resolve) => setTimeout(resolve, SHUTDOWN_BUDGET_MS))
         ])
       } catch (err) {

@@ -34,6 +34,7 @@ import { vs } from './bridge'
 import { uid, createLock } from './utils'
 import { useConfigStore } from '../store/useConfigStore'
 import { useMemoryStore } from '../store/useMemoryStore'
+import { extractFirstBalancedJsonObject } from '@shared/jsonExtract'
 import type { BiographicalCategory, ChatMessage, ChatTurn } from '@shared/types'
 
 /** Mirrors the storage cap in main/services/storage/memory.ts. Bumped
@@ -188,12 +189,19 @@ export async function extractBiographical(messages: ChatMessage[]): Promise<numb
       messages: [{ role: 'user', content: transcript }] as ChatTurn[]
     })
     if (result.error || !result.text) return 0
-    const match = result.text.match(/\{[\s\S]*\}/)
-    if (!match) return 0
+    // v2.0 round 10 — was `result.text.match(/\{[\s\S]*\}/)` which is
+    // greedy: on chatty providers that wrap the JSON in prose ("Here
+    // is the JSON: {…}. Note: …") or in ```json fences, the regex
+    // spans from the first `{` to the LAST `}` in the reply, JSON.parse
+    // throws, and the extractor silently records nothing every turn —
+    // passive bio memory promised in Settings just never accrues.
+    // Switched to the shared balanced-brace scanner.
+    const block = extractFirstBalancedJsonObject(result.text)
+    if (!block) return 0
 
     let parsed: { updates?: unknown }
     try {
-      parsed = JSON.parse(match[0]) as { updates?: unknown }
+      parsed = JSON.parse(block) as { updates?: unknown }
     } catch {
       return 0
     }
